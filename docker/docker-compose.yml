@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # Main application container
+  hr-rag-app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: hr-rag-pipeline
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///app/data/db/hr_rag.db
+      - VECTOR_STORE_PATH=/app/data/vector_store
+      - MASTER_FOLDER_PATH=/app/data/master
+      - SYNC_FOLDER_PATH=/app/data/sync
+      - LOG_LEVEL=INFO
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ../src:/app/src:ro
+      - hr_rag_data:/app/data
+      - hr_rag_logs:/app/data/logs
+      - type: bind
+        source: ${MASTER_FOLDER_PATH:-./data/master}
+        target: /app/data/master
+      - type: bind
+        source: ${SYNC_FOLDER_PATH:-./data/sync}
+        target: /app/data/sync
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - vector-store
+    networks:
+      - hr-rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Database container (PostgreSQL for production)
+  database:
+    image: postgres:15
+    container_name: hr-rag-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=hr_rag
+      - POSTGRES_USER=hr_rag_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-hr_rag_password}
+    volumes:
+      - hr_rag_db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - hr-rag-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hr_rag_user -d hr_rag"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Vector store container (ChromaDB)
+  vector-store:
+    image: chromadb/chroma:latest
+    container_name: hr-rag-vector-store
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    volumes:
+      - hr_rag_vector_data:/chroma/chroma
+    networks:
+      - hr-rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  hr_rag_data:
+    driver: local
+  hr_rag_logs:
+    driver: local
+  hr_rag_db_data:
+    driver: local
+  hr_rag_vector_data:
+    driver: local
+
+networks:
+  hr-rag-network:
+    driver: bridge 

@@ -1,0 +1,261 @@
+# HR RAG Pipeline .gitignore
+# ================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# ML Models and Cache
+models/
+*.model
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.onnx
+*.pt
+*.pth
+*.safetensors
+transformers_cache/
+huggingface_hub/
+.cache/
+
+# Vector Stores and Indexes
+*.index
+*.faiss
+chroma_db/
+vector_store/
+embeddings/
+indexes/
+
+# Data Files (be careful with real data)
+data/master/*
+data/sync/*
+!data/master/.gitkeep
+!data/sync/.gitkeep
+!data/README.md
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.docx
+*.doc
+*.pptx
+*.ppt
+*.txt
+*.json
+*.parquet
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+db_data/
+
+# Logs
+logs/
+*.log
+*.log.*
+log_data/
+
+# Configuration files with secrets
+config/secrets.yaml
+config/production.yaml
+.env.local
+.env.production
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Application specific
+app_data/
+user_uploads/
+processed_files/
+reports/
+exports/
+
+# Docker volumes (if mounted locally)
+docker_data/
+postgres_data/
+chroma_data/
+
+# Performance and profiling
+*.prof
+*.cprof
+.prof/
+
+# Documentation builds
+docs/_build/
+docs/build/
+
+# Package manager artifacts
+node_modules/
+package-lock.json
+yarn.lock
+
+# Terraform (if used for infrastructure)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraformrc
+terraform.rc
+
+# Monitoring and metrics
+metrics/
+prometheus_data/
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.p12
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Large datasets
+datasets/
+*.dataset
+
+# Experiment tracking
+experiments/
+mlruns/
+wandb/
+
+# GPU cache
+.nv/ 

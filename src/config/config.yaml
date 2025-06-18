@@ -1,0 +1,257 @@
+# HR RAG Pipeline Configuration
+# ===============================
+
+# Application Settings
+app:
+  name: "HR RAG Pipeline"
+  version: "1.0.0"
+  environment: "development"  # development, staging, production
+  debug: true
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+
+# Database Configuration
+database:
+  # For development (SQLite)
+  type: "sqlite"
+  sqlite:
+    path: "./data/db/hr_rag.db"
+    echo: false
+    check_same_thread: false
+  
+  # For production (PostgreSQL)
+  postgresql:
+    host: "database"
+    port: 5432
+    database: "hr_rag"
+    username: "hr_rag_user"
+    password: "${DB_PASSWORD}"  # From environment
+    pool_size: 5
+    max_overflow: 10
+    echo: false
+
+# Vector Store Configuration
+vector_store:
+  type: "chroma"  # chroma, faiss
+  chroma:
+    host: "vector-store"
+    port: 8000
+    collection_name: "hr_documents"
+    persist_directory: "./data/vector_store"
+  faiss:
+    index_type: "IndexFlatIP"
+    dimension: 1024
+    index_path: "./data/indexes/faiss.index"
+
+# ML Models Configuration
+models:
+  embedding:
+    name: "BAAI/bge-large-en-v1.5"
+    device: "auto"  # auto, cpu, cuda
+    batch_size: 32
+    max_length: 512
+    normalize_embeddings: true
+    cache_dir: "./models/embeddings"
+  
+  generative:
+    name: "microsoft/DialoGPT-medium"
+    device: "auto"
+    max_length: 1024
+    temperature: 0.7
+    top_p: 0.9
+    do_sample: true
+    cache_dir: "./models/generative"
+  
+  reranker:
+    name: "BAAI/bge-reranker-large"
+    device: "auto"
+    top_k: 10
+    cache_dir: "./models/reranker"
+
+# File Processing Configuration
+file_processing:
+  master_folder: "./data/master"
+  sync_folder: "./data/sync"
+  supported_formats:
+    - "pdf"
+    - "docx"
+    - "doc"
+    - "pptx"
+    - "ppt"
+    - "txt"
+    - "md"
+    - "xlsx"
+    - "xls"
+    - "csv"
+  
+  chunking:
+    strategy: "recursive"  # recursive, semantic, fixed
+    chunk_size: 1000
+    chunk_overlap: 200
+    separators: ["\n\n", "\n", " ", ""]
+  
+  metadata_extraction:
+    extract_title: true
+    extract_author: true
+    extract_creation_date: true
+    extract_modification_date: true
+    extract_file_size: true
+    extract_keywords: true
+
+# Sync Configuration
+sync:
+  interval_hours: 1
+  batch_size: 100
+  max_file_versions: 3
+  report_retention_days: 30
+  enable_delta_sync: true
+  conflict_resolution: "latest_wins"  # latest_wins, manual, skip
+
+# RAG Pipeline Configuration
+rag:
+  retrieval:
+    top_k: 20
+    similarity_threshold: 0.7
+    include_metadata: true
+    search_strategy: "hybrid"  # semantic, keyword, hybrid
+  
+  reranking:
+    enabled: true
+    top_k: 5
+    strategy: "cross_encoder"  # cross_encoder, colbert, listwise
+  
+  generation:
+    max_tokens: 512
+    temperature: 0.3
+    top_p: 0.9
+    presence_penalty: 0.1
+    frequency_penalty: 0.1
+    
+  context:
+    max_context_length: 4000
+    include_source_metadata: true
+    citation_style: "academic"  # academic, simple, none
+
+# Multi-Tenancy Configuration
+tenancy:
+  enabled: false  # Enable for multi-tenant mode
+  default_tenant: "tenant1"
+  tenant_folders:
+    tenant1: "./data/master/tenant1"
+    tenant2: "./data/master/tenant2"
+  
+  isolation:
+    database: true
+    vector_store: true
+    file_system: true
+  
+  resource_limits:
+    max_files_per_tenant: 10000
+    max_storage_gb: 50
+    max_queries_per_hour: 1000
+
+# Security Configuration
+security:
+  enable_auth: false  # Enable for production
+  jwt:
+    secret_key: "${JWT_SECRET_KEY}"
+    algorithm: "HS256"
+    access_token_expire_minutes: 30
+    refresh_token_expire_days: 7
+  
+  encryption:
+    enabled: false
+    key: "${ENCRYPTION_KEY}"
+    algorithm: "AES-256-GCM"
+  
+  input_validation:
+    max_query_length: 500
+    max_file_size_mb: 100
+    allowed_file_types: ["pdf", "docx", "txt", "pptx"]
+    sanitize_inputs: true
+
+# Resource Management
+resources:
+  gpu:
+    enabled: true
+    memory_limit_gb: 10
+    memory_fraction: 0.8
+  
+  cpu:
+    max_workers: 4
+    max_threads_per_worker: 2
+  
+  memory:
+    max_usage_gb: 8
+    cache_size_mb: 512
+  
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+    export_interval_seconds: 30
+  
+  tracing:
+    enabled: true
+    jaeger_endpoint: "http://localhost:14268"
+    sample_rate: 0.1
+  
+  health_checks:
+    enabled: true
+    interval_seconds: 30
+    timeout_seconds: 5
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "structured"  # structured, simple
+  output: "both"  # file, console, both
+  
+  file:
+    path: "./logs/hr_rag.log"
+    max_size_mb: 100
+    backup_count: 5
+    rotation: "time"  # size, time
+    rotation_interval: "daily"  # daily, weekly, monthly
+  
+  structured:
+    include_timestamp: true
+    include_level: true
+    include_module: true
+    include_function: true
+    include_line_number: true
+    include_request_id: true
+
+# Development Settings
+development:
+  auto_reload: true
+  debug_queries: true
+  profile_performance: false
+  mock_external_services: false
+  test_data_enabled: true
+
+# Production Settings  
+production:
+  auto_reload: false
+  debug_queries: false
+  profile_performance: true
+  enable_caching: true
+  optimize_models: true
+  
+  performance:
+    connection_pool_size: 20
+    max_concurrent_requests: 100
+    request_timeout_seconds: 30
+    
+  scaling:
+    auto_scaling: false
+    min_replicas: 1
+    max_replicas: 5
+    target_cpu_utilization: 70 
