@@ -1,11 +1,16 @@
 # Enterprise RAG Pipeline .gitignore
 # ================================
 
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -19,13 +24,15 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
 # PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -46,7 +53,29 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
-cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -58,21 +87,8 @@ ipython_config.py
 # pyenv
 .python-version
 
-# pipenv
-Pipfile.lock
-
-# poetry
-poetry.lock
-
-# pdm
-.pdm.toml
-
-# PEP 582
-__pypackages__/
-
-# Celery
+# celery beat schedule file
 celerybeat-schedule
-celerybeat.pid
 
 # SageMath parsed files
 *.sage.py
@@ -83,8 +99,8 @@ celerybeat.pid
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
+env.bak
+venv.bak
 
 # Spyder project settings
 .spyderproject
@@ -104,20 +120,37 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# pytype static type analyzer
+# pytype static analyzer
 .pytype/
 
 # Cython debug symbols
 cython_debug/
 
-# IDEs
+# VS Code
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
 
-# OS
+# Docker
+docker-compose.override.yml
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Data & Models & Tasks
+data/
+models/
+tasks/
+
+# IDE specific
+.idea/
+.cursor/
+
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -130,7 +163,6 @@ Thumbs.db
 .dockerignore
 
 # ML Models and Cache
-models/
 *.model
 *.pkl
 *.joblib
@@ -153,11 +185,6 @@ embeddings/
 indexes/
 
 # Data Files (be careful with real data)
-data/master/*
-data/sync/*
-!data/master/.gitkeep
-!data/sync/.gitkeep
-!data/README.md
 *.csv
 *.xlsx
 *.xls
