@@ -176,7 +176,7 @@ class TenantAwareVersionManager:
     Comprehensive version tracking manager.
     
     Features:
-    - Complete version history tracking
+    - Complete version history tracking (max 3 versions per document)
     - Advanced comparison and analytics
     - Rollback capabilities
     - Performance monitoring
@@ -197,6 +197,9 @@ class TenantAwareVersionManager:
         # Database setup
         db_path = self.version_config.get("database_path", "data/versions.db")
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        # Version limit configuration
+        self.max_versions = 3  # Hard limit of 3 versions per document
         
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
@@ -236,46 +239,43 @@ class TenantAwareVersionManager:
         metadata: Optional[Dict[str, Any]] = None,
         parent_version_id: Optional[str] = None
     ) -> str:
-        """
-        Create a new document version.
+        """Create a new version of a document.
+        
+        If this would exceed the 3-version limit, the oldest version is archived.
         
         Args:
-            tenant_id: Unique identifier for the tenant
-            document_id: Unique identifier for the document
-            document_path: Path to the document
-            metadata: Optional metadata
-            parent_version_id: Parent version ID for tracking changes
+            tenant_id: Tenant identifier
+            document_id: Document identifier
+            document_path: Path to document file
+            metadata: Optional version metadata
+            parent_version_id: Optional parent version ID
             
         Returns:
-            str: Version ID
+            New version ID
         """
-        version_id = f"ver_{tenant_id}_{uuid.uuid4().hex[:8]}"
-        
-        # Calculate document hash and size
-        document_hash, content_size = self._calculate_document_hash(document_path)
-        
-        # Determine version number
-        version_number = self._get_next_version_number(tenant_id, document_id)
-        
-        # Determine change type
-        change_type = ChangeType.CREATED if version_number == 1 else ChangeType.UPDATED
-        
-        with self.SessionLocal() as session:
-            # Create version record
+        session = self.SessionLocal()
+        try:
+            # Calculate document hash and size
+            doc_hash, doc_size = self._calculate_document_hash(document_path)
+            if not doc_hash:
+                raise ValueError("Failed to calculate document hash")
+            
+            # Get next version number
+            version_number = self._get_next_version_number(session, tenant_id, document_id)
+            
+            # Create new version
             version = DocumentVersion(
-                version_id=version_id,
+                version_id=str(uuid.uuid4()),
                 tenant_id=tenant_id,
                 document_id=document_id,
                 document_path=document_path,
-                document_hash=document_hash,
+                document_hash=doc_hash,
                 version_number=version_number,
                 parent_version_id=parent_version_id,
-                status=VersionStatus.ACTIVE.value,
                 created_at=time.time(),
-                content_size=content_size,
+                content_size=doc_size,
                 content_type=self._detect_content_type(document_path),
-                content_checksum=document_hash,
-                change_type=change_type.value,
+                change_type=ChangeType.CREATED.value if version_number == 1 else ChangeType.UPDATED.value,
                 change_metadata=metadata or {}
             )
             
@@ -285,26 +285,19 @@ class TenantAwareVersionManager:
             self._archive_old_versions(session, tenant_id, document_id)
             
             session.commit()
-        
-        # Update cache
-        with self.cache_lock:
-            self.version_cache[version_id] = version
-        
-        # Update statistics
-        with self.stats_lock:
-            self.stats["total_versions"] += 1
-            self.stats["active_versions"] += 1
-        
-        logger.info(f"Created version {version_id} for document {document_id}")
-        
-        # Auto-comparison with previous version
-        if self.enable_auto_comparison and parent_version_id:
-            try:
-                self.compare_versions(parent_version_id, version_id)
-            except Exception as e:
-                logger.warning(f"Auto-comparison failed: {e}")
-        
-        return version_id
+            logger.info(
+                f"Created version {version.version_id} ({version_number}) of document "
+                f"{document_id} for tenant {tenant_id}"
+            )
+            
+            return version.version_id
+            
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to create version: {e}")
+            raise
+        finally:
+            session.close()
     
     def get_version(self, version_id: str) -> Optional[Dict[str, Any]]:
         """Get version information."""
@@ -637,14 +630,25 @@ class TenantAwareVersionManager:
             }
     
     def _calculate_document_hash(self, document_path: str) -> Tuple[str, int]:
-        """Calculate hash and size of document."""
+        """Calculate SHA-256 hash and size of a document.
+        
+        Args:
+            document_path: Path to document
+            
+        Returns:
+            (hash, size) tuple
+        """
+        hasher = hashlib.sha256()
+        size = 0
+        
         try:
             with open(document_path, 'rb') as f:
-                content = f.read()
-                document_hash = hashlib.sha256(content).hexdigest()
-                return document_hash, len(content)
-        except Exception as e:
-            logger.warning(f"Failed to calculate hash for {document_path}: {e}")
+                while chunk := f.read(8192):
+                    hasher.update(chunk)
+                    size += len(chunk)
+            return hasher.hexdigest(), size
+        except (OSError, IOError) as e:
+            logger.error(f"Failed to calculate document hash: {e}")
             return "", 0
     
     def _detect_content_type(self, document_path: str) -> str:
@@ -662,8 +666,13 @@ class TenantAwareVersionManager:
         }
         return type_mapping.get(extension, 'application/octet-stream')
     
-    def _get_next_version_number(self, tenant_id: str, document_id: str) -> int:
+    def _get_next_version_number(self, session, tenant_id: str, document_id: str) -> int:
         """Get the next version number for a document."""
+        max_version = session.query(DocumentVersion).filter_by(
+            tenant_id=tenant_id,
+            document_id=document_id
+        ).order_by(DocumentVersion.version_number.desc()).first()
+        
         with self.SessionLocal() as session:
             max_version = session.query(DocumentVersion).filter_by(
                 tenant_id=tenant_id,

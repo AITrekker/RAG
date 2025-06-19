@@ -1,188 +1,226 @@
-# Docker Configuration for Enterprise RAG Pipeline
+# Docker Setup for Enterprise RAG Pipeline
 
-This directory contains all Docker-related configuration files for the Enterprise RAG Pipeline.
+## System Requirements
 
-## Files Overview
-
-- `Dockerfile` - Main application container with GPU support
-- `docker-compose.yml` - Multi-container orchestration
-- `entrypoint.sh` - Container startup script
-- `env.example` - Environment variables template
+- Docker Engine 24.0.0+
+- Docker Compose v2.20.0+
+- NVIDIA Container Toolkit (for GPU support)
+- 16GB RAM minimum (32GB recommended)
+- 100GB disk space minimum
+- NVIDIA GPU with 8GB VRAM (for optimal performance)
 
 ## Quick Start
 
-1. **Prerequisites**
-   - Docker Engine 20.10+
-   - Docker Compose 2.0+
-   - NVIDIA Container Toolkit (for GPU support)
-   - NVIDIA GPU drivers
-
-2. **Setup Environment**
+1. Clone the repository:
    ```bash
-   # Copy environment template
-   cp docker/env.example .env
-   
-   # Edit .env with your settings
-   nano .env
+   git clone https://github.com/your-org/rag.git
+   cd rag
    ```
 
-3. **Start Services**
+2. Copy and configure environment variables:
    ```bash
-   # Build and start all services
-   docker-compose -f docker/docker-compose.yml up --build
-   
-   # Or run in background
-   docker-compose -f docker/docker-compose.yml up -d --build
+   cp docker/.env.example docker/.env
+   # Edit docker/.env with your settings
    ```
 
-4. **Access Services**
-   - Main Application: http://localhost:8000
-   - Vector Store API: http://localhost:8001
-   - Database: localhost:5432
+3. Start the services:
+   ```bash
+   cd docker
+   docker compose up -d
+   ```
 
-## Container Architecture
+4. Verify the deployment:
+   ```bash
+   docker compose ps
+   ```
 
-### Main Application Container (`hr-rag-app`)
-- **Base Image**: `nvidia/cuda:11.8-devel-ubuntu22.04`
-- **Purpose**: Runs the Enterprise RAG Pipeline application
-- **GPU Support**: Uses NVIDIA runtime for embedding generation
-- **Ports**: 8000 (FastAPI)
-- **Volumes**: 
-  - Source code (read-only)
-  - Data directories (master/sync folders)
-  - Application data (SQLite, logs)
+## Service Architecture
 
-### Database Container (`database`)
-- **Base Image**: `postgres:15`
-- **Purpose**: Stores metadata, file tracking, and sync status
-- **Ports**: 5432
-- **Volumes**: Persistent database storage
+The system consists of the following containers:
 
-### Vector Store Container (`vector-store`)
-- **Base Image**: `chromadb/chroma:latest`
-- **Purpose**: Stores and retrieves vector embeddings
-- **Ports**: 8001 (mapped from internal 8000)
-- **Volumes**: Persistent vector data storage
+1. `rag-app`: Main application container
+   - Python FastAPI backend
+   - React frontend
+   - GPU-accelerated inference
+   - Resource monitoring
 
-## Volume Configuration
+2. `rag-db`: PostgreSQL database
+   - Document metadata
+   - User data
+   - System metrics
+   - Backup management
 
-### Named Volumes (Managed by Docker)
-- `enterprise_rag_data` - Application data and SQLite database
-- `enterprise_rag_logs` - Application logs
-- `enterprise_rag_db_data` - PostgreSQL database files
-- `enterprise_rag_vector_data` - ChromaDB vector storage
+3. `rag-vector`: Vector store (pgvector)
+   - Document embeddings
+   - Semantic search
+   - Index management
 
-### Bind Mounts (Host Directories)
-- `./data/master` → `/app/data/master` - File drop location
-- `./data/sync` → `/app/data/sync` - Processed files
+4. `rag-monitoring`: Monitoring stack
+   - Prometheus metrics
+   - Grafana dashboards
+   - Alert management
 
-## Environment Variables
+## Configuration
 
-Key environment variables (see `env.example` for complete list):
+### Environment Variables
 
-- `DATABASE_URL` - Database connection string
-- `MASTER_FOLDER_PATH` - Override master folder location
-- `SYNC_FOLDER_PATH` - Override sync folder location
-- `CUDA_VISIBLE_DEVICES` - GPU device selection
-- `LOG_LEVEL` - Logging verbosity
+Key environment variables in `.env`:
 
-## GPU Support
+```env
+# App Configuration
+RAG_ENV=production
+LOG_LEVEL=INFO
+DEBUG=0
 
-### Requirements
-- NVIDIA GPU with compute capability 6.0+
-- NVIDIA Container Toolkit installed
-- Proper GPU drivers
+# Database
+POSTGRES_USER=rag_user
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=rag_db
+POSTGRES_HOST=rag-db
 
-### Configuration
-The application automatically detects GPU availability and falls back to CPU if needed.
+# Vector Store
+VECTOR_STORE_URL=postgresql://rag_user:your_secure_password@rag-vector:5432/vector_db
 
-```yaml
-deploy:
-  resources:
-    reservations:
-      devices:
-        - driver: nvidia
-          count: 1
-          capabilities: [gpu]
+# GPU Settings
+NVIDIA_VISIBLE_DEVICES=all
+NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Resource Limits
+APP_MEMORY_LIMIT=16g
+DB_MEMORY_LIMIT=8g
+VECTOR_MEMORY_LIMIT=8g
 ```
+
+### Volume Configuration
+
+Persistent data is stored in Docker volumes:
+
+- `rag-db-data`: Database files
+- `rag-vector-data`: Vector store data
+- `rag-app-data`: Application data
+- `rag-monitoring-data`: Monitoring data
 
 ## Health Checks
 
-All containers include health checks:
-- **App**: HTTP health endpoint
-- **Database**: PostgreSQL connection test
-- **Vector Store**: ChromaDB heartbeat API
+The system implements the following health checks:
 
-## Development vs Production
+1. Application Health:
+   ```bash
+   curl http://localhost:8000/health
+   ```
 
-### Development Mode
-- Uses SQLite database
-- Source code mounted as volume for hot reload
-- Debug logging enabled
+2. Database Health:
+   ```bash
+   docker compose exec rag-db pg_isready
+   ```
 
-### Production Mode
-- Uses PostgreSQL database
-- Source code copied into container
-- Optimized logging configuration
-
-Switch modes by updating `DATABASE_URL` in environment variables.
+3. Vector Store Health:
+   ```bash
+   docker compose exec rag-vector pg_isready
+   ```
 
 ## Troubleshooting
 
-### GPU Issues
-```bash
-# Check GPU availability in container
-docker exec hr-rag-pipeline nvidia-smi
+Common issues and solutions:
 
-# Check NVIDIA runtime
-docker run --rm --gpus all nvidia/cuda:11.8-base nvidia-smi
-```
+1. Container fails to start:
+   ```bash
+   docker compose logs [service-name]
+   ```
 
-### Permission Issues
-```bash
-# Fix volume permissions
-sudo chown -R $USER:$USER ./data/
-```
+2. Out of memory:
+   - Check resource usage: `docker stats`
+   - Adjust memory limits in `.env`
+   - Consider scaling horizontally
 
-### Container Logs
-```bash
-# View application logs
-docker logs hr-rag-pipeline
+3. GPU not detected:
+   - Verify NVIDIA drivers: `nvidia-smi`
+   - Check NVIDIA Container Toolkit: `nvidia-container-cli info`
+   - Ensure GPU support in Docker: `docker info | grep -i gpu`
 
-# View all service logs
-docker-compose -f docker/docker-compose.yml logs
-```
+4. Database connection issues:
+   - Check network: `docker network inspect rag_network`
+   - Verify credentials in `.env`
+   - Check logs: `docker compose logs rag-db`
 
-### Reset Everything
-```bash
-# Stop and remove all containers and volumes
-docker-compose -f docker/docker-compose.yml down -v
+## Maintenance
 
-# Remove images
-docker rmi $(docker images "hr-rag*" -q)
-```
+### Backup Procedures
+
+1. Database backup:
+   ```bash
+   docker compose exec rag-db pg_dump -U rag_user rag_db > backup.sql
+   ```
+
+2. Vector store backup:
+   ```bash
+   docker compose exec rag-vector pg_dump -U rag_user vector_db > vector_backup.sql
+   ```
+
+3. Application data backup:
+   ```bash
+   docker compose exec rag-app tar czf /backup/app_data.tar.gz /app/data
+   ```
+
+### Monitoring
+
+1. Access Grafana:
+   ```
+   http://localhost:3000
+   ```
+
+2. View Prometheus metrics:
+   ```
+   http://localhost:9090
+   ```
+
+3. Check container metrics:
+   ```bash
+   docker stats
+   ```
+
+## Security Best Practices
+
+1. Use strong passwords in `.env`
+2. Keep Docker and dependencies updated
+3. Implement network segmentation
+4. Enable Docker content trust
+5. Use non-root users in containers
+6. Regular security audits
+7. Monitor container logs
 
 ## Performance Tuning
 
-### GPU Memory
-Adjust in environment:
-```env
-MAX_GPU_MEMORY_GB=10
-```
+1. Database optimization:
+   - Adjust `postgresql.conf`
+   - Optimize indexes
+   - Configure connection pooling
 
-### Resource Limits
-Configure in docker-compose.yml:
-```yaml
-deploy:
-  resources:
-    limits:
-      memory: 8G
-      cpus: '4.0'
-```
+2. Vector store tuning:
+   - Optimize index parameters
+   - Configure batch sizes
+   - Adjust search parameters
 
-## Security Notes
+3. Application settings:
+   - Configure worker processes
+   - Optimize batch processing
+   - Tune caching parameters
 
-- Change default passwords in production
-- Use secrets management for sensitive environment variables
-- Configure firewall rules for exposed ports
-- Enable container security scanning 
+## Scaling Guidelines
+
+1. Vertical scaling:
+   - Increase container resources
+   - Optimize resource allocation
+   - Monitor resource usage
+
+2. Horizontal scaling:
+   - Add read replicas
+   - Implement load balancing
+   - Configure service discovery
+
+## Support and Resources
+
+- [Docker Documentation](https://docs.docker.com/)
+- [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-docker)
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
+- [Prometheus Documentation](https://prometheus.io/docs/) 

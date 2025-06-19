@@ -22,18 +22,25 @@ database:
   
   # For production (PostgreSQL)
   postgresql:
-    host: "database"
+    host: "localhost"
     port: 5432
-    database: "enterprise_rag"
-    username: "enterprise_rag_user"
-    password: "${DB_PASSWORD}"  # From environment
-    pool_size: 5
-    max_overflow: 10
+    database: "rag_db"
+    username: "postgres"
+    password: ""  # Set via environment variable
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30
     echo: false
 
 # Vector Store Configuration
 vector_store:
-  type: "chroma"  # chroma, faiss, pinecone, weaviate
+  type: "faiss"
+  dimension: 768  # For all-MiniLM-L6-v2
+  index_type: "IVF_FLAT"
+  metric_type: "L2"
+  nprobe: 10
+  ef_search: 100
+  nlist: 1024
   
   # ChromaDB Configuration
   chroma:
@@ -308,7 +315,7 @@ resources:
 monitoring:
   metrics:
     enabled: true
-    prometheus_port: 9090
+    prometheus_port: 8000
     export_interval_seconds: 30
   
   tracing:
@@ -323,16 +330,11 @@ monitoring:
 
 # Logging Configuration
 logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  format: "structured"  # structured, simple
-  output: "both"  # file, console, both
-  
-  file:
-    path: "./logs/enterprise_rag.log"
-    max_size_mb: 100
-    backup_count: 5
-    rotation: "time"  # size, time
-    rotation_interval: "daily"  # daily, weekly, monthly
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_path: "logs/rag_pipeline.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
   
   structured:
     include_timestamp: true
@@ -426,4 +428,22 @@ version_tracking:
   
   # Cleanup settings
   cleanup_interval_hours: 24
-  max_comparison_cache_size: 1000 
+  max_comparison_cache_size: 1000
+
+# New settings
+llm:
+  provider: "openai"  # or "anthropic"
+  model_name: "gpt-4"
+  temperature: 0.7
+  max_tokens: 2000
+  top_p: 1.0
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+  stop_sequences: []
+
+processing:
+  chunk_size: 500
+  chunk_overlap: 50
+  max_chunks_per_doc: 100
+  embeddings_batch_size: 32
+  max_doc_size_mb: 10 

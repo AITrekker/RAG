@@ -12,55 +12,54 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-class DatabaseSettings(BaseModel):
-    """Database configuration settings."""
-    type: str = "sqlite"
-    
-    # SQLite settings
-    sqlite_path: str = "./data/db/enterprise_rag.db"
-    sqlite_echo: bool = False
-    sqlite_check_same_thread: bool = False
-    
-    # PostgreSQL settings
-    postgresql_host: str = "database"
-    postgresql_port: int = 5432
-    postgresql_database: str = "enterprise_rag"
-    postgresql_username: str = "enterprise_rag_user"
-    postgresql_password: str = ""
-    postgresql_pool_size: int = 5
-    postgresql_max_overflow: int = 10
-    postgresql_echo: bool = False
-    
-    @property
-    def database_url(self) -> str:
-        """Generate database URL based on type."""
-        if self.type == "sqlite":
-            return f"sqlite:///{self.sqlite_path}"
-        elif self.type == "postgresql":
-            return (
-                f"postgresql://{self.postgresql_username}:{self.postgresql_password}"
-                f"@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
-            )
-        else:
-            raise ValueError(f"Unsupported database type: {self.type}")
+@dataclass
+class LLMSettings:
+    """LLM configuration settings."""
+    provider: str  # "openai" or "anthropic"
+    model_name: str
+    api_key: str
+    temperature: float = 0.7
+    max_tokens: Optional[int] = None
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    stop_sequences: Optional[list] = None
 
-class VectorStoreSettings(BaseModel):
+@dataclass
+class DatabaseSettings:
+    """Database configuration settings."""
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_timeout: int = 30
+
+@dataclass
+class VectorStoreSettings:
     """Vector store configuration settings."""
-    type: str = "chroma"
-    
-    # ChromaDB settings
-    chroma_host: str = "vector-store"
-    chroma_port: int = 8000
-    chroma_collection_name: str = "hr_documents"
-    chroma_persist_directory: str = "./data/vector_store"
-    
-    # FAISS settings
-    faiss_index_type: str = "IndexFlatIP"
-    faiss_dimension: int = 1024
-    faiss_index_path: str = "./data/indexes/faiss.index"
+    store_type: str  # "faiss", "milvus", etc.
+    dimension: int
+    index_type: str
+    metric_type: str
+    nprobe: int = 10
+    ef_search: int = 100
+    nlist: int = 1024
+
+@dataclass
+class ProcessingSettings:
+    """Text processing configuration settings."""
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+    max_chunks_per_doc: int = 100
+    embeddings_batch_size: int = 32
+    max_doc_size_mb: int = 10
 
 class ModelSettings(BaseModel):
     """ML model configuration settings."""
@@ -262,8 +261,8 @@ class Settings(BaseSettings):
     """Main settings class that combines all configuration sections."""
     
     app: AppSettings = AppSettings()
-    database: DatabaseSettings = DatabaseSettings()
-    vector_store: VectorStoreSettings = VectorStoreSettings()
+    database: DatabaseSettings = DatabaseSettings(host="localhost", port=5432, database="rag_db", username="postgres", password="")
+    vector_store: VectorStoreSettings = VectorStoreSettings(store_type="faiss", dimension=768, index_type="IVF_FLAT", metric_type="L2")
     models: ModelSettings = ModelSettings()
     file_processing: FileProcessingSettings = FileProcessingSettings()
     sync: SyncSettings = SyncSettings()
@@ -347,12 +346,10 @@ def create_directories(settings: Settings) -> None:
     directories = [
         settings.file_processing.master_folder,
         settings.file_processing.sync_folder,
-        settings.vector_store.chroma_persist_directory,
         settings.models.embedding_cache_dir,
         settings.models.generative_cache_dir,
         settings.models.reranker_cache_dir,
         Path(settings.logging.file_path).parent,
-        Path(settings.database.sqlite_path).parent if settings.database.type == "sqlite" else None,
     ]
     
     for directory in directories:

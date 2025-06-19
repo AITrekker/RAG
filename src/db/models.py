@@ -15,6 +15,7 @@ from sqlalchemy.sql import func
 from datetime import datetime
 from typing import Optional, Dict, Any
 import uuid
+from enum import Enum
 
 Base = declarative_base()
 
@@ -26,6 +27,39 @@ class TimestampMixin:
 class TenantMixin:
     """Mixin for tenant support."""
     tenant_id = Column(String(255), nullable=False, index=True)
+
+class SyncTaskStatus(str, Enum):
+    """Status of a sync task."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    SUCCESS = "success"
+    ERROR = "error"
+
+class SyncMetric(Base):
+    """Model for storing sync task metrics."""
+    __tablename__ = "sync_metrics"
+    
+    id = Column(Integer, primary_key=True)
+    task_id = Column(String(255), nullable=False, index=True)
+    tenant_id = Column(String(255), nullable=True, index=True)
+    metric_type = Column(String(50), nullable=False)
+    value = Column(Float, nullable=False)
+    timestamp = Column(DateTime, nullable=False, index=True)
+    metadata = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class SyncReport(Base):
+    """Model for storing sync task reports."""
+    __tablename__ = "sync_reports"
+    
+    id = Column(Integer, primary_key=True)
+    task_id = Column(String(255), nullable=False, unique=True, index=True)
+    tenant_id = Column(String(255), nullable=True, index=True)
+    timestamp = Column(DateTime, nullable=False, index=True)
+    status = Column(SQLEnum(SyncTaskStatus), nullable=False)
+    metrics = Column(JSON, nullable=False)  # Serialized metrics data
+    details = Column(JSON, nullable=True)  # Additional report details
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 # Tenant Management Tables
 
@@ -380,4 +414,7 @@ __all__ = [
     "Embedding",
     "SyncStatus",
     "SyncFileStatus",
+    "SyncTaskStatus",
+    "SyncMetric",
+    "SyncReport",
 ]

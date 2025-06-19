@@ -1,21 +1,33 @@
 """
-Simplified file system watcher with multi-tenant support.
+File system watcher for Enterprise RAG system.
 
-This module provides basic file system monitoring capabilities without
-external dependencies, using polling-based monitoring.
+This module provides real-time file system monitoring with event queuing
+and batch processing capabilities.
 """
 
 import os
-import asyncio
+import time
 import logging
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Callable, Any
-from enum import Enum
-from dataclasses import dataclass, field
-from datetime import datetime
-import hashlib
+import asyncio
 import threading
-from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Any, Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
+from enum import Enum
+from queue import Queue, Empty
+from watchdog.observers import Observer
+from watchdog.events import (
+    FileSystemEventHandler,
+    FileSystemEvent,
+    FileCreatedEvent,
+    FileModifiedEvent,
+    FileDeletedEvent,
+    FileMovedEvent
+)
+
+from ..config.settings import get_settings
+from .sync_state import SyncStateManager, SyncState, SyncError, SyncErrorType
 
 logger = logging.getLogger(__name__)
 
@@ -25,359 +37,313 @@ class FileEventType(Enum):
     MODIFIED = "modified"
     DELETED = "deleted"
     MOVED = "moved"
+    UNKNOWN = "unknown"
 
 @dataclass
 class FileEvent:
     """Represents a file system event."""
     event_type: FileEventType
-    file_path: str
-    tenant_id: str
-    timestamp: datetime = field(default_factory=datetime.now)
-    file_size: Optional[int] = None
-    file_hash: Optional[str] = None
-    old_path: Optional[str] = None  # For move events
+    src_path: str
+    dest_path: Optional[str] = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    tenant_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def __post_init__(self):
-        """Calculate file metadata after initialization."""
-        if self.event_type != FileEventType.DELETED and os.path.exists(self.file_path):
-            try:
-                stat = os.stat(self.file_path)
-                self.file_size = stat.st_size
-                if self.file_size < 100 * 1024 * 1024:  # Only hash files < 100MB
-                    self.file_hash = self._calculate_hash()
-            except (OSError, IOError) as e:
-                logger.warning(f"Failed to get file metadata for {self.file_path}: {e}")
-    
-    def _calculate_hash(self) -> str:
-        """Calculate MD5 hash of the file."""
-        try:
-            hasher = hashlib.md5()
-            with open(self.file_path, 'rb') as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    hasher.update(chunk)
-            return hasher.hexdigest()
-        except (OSError, IOError):
-            return ""
 
-class TenantFileWatcher:
-    """Simple polling-based file watcher for a specific tenant."""
+class BatchConfig:
+    """Configuration for batch processing."""
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        config = config or {}
+        self.max_batch_size = config.get("max_batch_size", 100)
+        self.batch_timeout = config.get("batch_timeout", 5.0)  # seconds
+        self.max_queue_size = config.get("max_queue_size", 10000)
+        self.processing_threads = config.get("processing_threads", 4)
+        self.retry_delay = config.get("retry_delay", 1.0)  # seconds
+        self.max_retries = config.get("max_retries", 3)
+
+class FileWatcher:
+    """Watches file system for changes with event queuing and batch processing."""
     
     def __init__(
         self,
-        tenant_id: str,
-        source_folders: List[str],
-        supported_extensions: Optional[Set[str]] = None,
-        event_callback: Optional[Callable[[FileEvent], None]] = None,
-        poll_interval: float = 10.0
+        master_dir: str,
+        batch_config: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None
     ):
+        """Initialize file watcher.
+        
+        Args:
+            master_dir: Directory to watch
+            batch_config: Optional batch processing configuration
+            tenant_id: Optional tenant identifier
+        """
+        self.master_dir = Path(master_dir)
         self.tenant_id = tenant_id
-        self.source_folders = [Path(folder).resolve() for folder in source_folders]
-        self.supported_extensions = supported_extensions or {
-            '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.txt', '.md',
-            '.xlsx', '.xls', '.csv'
-        }
-        self.event_callback = event_callback
-        self.poll_interval = poll_interval
-        self.is_active = False
-        self.monitor_task: Optional[asyncio.Task] = None
-        self.file_states: Dict[str, float] = {}  # file_path -> mtime
-        self.stats = {
-            'events_processed': 0,
-            'files_watched': 0,
-            'last_event_time': None,
-            'errors': 0
+        self.batch_config = BatchConfig(batch_config)
+        
+        # Initialize components
+        self.state_manager = SyncStateManager()
+        
+        # Event queue
+        self.event_queue: Queue[FileEvent] = Queue(maxsize=self.batch_config.max_queue_size)
+        
+        # File tracking
+        self._processed_files: Set[str] = set()
+        self._processing_lock = threading.Lock()
+        
+        # Event handlers
+        self._event_handlers: Dict[FileEventType, List[Callable]] = {
+            event_type: [] for event_type in FileEventType
         }
         
-        # Validate and create tenant directories
-        self._validate_directories()
+        # Initialize watchdog
+        self._observer = Observer()
+        self._event_handler = _FileSystemEventHandler(self)
+        self._observer.schedule(
+            self._event_handler,
+            str(self.master_dir),
+            recursive=True
+        )
+        
+        # Processing state
+        self._processing = False
+        self._processing_thread = None
+        
+        logger.info(f"Initialized file watcher for {master_dir}")
     
-    def _validate_directories(self) -> None:
-        """Validate and create tenant source directories."""
-        valid_folders = []
-        for folder in self.source_folders:
+    def start(self):
+        """Start file system watching and event processing."""
+        if self._processing:
+            return
+        
+        self._processing = True
+        
+        # Start watchdog observer
+        self._observer.start()
+        
+        # Start processing thread
+        self._processing_thread = threading.Thread(
+            target=self._process_events,
+            daemon=True
+        )
+        self._processing_thread.start()
+        
+        logger.info("Started file watcher")
+    
+    def stop(self):
+        """Stop file system watching and event processing."""
+        self._processing = False
+        
+        if self._observer.is_alive():
+            self._observer.stop()
+            self._observer.join()
+        
+        if self._processing_thread and self._processing_thread.is_alive():
+            self._processing_thread.join(timeout=5.0)
+        
+        logger.info("Stopped file watcher")
+    
+    def add_event_handler(
+        self,
+        event_type: FileEventType,
+        handler: Callable[[FileEvent], None]
+    ):
+        """Add event handler for specific event type.
+        
+        Args:
+            event_type: Type of event to handle
+            handler: Handler function
+        """
+        self._event_handlers[event_type].append(handler)
+    
+    def queue_event(self, event: FileEvent):
+        """Queue a file event for processing.
+        
+        Args:
+            event: File event to queue
+        """
+        try:
+            self.event_queue.put(event, timeout=1.0)
+            logger.debug(f"Queued {event.event_type.value} event for {event.src_path}")
+        except Exception as e:
+            logger.error(f"Failed to queue event: {e}")
+            
+            # Update sync state
+            if self.tenant_id:
+                self.state_manager.update_state(
+                    tenant_id=self.tenant_id,
+                    folder_name=str(self.master_dir),
+                    new_state=SyncState.FAILED,
+                    error=SyncError(
+                        error_type=SyncErrorType.INTERNAL,
+                        message=f"Failed to queue event: {e}"
+                    )
+                )
+    
+    def _process_events(self):
+        """Process queued events in batches."""
+        while self._processing:
             try:
-                # Create directory if it doesn't exist
-                folder.mkdir(parents=True, exist_ok=True)
+                # Initialize new batch
+                batch: List[FileEvent] = []
+                batch_start = time.time()
                 
-                # Check if directory is accessible
-                if folder.exists() and folder.is_dir():
-                    if os.access(folder, os.R_OK):
-                        valid_folders.append(folder)
-                        logger.info(f"Validated tenant {self.tenant_id} folder: {folder}")
-                    else:
-                        logger.error(f"No read access to folder {folder} for tenant {self.tenant_id}")
-                else:
-                    logger.error(f"Invalid directory {folder} for tenant {self.tenant_id}")
+                # Collect events for batch
+                while (
+                    len(batch) < self.batch_config.max_batch_size
+                    and time.time() - batch_start < self.batch_config.batch_timeout
+                ):
+                    try:
+                        event = self.event_queue.get(timeout=0.1)
+                        batch.append(event)
+                    except Empty:
+                        break
+                
+                if not batch:
+                    continue
+                
+                # Process batch
+                self._process_batch(batch)
+                
             except Exception as e:
-                logger.error(f"Failed to validate directory {folder} for tenant {self.tenant_id}: {e}")
+                logger.error(f"Error processing event batch: {e}")
+                
+                # Update sync state
+                if self.tenant_id:
+                    self.state_manager.update_state(
+                        tenant_id=self.tenant_id,
+                        folder_name=str(self.master_dir),
+                        new_state=SyncState.FAILED,
+                        error=SyncError(
+                            error_type=SyncErrorType.INTERNAL,
+                            message=f"Batch processing error: {e}"
+                        )
+                    )
+                
+                # Short delay before retrying
+                time.sleep(self.batch_config.retry_delay)
+    
+    def _process_batch(self, batch: List[FileEvent]):
+        """Process a batch of events.
         
-        self.source_folders = valid_folders
-        if not self.source_folders:
-            raise ValueError(f"No valid source folders found for tenant {self.tenant_id}")
+        Args:
+            batch: List of events to process
+        """
+        logger.debug(f"Processing batch of {len(batch)} events")
+        
+        # Update sync state
+        if self.tenant_id:
+            self.state_manager.update_state(
+                tenant_id=self.tenant_id,
+                folder_name=str(self.master_dir),
+                new_state=SyncState.SYNCING
+            )
+        
+        # Group events by type
+        events_by_type: Dict[FileEventType, List[FileEvent]] = {
+            event_type: [] for event_type in FileEventType
+        }
+        
+        for event in batch:
+            events_by_type[event.event_type].append(event)
+        
+        # Process each event type
+        for event_type, events in events_by_type.items():
+            if not events:
+                continue
+            
+            # Call handlers for this event type
+            for handler in self._event_handlers[event_type]:
+                try:
+                    for event in events:
+                        handler(event)
+                except Exception as e:
+                    logger.error(
+                        f"Error in handler for {event_type.value} events: {e}"
+                    )
+                    
+                    # Update sync state
+                    if self.tenant_id:
+                        self.state_manager.update_state(
+                            tenant_id=self.tenant_id,
+                            folder_name=str(self.master_dir),
+                            new_state=SyncState.FAILED,
+                            error=SyncError(
+                                error_type=SyncErrorType.INTERNAL,
+                                message=f"Handler error for {event_type.value}: {e}"
+                            )
+                        )
+        
+        # Update sync state
+        if self.tenant_id:
+            self.state_manager.update_state(
+                tenant_id=self.tenant_id,
+                folder_name=str(self.master_dir),
+                new_state=SyncState.IDLE
+            )
+        
+        logger.debug("Completed batch processing")
+
+
+class _FileSystemEventHandler(FileSystemEventHandler):
+    """Internal watchdog event handler."""
     
-    def _is_supported_file(self, file_path: str) -> bool:
-        """Check if file has supported extension."""
-        return Path(file_path).suffix.lower() in self.supported_extensions
+    def __init__(self, watcher: FileWatcher):
+        """Initialize handler.
+        
+        Args:
+            watcher: Parent file watcher
+        """
+        self.watcher = watcher
     
-    def _is_tenant_file(self, file_path: str) -> bool:
-        """Check if file belongs to this tenant's directories."""
-        file_path_obj = Path(file_path).resolve()
-        return any(
-            str(file_path_obj).startswith(str(folder))
-            for folder in self.source_folders
+    def on_created(self, event: FileCreatedEvent):
+        """Handle file creation event."""
+        if event.is_directory:
+            return
+        
+        self.watcher.queue_event(
+            FileEvent(
+                event_type=FileEventType.CREATED,
+                src_path=event.src_path,
+                tenant_id=self.watcher.tenant_id
+            )
         )
     
-    def _scan_files(self) -> Dict[str, float]:
-        """Scan all files and return their modification times."""
-        current_files = {}
-        
-        for folder in self.source_folders:
-            if not folder.exists():
-                continue
-                
-            try:
-                for file_path in folder.rglob('*'):
-                    if (file_path.is_file() and 
-                        self._is_supported_file(str(file_path))):
-                        
-                        try:
-                            mtime = file_path.stat().st_mtime
-                            current_files[str(file_path)] = mtime
-                        except (OSError, IOError):
-                            # File might have been deleted between scan and stat
-                            continue
-            except Exception as e:
-                logger.error(f"Error scanning folder {folder}: {e}")
-        
-        return current_files
-    
-    def _detect_changes(self, current_files: Dict[str, float]) -> List[FileEvent]:
-        """Detect changes between current scan and previous state."""
-        events = []
-        
-        # Find new and modified files
-        for file_path, mtime in current_files.items():
-            if file_path not in self.file_states:
-                # New file
-                events.append(FileEvent(
-                    event_type=FileEventType.CREATED,
-                    file_path=file_path,
-                    tenant_id=self.tenant_id
-                ))
-            elif self.file_states[file_path] != mtime:
-                # Modified file
-                events.append(FileEvent(
-                    event_type=FileEventType.MODIFIED,
-                    file_path=file_path,
-                    tenant_id=self.tenant_id
-                ))
-        
-        # Find deleted files
-        for file_path in self.file_states:
-            if file_path not in current_files:
-                events.append(FileEvent(
-                    event_type=FileEventType.DELETED,
-                    file_path=file_path,
-                    tenant_id=self.tenant_id
-                ))
-        
-        return events
-    
-    async def _monitor_loop(self) -> None:
-        """Main monitoring loop."""
-        logger.info(f"Started monitoring for tenant {self.tenant_id}")
-        
-        # Initial scan
-        self.file_states = self._scan_files()
-        self.stats['files_watched'] = len(self.file_states)
-        
-        while self.is_active:
-            try:
-                # Scan for changes
-                current_files = self._scan_files()
-                events = self._detect_changes(current_files)
-                
-                # Process events
-                for event in events:
-                    try:
-                        if self.event_callback:
-                            self.event_callback(event)
-                        
-                        self.stats['events_processed'] += 1
-                        self.stats['last_event_time'] = event.timestamp
-                        
-                        logger.debug(f"Processed {event.event_type.value} event for {event.file_path}")
-                        
-                    except Exception as e:
-                        self.stats['errors'] += 1
-                        logger.error(f"Error handling event for {event.file_path}: {e}")
-                
-                # Update state
-                self.file_states = current_files
-                self.stats['files_watched'] = len(current_files)
-                
-                # Wait for next poll
-                await asyncio.sleep(self.poll_interval)
-                
-            except Exception as e:
-                self.stats['errors'] += 1
-                logger.error(f"Error in monitoring loop for tenant {self.tenant_id}: {e}")
-                await asyncio.sleep(self.poll_interval)
-        
-        logger.info(f"Stopped monitoring for tenant {self.tenant_id}")
-    
-    async def start_watching(self) -> None:
-        """Start watching tenant directories."""
-        if self.is_active:
-            logger.warning(f"Watcher for tenant {self.tenant_id} is already active")
+    def on_modified(self, event: FileModifiedEvent):
+        """Handle file modification event."""
+        if event.is_directory:
             return
         
-        self.is_active = True
-        self.monitor_task = asyncio.create_task(self._monitor_loop())
-        logger.info(f"File watcher started for tenant {self.tenant_id}")
-    
-    async def stop_watching(self) -> None:
-        """Stop watching tenant directories."""
-        if not self.is_active:
-            return
-            
-        self.is_active = False
-        
-        if self.monitor_task:
-            self.monitor_task.cancel()
-            try:
-                await self.monitor_task
-            except asyncio.CancelledError:
-                pass
-        
-        logger.info(f"File watcher stopped for tenant {self.tenant_id}")
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get watcher statistics."""
-        return {
-            **self.stats,
-            'tenant_id': self.tenant_id,
-            'source_folders': [str(f) for f in self.source_folders],
-            'supported_extensions': list(self.supported_extensions),
-            'is_active': self.is_active,
-            'poll_interval': self.poll_interval
-        }
-
-class FileWatcherManager:
-    """Manages file watchers for multiple tenants."""
-    
-    def __init__(self):
-        self.watchers: Dict[str, TenantFileWatcher] = {}
-        self.global_event_handlers: List[Callable[[FileEvent], None]] = []
-        self.is_running = False
-        self._lock = threading.Lock()
-    
-    def add_tenant_watcher(
-        self,
-        tenant_id: str,
-        source_folders: List[str],
-        supported_extensions: Optional[Set[str]] = None,
-        poll_interval: float = 10.0
-    ) -> TenantFileWatcher:
-        """Add a file watcher for a tenant."""
-        with self._lock:
-            if tenant_id in self.watchers:
-                logger.warning(f"Watcher for tenant {tenant_id} already exists")
-                return self.watchers[tenant_id]
-            
-            watcher = TenantFileWatcher(
-                tenant_id=tenant_id,
-                source_folders=source_folders,
-                supported_extensions=supported_extensions,
-                event_callback=self._handle_global_event,
-                poll_interval=poll_interval
+        self.watcher.queue_event(
+            FileEvent(
+                event_type=FileEventType.MODIFIED,
+                src_path=event.src_path,
+                tenant_id=self.watcher.tenant_id
             )
-            
-            self.watchers[tenant_id] = watcher
-            logger.info(f"Added watcher for tenant {tenant_id}")
-            
-            # Start watcher if manager is running
-            if self.is_running:
-                asyncio.create_task(watcher.start_watching())
-            
-            return watcher
+        )
     
-    def remove_tenant_watcher(self, tenant_id: str) -> bool:
-        """Remove a file watcher for a tenant."""
-        with self._lock:
-            if tenant_id not in self.watchers:
-                logger.warning(f"No watcher found for tenant {tenant_id}")
-                return False
-            
-            watcher = self.watchers[tenant_id]
-            if watcher.is_active:
-                asyncio.create_task(watcher.stop_watching())
-            
-            del self.watchers[tenant_id]
-            logger.info(f"Removed watcher for tenant {tenant_id}")
-            return True
+    def on_deleted(self, event: FileDeletedEvent):
+        """Handle file deletion event."""
+        if event.is_directory:
+            return
+        
+        self.watcher.queue_event(
+            FileEvent(
+                event_type=FileEventType.DELETED,
+                src_path=event.src_path,
+                tenant_id=self.watcher.tenant_id
+            )
+        )
     
-    def add_global_event_handler(self, handler: Callable[[FileEvent], None]) -> None:
-        """Add a global event handler for all tenant events."""
-        self.global_event_handlers.append(handler)
-    
-    def _handle_global_event(self, event: FileEvent) -> None:
-        """Handle events from all tenant watchers."""
-        for handler in self.global_event_handlers:
-            try:
-                handler(event)
-            except Exception as e:
-                logger.error(f"Error in global event handler: {e}")
-    
-    async def start_all_watchers(self) -> None:
-        """Start all tenant watchers."""
-        with self._lock:
-            self.is_running = True
-            start_tasks = []
-            for watcher in self.watchers.values():
-                if not watcher.is_active:
-                    start_tasks.append(watcher.start_watching())
-            
-            if start_tasks:
-                await asyncio.gather(*start_tasks, return_exceptions=True)
-            
-            logger.info(f"Started {len(self.watchers)} tenant watchers")
-    
-    async def stop_all_watchers(self) -> None:
-        """Stop all tenant watchers."""
-        with self._lock:
-            self.is_running = False
-            stop_tasks = []
-            for watcher in self.watchers.values():
-                if watcher.is_active:
-                    stop_tasks.append(watcher.stop_watching())
-            
-            if stop_tasks:
-                await asyncio.gather(*stop_tasks, return_exceptions=True)
-            
-            logger.info("Stopped all tenant watchers")
-    
-    def get_all_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Get statistics for all tenant watchers."""
-        with self._lock:
-            return {
-                tenant_id: watcher.get_stats()
-                for tenant_id, watcher in self.watchers.items()
-            }
-    
-    def get_tenant_watcher(self, tenant_id: str) -> Optional[TenantFileWatcher]:
-        """Get watcher for specific tenant."""
-        return self.watchers.get(tenant_id)
-    
-    @asynccontextmanager
-    async def managed_watchers(self):
-        """Context manager for managing all watchers."""
-        try:
-            await self.start_all_watchers()
-            yield self
-        finally:
-            await self.stop_all_watchers()
-
-# Global file watcher manager instance
-file_watcher_manager = FileWatcherManager() 
+    def on_moved(self, event: FileMovedEvent):
+        """Handle file move event."""
+        if event.is_directory:
+            return
+        
+        self.watcher.queue_event(
+            FileEvent(
+                event_type=FileEventType.MOVED,
+                src_path=event.src_path,
+                dest_path=event.dest_path,
+                tenant_id=self.watcher.tenant_id
+            )
+        ) 

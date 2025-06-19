@@ -1,19 +1,16 @@
-# Enterprise RAG Pipeline Dockerfile with GPU Support
-FROM nvidia/cuda:11.8-devel-ubuntu22.04
+# Stage 1: Builder
+# Use the development image with build tools
+FROM nvidia/cuda:11.8-devel-ubuntu22.04 AS builder
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV CUDA_VISIBLE_DEVICES=0
 
-# Install system dependencies
+# Install system dependencies needed for building wheels
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-dev \
-    git \
-    curl \
-    wget \
     build-essential \
     libssl-dev \
     libffi-dev \
@@ -22,19 +19,50 @@ RUN apt-get update && apt-get install -y \
     liblapack-dev \
     libblas-dev \
     gfortran \
+    tesseract-ocr \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up a virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy requirements first for better caching
+WORKDIR /app
+COPY docker/requirements.docker.txt requirements.txt
+
+# Install Python dependencies into the virtual environment
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# Stage 2: Final Image
+# Use a smaller base image for the final application
+FROM nvidia/cuda:11.8-base-ubuntu22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install only necessary runtime system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    curl \
+    tesseract-ocr \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Create application directory
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Copy the virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir --upgrade pip
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Make the virtual environment's Python the default
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code
+# Copy application code and entrypoint
 COPY src/ ./src/
 COPY docker/entrypoint.sh ./entrypoint.sh
 
