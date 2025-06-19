@@ -1,5 +1,5 @@
 """
-Database module for HR RAG Pipeline.
+Database module for Enterprise RAG Pipeline.
 
 This module provides database models, connection management, and operations.
 """

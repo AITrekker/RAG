@@ -1,4 +1,4 @@
-# HR RAG Pipeline Dockerfile with GPU Support
+# Enterprise RAG Pipeline Dockerfile with GPU Support
 FROM nvidia/cuda:11.8-devel-ubuntu22.04
 
 # Set environment variables

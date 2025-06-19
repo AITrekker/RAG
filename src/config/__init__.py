@@ -1,5 +1,5 @@
 """
-Configuration module for HR RAG Pipeline.
+Configuration module for Enterprise RAG Pipeline.
 
 This module provides configuration management and logging setup.
 """

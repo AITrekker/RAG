@@ -1,5 +1,5 @@
 """
-Logging configuration for HR RAG Pipeline.
+Logging configuration for Enterprise RAG Pipeline.
 
 This module sets up structured logging with file rotation, console output,
 and configurable log levels and formats.
@@ -195,7 +195,7 @@ def configure_logging(
     level: str = "INFO",
     format_type: str = "structured",
     output: str = "both",
-    file_path: str = "./logs/hr_rag.log",
+    file_path: str = "./logs/enterprise_rag.log",
     file_max_size_mb: int = 100,
     file_backup_count: int = 5,
     file_rotation: str = "time",
@@ -333,7 +333,7 @@ def setup_logging(settings: Optional[Dict[str, Any]] = None) -> None:
         level=settings.get("level", "INFO"),
         format_type=settings.get("format", "structured"),
         output=settings.get("output", "both"),
-        file_path=settings.get("file_path", "./logs/hr_rag.log"),
+        file_path=settings.get("file_path", "./logs/enterprise_rag.log"),
         file_max_size_mb=settings.get("file_max_size_mb", 100),
         file_backup_count=settings.get("file_backup_count", 5),
         file_rotation=settings.get("file_rotation", "time"),

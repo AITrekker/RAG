@@ -1,9 +1,9 @@
-# HR RAG Pipeline Configuration
+# Enterprise RAG Pipeline Configuration
 # ===============================
 
 # Application Settings
 app:
-  name: "HR RAG Pipeline"
+  name: "Enterprise RAG Pipeline"
   version: "1.0.0"
   environment: "development"  # development, staging, production
   debug: true
@@ -16,7 +16,7 @@ database:
   # For development (SQLite)
   type: "sqlite"
   sqlite:
-    path: "./data/db/hr_rag.db"
+    path: "./data/db/enterprise_rag.db"
     echo: false
     check_same_thread: false
   
@@ -24,8 +24,8 @@ database:
   postgresql:
     host: "database"
     port: 5432
-    database: "hr_rag"
-    username: "hr_rag_user"
+    database: "enterprise_rag"
+    username: "enterprise_rag_user"
     password: "${DB_PASSWORD}"  # From environment
     pool_size: 5
     max_overflow: 10
@@ -33,16 +33,88 @@ database:
 
 # Vector Store Configuration
 vector_store:
-  type: "chroma"  # chroma, faiss
+  type: "chroma"  # chroma, faiss, pinecone, weaviate
+  
+  # ChromaDB Configuration
   chroma:
-    host: "vector-store"
-    port: 8000
-    collection_name: "hr_documents"
+    # For Docker deployment
+    host: "localhost"  # or "chromadb" for docker-compose
+    port: 8001
+    
+    # For local development
     persist_directory: "./data/vector_store"
+    
+    # Collection settings
+    collection_settings:
+      default_ef: 128
+      max_connections: 16
+      
+    # Batch processing
+    batch_size: 100
+    max_batch_size: 1000
+    
+  # FAISS Configuration
   faiss:
     index_type: "IndexFlatIP"
     dimension: 1024
     index_path: "./data/indexes/faiss.index"
+    
+  # Performance settings
+  performance:
+    enable_cache: true
+    cache_size: 1000
+    query_timeout: 30
+    
+  # Embedding settings
+  embeddings:
+    dimension: 1536  # OpenAI text-embedding-ada-002 or similar
+    similarity_metric: "cosine"
+    normalize_embeddings: true
+    
+  # Atomic operations
+  operations:
+    enable_atomic: true
+    rollback_on_failure: true
+    operation_timeout: 60
+    max_retry_attempts: 3
+
+# Metadata Management Configuration
+metadata:
+  # Database settings
+  database_path: "./data/metadata.db"
+  debug_sql: false
+  
+  # Caching
+  enable_cache: true
+  cache_ttl: 300  # 5 minutes
+  
+  # Indexing
+  auto_create_indexes: true
+  custom_indexes:
+    - field: "tenant_id"
+      type: "btree"
+    - field: "document_type"
+      type: "btree"
+    - field: "folder_path"
+      type: "btree"
+    - field: "processing_timestamp"
+      type: "btree"
+    - field: "content_hash"
+      type: "hash"
+    - field: "embedding_hash"
+      type: "hash"
+  
+  # Analytics
+  enable_analytics: true
+  analytics_retention_days: 90
+  
+  # Relationship tracking
+  enable_relationships: true
+  relationship_types:
+    - "same_folder"
+    - "similar_content"
+    - "shared_tags"
+    - "temporal_proximity"
 
 # ML Models Configuration
 models:
@@ -68,6 +140,47 @@ models:
     device: "auto"
     top_k: 10
     cache_dir: "./models/reranker"
+
+# LlamaIndex Configuration
+llama_index:
+  # Global settings
+  global:
+    chunk_size: 1000
+    chunk_overlap: 200
+    context_window: 4000
+    enable_logging: true
+    log_level: "INFO"
+  
+  # Tenant-aware settings
+  tenant_settings:
+    enable_tenant_isolation: true
+    shared_models: true  # Share models across tenants for efficiency
+    model_sharing_strategy: "memory_efficient"  # memory_efficient, dedicated, hybrid
+    tenant_cache_dirs: true  # Create separate cache dirs per tenant
+    
+  # Model management
+  model_management:
+    auto_model_loading: true
+    lazy_loading: true  # Load models only when needed
+    model_unloading: true  # Unload unused models to save memory
+    unload_timeout_minutes: 30
+    max_concurrent_models: 3
+    
+  # Resource optimization
+  resource_optimization:
+    enable_gpu_sharing: true
+    batch_processing: true
+    async_processing: true
+    memory_efficient_loading: true
+    quantization: false  # Enable for production with limited GPU memory
+    
+  # Performance tuning
+  performance:
+    enable_caching: true
+    cache_size_mb: 512
+    enable_async_embeddings: true
+    parallel_processing: true
+    max_parallel_workers: 4
 
 # File Processing Configuration
 file_processing:
@@ -215,7 +328,7 @@ logging:
   output: "both"  # file, console, both
   
   file:
-    path: "./logs/hr_rag.log"
+    path: "./logs/enterprise_rag.log"
     max_size_mb: 100
     backup_count: 5
     rotation: "time"  # size, time
@@ -254,4 +367,63 @@ production:
     auto_scaling: false
     min_replicas: 1
     max_replicas: 5
-    target_cpu_utilization: 70 
+    target_cpu_utilization: 70
+
+# Embedding deletion configuration
+deletion:
+  # Queue processing
+  max_concurrent_tasks: 3
+  batch_size: 100
+  enable_verification: true
+  
+  # Logging and retention
+  log_retention_hours: 168  # 7 days
+  audit_all_operations: true
+  
+  # Safety features
+  require_confirmation: true
+  enable_rollback: true
+  backup_before_delete: false  # For production, consider enabling
+
+# Embedding update workflow configuration
+update:
+  # Transaction management
+  max_concurrent_transactions: 2
+  enable_verification: true
+  auto_cleanup: true
+  
+  # Processing control
+  atomic_operations: true
+  rollback_on_failure: true
+  
+  # Logging and monitoring
+  log_retention_hours: 168  # 7 days
+  detailed_logging: true
+  
+  # Performance optimization
+  batch_size: 50
+  parallel_processing: true
+  memory_limit_mb: 1024
+
+# Version tracking configuration
+version_tracking:
+  # Database configuration
+  database_path: "data/versions.db"
+  
+  # Version management
+  max_versions_per_document: 50
+  auto_archive_days: 90
+  
+  # Features
+  enable_quality_tracking: true
+  enable_auto_comparison: true
+  track_performance_metrics: true
+  
+  # Comparison settings
+  comparison_threshold: 0.8
+  semantic_comparison: true
+  detailed_diff_analysis: true
+  
+  # Cleanup settings
+  cleanup_interval_hours: 24
+  max_comparison_cache_size: 1000 

@@ -69,7 +69,7 @@ class SyncDemo:
     async def _create_demo_files(self, base_dir: Path, tenant_id: str) -> None:
         """Create demo files for a tenant."""
         files = [
-            ("policies/hr_policy.txt", f"HR Policy for {tenant_id}\n\nThis is the employee handbook..."),
+            ("policies/corporate_policy.txt", f"Corporate Policy for {tenant_id}\n\nThis is the employee handbook..."),
             ("reports/quarterly_report.md", f"# Q1 Report - {tenant_id}\n\n## Summary\nExcellent performance..."),
             ("documents/employee_guide.docx", f"Employee Guide Content for {tenant_id}"),
             ("training/safety_manual.pdf", f"Safety Manual PDF content for {tenant_id}"),

@@ -1,5 +1,5 @@
 """
-Database models for HR RAG Pipeline.
+Database models for Enterprise RAG Pipeline.
 
 This module defines SQLAlchemy models for file tracking, versioning,
 embedding management, and sync status with multi-tenant support.

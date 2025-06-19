@@ -1,6 +1,6 @@
-# Docker Configuration for HR RAG Pipeline
+# Docker Configuration for Enterprise RAG Pipeline
 
-This directory contains all Docker-related configuration files for the HR RAG Pipeline.
+This directory contains all Docker-related configuration files for the Enterprise RAG Pipeline.
 
 ## Files Overview
 
@@ -44,7 +44,7 @@ This directory contains all Docker-related configuration files for the HR RAG Pi
 
 ### Main Application Container (`hr-rag-app`)
 - **Base Image**: `nvidia/cuda:11.8-devel-ubuntu22.04`
-- **Purpose**: Runs the HR RAG Pipeline application
+- **Purpose**: Runs the Enterprise RAG Pipeline application
 - **GPU Support**: Uses NVIDIA runtime for embedding generation
 - **Ports**: 8000 (FastAPI)
 - **Volumes**: 
@@ -67,10 +67,10 @@ This directory contains all Docker-related configuration files for the HR RAG Pi
 ## Volume Configuration
 
 ### Named Volumes (Managed by Docker)
-- `hr_rag_data` - Application data and SQLite database
-- `hr_rag_logs` - Application logs
-- `hr_rag_db_data` - PostgreSQL database files
-- `hr_rag_vector_data` - ChromaDB vector storage
+- `enterprise_rag_data` - Application data and SQLite database
+- `enterprise_rag_logs` - Application logs
+- `enterprise_rag_db_data` - PostgreSQL database files
+- `enterprise_rag_vector_data` - ChromaDB vector storage
 
 ### Bind Mounts (Host Directories)
 - `./data/master` → `/app/data/master` - File drop location

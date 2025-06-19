@@ -1,5 +1,5 @@
 """
-Sync module for HR RAG pipeline.
+Sync module for Enterprise RAG pipeline.
 
 This module provides comprehensive file synchronization capabilities including:
 - File system monitoring and change detection

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# HR RAG Pipeline Docker Entrypoint Script
+# Enterprise RAG Pipeline Docker Entrypoint Script
 
 set -e
 
-echo "Starting HR RAG Pipeline..."
+echo "Starting Enterprise RAG Pipeline..."
 
 # Check GPU availability
 if command -v nvidia-smi &> /dev/null; then
@@ -15,7 +15,7 @@ else
 fi
 
 # Check if database needs initialization
-if [ ! -f "/app/data/db/hr_rag.db" ]; then
+if [ ! -f "/app/data/db/enterprise_rag.db" ]; then
     echo "Initializing database..."
     # Database initialization will be handled by alembic when we implement it
 fi

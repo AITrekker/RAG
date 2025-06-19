@@ -1,5 +1,5 @@
 """
-Connection pooling utilities for HR RAG Pipeline.
+Connection pooling utilities for Enterprise RAG Pipeline.
 
 This module provides advanced connection pooling, monitoring,
 and health checking for database connections.

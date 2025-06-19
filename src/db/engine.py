@@ -1,5 +1,5 @@
 """
-Database engine and connection management for HR RAG Pipeline.
+Database engine and connection management for Enterprise RAG Pipeline.
 
 This module handles SQLAlchemy engine creation, session management,
 and database initialization with tenant support.

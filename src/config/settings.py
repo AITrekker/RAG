@@ -1,5 +1,5 @@
 """
-Configuration management for HR RAG Pipeline.
+Configuration management for Enterprise RAG Pipeline.
 
 This module handles loading configuration from YAML files and environment variables,
 with support for environment-specific overrides and validation.
@@ -20,15 +20,15 @@ class DatabaseSettings(BaseModel):
     type: str = "sqlite"
     
     # SQLite settings
-    sqlite_path: str = "./data/db/hr_rag.db"
+    sqlite_path: str = "./data/db/enterprise_rag.db"
     sqlite_echo: bool = False
     sqlite_check_same_thread: bool = False
     
     # PostgreSQL settings
     postgresql_host: str = "database"
     postgresql_port: int = 5432
-    postgresql_database: str = "hr_rag"
-    postgresql_username: str = "hr_rag_user"
+    postgresql_database: str = "enterprise_rag"
+    postgresql_username: str = "enterprise_rag_user"
     postgresql_password: str = ""
     postgresql_pool_size: int = 5
     postgresql_max_overflow: int = 10
@@ -191,7 +191,7 @@ class LoggingSettings(BaseModel):
     output: str = "both"
     
     # File logging
-    file_path: str = "./logs/hr_rag.log"
+    file_path: str = "./logs/enterprise_rag.log"
     file_max_size_mb: int = 100
     file_backup_count: int = 5
     file_rotation: str = "time"
@@ -245,7 +245,7 @@ class TenantSettings(BaseModel):
 
 class AppSettings(BaseModel):
     """Main application settings."""
-    name: str = "HR RAG Pipeline"
+    name: str = "Enterprise RAG Pipeline"
     version: str = "1.0.0"
     environment: str = "development"
     debug: bool = True

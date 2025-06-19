@@ -1,5 +1,5 @@
 """
-Database operations for HR RAG Pipeline.
+Database operations for Enterprise RAG Pipeline.
 
 This module provides CRUD operations, transaction handling,
 and tenant-aware database operations.

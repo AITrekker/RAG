@@ -1,8 +1,8 @@
-# HR RAG Pipeline: Intelligent HR Document Assistant
+# Enterprise RAG Pipeline: Intelligent Document Assistant
 
 ## 1. Overview
 
-This project is a sophisticated, multi-tenant Retrieval-Augmented Generation (RAG) system designed to power an intelligent HR support application. It allows HR staff to ask natural language questions and receive accurate, context-aware answers based on a private, internal corpus of HR documents (e.g., policies, employee handbooks, legal documents).
+This project is a sophisticated, multi-tenant Retrieval-Augmented Generation (RAG) system designed to power an intelligent enterprise support application. It allows staff to ask natural language questions and receive accurate, context-aware answers based on a private, internal corpus of corporate documents (e.g., policies, handbooks, legal documents).
 
 The system is built with a local-first, self-hosted architecture for maximum data privacy and control, with a clear and easy path to cloud deployment. It ingests documents from specified local folders, processes them into a searchable vector database, and uses a generative LLM to provide answers, all while ensuring strict data isolation between tenants.
 
@@ -47,7 +47,6 @@ The system follows a modular RAG architecture:
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd hr-rag-pipeline
     ```
 
 2.  **Configure Environment:**
@@ -76,4 +75,4 @@ This `README` outlines the plan for the initial MVP. We have a comprehensive roa
 - **Phase 6:** Enhanced UI/UX
 - **Phase 7:** Integration and Scaling
 
-For a detailed breakdown of all current and future tasks, please see the `tasks/tasks-prd-hr-rag-pipeline.md` file.
+For a detailed breakdown of all current and future tasks, please see the `tasks/tasks-prd-enterprise-rag-pipeline.md` file.
