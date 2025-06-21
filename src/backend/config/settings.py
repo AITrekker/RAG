@@ -5,8 +5,9 @@ Handles environment variables, database configuration, and application settings.
 """
 
 import os
-from typing import List, Optional
-from pydantic import BaseSettings, Field
+from typing import List, Optional, Dict, Any
+from pydantic_settings import BaseSettings
+from pydantic import Field
 from functools import lru_cache
 
 
@@ -158,6 +159,59 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+# Global settings instance
+settings = get_settings()
+
+
+def get_embedding_model_config() -> Dict[str, Any]:
+    """Get embedding model configuration."""
+    return {
+        "model_name": settings.embedding_model,
+        "device": settings.embedding_device,
+        "batch_size": settings.embedding_batch_size,
+        "max_seq_length": 512,
+        "cache_dir": "./cache/transformers",
+        "enable_mixed_precision": True,
+        "target_performance": 16.3
+    }
+
+
+def validate_rtx_5070_compatibility() -> Dict[str, Any]:
+    """Validate RTX 5070 compatibility and return recommendations."""
+    import torch
+    
+    result = {
+        "cuda_available": torch.cuda.is_available(),
+        "rtx_5070_detected": False,
+        "gpu_name": None,
+        "recommendations": []
+    }
+    
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        result["gpu_name"] = gpu_name
+        
+        if "RTX 5070" in gpu_name:
+            result["rtx_5070_detected"] = True
+            result["recommendations"] = [
+                "Using mixed precision (FP16) for optimal performance",
+                "Batch size optimized for RTX 5070 memory",
+                "CUDA acceleration enabled"
+            ]
+        else:
+            result["recommendations"] = [
+                "GPU detected but not RTX 5070",
+                "Performance may vary based on GPU capabilities"
+            ]
+    else:
+        result["recommendations"] = [
+            "CUDA not available - using CPU",
+            "Consider installing CUDA for better performance"
+        ]
+    
+    return result
 
 
 # Environment-specific configurations

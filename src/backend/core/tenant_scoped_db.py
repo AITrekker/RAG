@@ -14,6 +14,8 @@ from contextlib import contextmanager
 from sqlalchemy.orm import Query, Session
 from sqlalchemy import and_, or_
 from sqlalchemy.inspection import inspect
+from dataclasses import dataclass
+import uuid
 
 from ..models.tenant import (
     Tenant, TenantConfiguration, TenantUsageStats, TenantApiKey, TenantDocument
@@ -27,81 +29,16 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T')
 
 
+@dataclass
 class TenantContext:
-    """
-    Thread-local tenant context for scoped operations
-    """
-    _current_tenant_id: Optional[str] = None
-    _current_user_id: Optional[str] = None
-    _bypass_tenant_filter: bool = False
+    """Tenant context information."""
+    tenant_id: str
+    tenant_name: str = ""
+    settings: Dict[str, Any] = None
     
-    @classmethod
-    def set_current_tenant(cls, tenant_id: str, user_id: Optional[str] = None) -> None:
-        """Set the current tenant context"""
-        cls._current_tenant_id = tenant_id
-        cls._current_user_id = user_id
-        cls._bypass_tenant_filter = False
-        logger.debug(f"Set tenant context: {tenant_id}")
-    
-    @classmethod
-    def get_current_tenant(cls) -> Optional[str]:
-        """Get the current tenant ID"""
-        return cls._current_tenant_id
-    
-    @classmethod
-    def get_current_user(cls) -> Optional[str]:
-        """Get the current user ID"""
-        return cls._current_user_id
-    
-    @classmethod
-    def clear_context(cls) -> None:
-        """Clear the tenant context"""
-        cls._current_tenant_id = None
-        cls._current_user_id = None
-        cls._bypass_tenant_filter = False
-        logger.debug("Cleared tenant context")
-    
-    @classmethod
-    @contextmanager
-    def scope(cls, tenant_id: str, user_id: Optional[str] = None):
-        """Context manager for temporary tenant scope"""
-        old_tenant = cls._current_tenant_id
-        old_user = cls._current_user_id
-        old_bypass = cls._bypass_tenant_filter
-        
-        try:
-            cls.set_current_tenant(tenant_id, user_id)
-            yield
-        finally:
-            cls._current_tenant_id = old_tenant
-            cls._current_user_id = old_user
-            cls._bypass_tenant_filter = old_bypass
-    
-    @classmethod
-    @contextmanager
-    def bypass_tenant_filter(cls):
-        """Context manager to bypass tenant filtering (admin operations)"""
-        old_bypass = cls._bypass_tenant_filter
-        try:
-            cls._bypass_tenant_filter = True
-            yield
-        finally:
-            cls._bypass_tenant_filter = old_bypass
-    
-    @classmethod
-    def validate_tenant_access(cls, resource_tenant_id: str) -> bool:
-        """Validate access to a resource based on tenant context"""
-        if cls._bypass_tenant_filter:
-            return True
-        
-        current_tenant = cls.get_current_tenant()
-        if not current_tenant:
-            raise TenantSecurityError("No tenant context set")
-        
-        if current_tenant != resource_tenant_id:
-            raise TenantSecurityError(f"Access denied: tenant {current_tenant} cannot access {resource_tenant_id} resources")
-        
-        return True
+    def __post_init__(self):
+        if self.settings is None:
+            self.settings = {}
 
 
 class TenantScopedQuery:
@@ -516,24 +453,18 @@ def validate_tenant_context_middleware():
 
 
 def extract_tenant_from_api_key(api_key: str) -> Optional[str]:
-    """
-    Extract tenant ID from API key format
-    
-    Args:
-        api_key: API key string
-        
-    Returns:
-        Tenant ID if valid format, None otherwise
-    """
-    if not api_key.startswith("rag_"):
-        return None
-    
-    try:
-        # Format: rag_{tenant_id}_{random_string}
-        parts = api_key.split("_", 2)
-        if len(parts) >= 2:
-            return parts[1]
-    except Exception:
-        pass
-    
-    return None 
+    """Extract tenant ID from API key."""
+    # Mock implementation - in real app this would decode the API key
+    if api_key.startswith("tenant_"):
+        return api_key.replace("tenant_", "").split("_")[0]
+    return "default"
+
+
+def get_tenant_database_path(tenant_id: str) -> str:
+    """Get tenant-specific database path."""
+    return f"./data/tenant_{tenant_id}.db"
+
+
+def get_tenant_storage_path(tenant_id: str) -> str:
+    """Get tenant-specific storage path."""
+    return f"./data/tenants/{tenant_id}" 

@@ -14,11 +14,20 @@ from datetime import datetime
 from ...core.rag_pipeline import RAGPipeline
 from ...core.embeddings import EmbeddingService
 from ...utils.vector_store import VectorStoreManager
-from ...middleware.tenant_context import get_current_tenant_id
+from ...middleware.mock_tenant import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Local dependency functions (will be overridden by main app)
+def get_embedding_service() -> EmbeddingService:
+    """Get embedding service - will be overridden by main app dependency."""
+    return EmbeddingService()
+
+def get_vector_store_manager() -> VectorStoreManager:
+    """Get vector store manager - will be overridden by main app dependency."""
+    return VectorStoreManager()
 
 # Request/Response Models
 class QueryRequest(BaseModel):
@@ -67,8 +76,8 @@ class QueryHistory(BaseModel):
 
 # Dependency to get RAG pipeline
 async def get_rag_pipeline(
-    embedding_service: EmbeddingService = Depends(),
-    vector_store_manager: VectorStoreManager = Depends(),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    vector_store_manager: VectorStoreManager = Depends(get_vector_store_manager),
     tenant_id: str = Depends(get_current_tenant_id)
 ) -> RAGPipeline:
     """Get RAG pipeline for the current tenant."""

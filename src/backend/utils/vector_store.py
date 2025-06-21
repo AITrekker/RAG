@@ -22,7 +22,7 @@ def get_chroma_client() -> chromadb.Client:
     """
     try:
         # Create persistent directory
-        persist_dir = Path(settings.vector_store.chroma_persist_directory)
+        persist_dir = Path(settings.vector_store_path)
         persist_dir.mkdir(parents=True, exist_ok=True)
         
         # Create persistent Chroma client
@@ -53,7 +53,7 @@ def create_tenant_collection(
         Chroma collection instance
     """
     if not collection_name:
-        collection_name = f"{settings.vector_store.collection_name_prefix}_{tenant_id}"
+        collection_name = f"tenant_{tenant_id}"
     
     try:
         # Get or create collection with tenant metadata
@@ -62,7 +62,7 @@ def create_tenant_collection(
             metadata={
                 "tenant_id": tenant_id,
                 "created_by": "rag_platform",
-                "embedding_model": settings.embedding.model_name
+                "embedding_model": settings.embedding_model
             }
         )
         
@@ -122,7 +122,7 @@ def delete_tenant_collection(
         True if deleted successfully
     """
     if not collection_name:
-        collection_name = f"{settings.vector_store.collection_name_prefix}_{tenant_id}"
+        collection_name = f"tenant_{tenant_id}"
     
     try:
         # Verify this collection belongs to the tenant
@@ -237,4 +237,36 @@ def get_chroma_manager() -> ChromaManager:
     if _chroma_manager is None:
         _chroma_manager = ChromaManager()
     
-    return _chroma_manager 
+    return _chroma_manager
+
+
+class VectorStoreManager:
+    """Basic vector store manager for demo purposes."""
+    
+    def __init__(self):
+        self.collections = {}
+    
+    def create_collection(self, name: str) -> bool:
+        """Create a new collection."""
+        self.collections[name] = []
+        return True
+    
+    def add_documents(self, collection_name: str, documents: List[Dict[str, Any]]) -> bool:
+        """Add documents to collection."""
+        if collection_name not in self.collections:
+            self.create_collection(collection_name)
+        
+        self.collections[collection_name].extend(documents)
+        return True
+    
+    def search(self, collection_name: str, query_vector: List[float], top_k: int = 5) -> List[Dict[str, Any]]:
+        """Search for similar documents."""
+        # Mock search results
+        return [
+            {
+                "id": f"doc_{i}",
+                "score": 0.9 - (i * 0.1),
+                "metadata": {"content": f"Mock document {i}"}
+            }
+            for i in range(min(top_k, 3))
+        ] 

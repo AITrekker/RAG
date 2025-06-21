@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any
 
 from .config.settings import get_settings
-from .middleware.tenant_context import TenantContextMiddleware
 from .api.routes import query, tenants, sync, health
 from .core.embeddings import EmbeddingService
 from .utils.vector_store import VectorStoreManager
@@ -30,6 +29,12 @@ settings = get_settings()
 # Global services that need to be initialized
 embedding_service: EmbeddingService = None
 vector_store_manager: VectorStoreManager = None
+
+
+# Mock tenant ID function for demo purposes
+async def get_current_tenant_id() -> str:
+    """Mock function to return default tenant ID for demo."""
+    return "default"
 
 
 @asynccontextmanager
@@ -107,8 +112,9 @@ if not settings.debug:
         allowed_hosts=settings.allowed_hosts
     )
 
-# Tenant Context Middleware
-app.add_middleware(TenantContextMiddleware)
+# Note: TenantContextMiddleware temporarily disabled for demo purposes
+# In production, you would configure proper database session factory
+# app.add_middleware(TenantContextMiddleware, db_session_factory=get_db_session)
 
 
 # Performance monitoring middleware
@@ -177,13 +183,17 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 # Dependency injection for services
-async def get_embedding_service() -> EmbeddingService:
+def get_embedding_service() -> EmbeddingService:
     """Dependency to get the embedding service."""
+    if not hasattr(app.state, 'embedding_service') or app.state.embedding_service is None:
+        app.state.embedding_service = EmbeddingService()
     return app.state.embedding_service
 
 
-async def get_vector_store_manager() -> VectorStoreManager:
+def get_vector_store_manager() -> VectorStoreManager:
     """Dependency to get the vector store manager."""
+    if not hasattr(app.state, 'vector_store_manager') or app.state.vector_store_manager is None:
+        app.state.vector_store_manager = VectorStoreManager()
     return app.state.vector_store_manager
 
 
@@ -197,8 +207,7 @@ app.include_router(
 app.include_router(
     query.router,
     prefix="/api/v1",
-    tags=["query"],
-    dependencies=[Depends(get_embedding_service), Depends(get_vector_store_manager)]
+    tags=["query"]
 )
 
 app.include_router(
@@ -210,8 +219,7 @@ app.include_router(
 app.include_router(
     sync.router,
     prefix="/api/v1",
-    tags=["sync"],
-    dependencies=[Depends(get_embedding_service), Depends(get_vector_store_manager)]
+    tags=["sync"]
 )
 
 

@@ -13,7 +13,7 @@ import uuid
 
 from ...core.tenant_manager import TenantManager
 from ...models.tenant import Tenant, TenantStatus
-from ...middleware.tenant_context import get_current_tenant_id
+from ...middleware.mock_tenant import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 

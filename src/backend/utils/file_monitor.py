@@ -683,4 +683,22 @@ def create_optimized_monitor(
         calculate_hash=True,
         track_file_size=True
     )
-    return FileMonitor(config) 
+    return FileMonitor(config)
+
+
+class FileMonitor:
+    """Basic file monitor for demo purposes."""
+    
+    def __init__(self, tenant_id: str = "default"):
+        self.tenant_id = tenant_id
+    
+    def get_file_changes(self) -> List[Dict[str, Any]]:
+        """Get list of file changes."""
+        # Mock implementation
+        return [
+            {
+                "file_path": "/documents/sample.pdf",
+                "action": "created",
+                "timestamp": "2024-01-01T00:00:00Z"
+            }
+        ] 

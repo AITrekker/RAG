@@ -15,7 +15,7 @@ from ...core.document_ingestion import DocumentIngestionPipeline
 from ...core.embeddings import EmbeddingService
 from ...utils.vector_store import VectorStoreManager
 from ...utils.file_monitor import FileMonitor
-from ...middleware.tenant_context import get_current_tenant_id
+from ...middleware.mock_tenant import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +93,26 @@ class SyncScheduleResponse(BaseModel):
     last_auto_sync: Optional[datetime] = Field(None, description="Last automatic sync time")
 
 
+class SyncScheduleUpdateRequest(BaseModel):
+    """Request model for updating sync schedule."""
+    auto_sync_enabled: bool = Field(..., description="Whether to enable automatic sync")
+    sync_interval_hours: int = Field(..., ge=1, le=168, description="Sync interval in hours (1-168)")
+
+
+# Local dependency functions
+def get_embedding_service() -> EmbeddingService:
+    """Get embedding service."""
+    return EmbeddingService()
+
+def get_vector_store_manager() -> VectorStoreManager:
+    """Get vector store manager."""
+    return VectorStoreManager()
+
+
 # Dependencies
 async def get_ingestion_pipeline(
-    embedding_service: EmbeddingService = Depends(),
-    vector_store_manager: VectorStoreManager = Depends(),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    vector_store_manager: VectorStoreManager = Depends(get_vector_store_manager),
     tenant_id: str = Depends(get_current_tenant_id)
 ) -> DocumentIngestionPipeline:
     """Get document ingestion pipeline for the current tenant."""
@@ -440,8 +456,7 @@ async def get_sync_schedule(
 
 @router.put("/sync/schedule")
 async def update_sync_schedule(
-    auto_sync_enabled: bool,
-    sync_interval_hours: int = Field(..., ge=1, le=168),  # 1 hour to 1 week
+    request: SyncScheduleUpdateRequest,
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """
@@ -450,7 +465,7 @@ async def update_sync_schedule(
     Updates the automatic sync settings for the current tenant.
     """
     try:
-        logger.info(f"Updating sync schedule for tenant {tenant_id}: enabled={auto_sync_enabled}, interval={sync_interval_hours}h")
+        logger.info(f"Updating sync schedule for tenant {tenant_id}: enabled={request.auto_sync_enabled}, interval={request.sync_interval_hours}h")
         
         # TODO: Implement actual sync schedule update in tenant settings
         # This would involve:
@@ -460,8 +475,8 @@ async def update_sync_schedule(
         
         return {
             "message": "Sync schedule updated successfully",
-            "auto_sync_enabled": auto_sync_enabled,
-            "sync_interval_hours": sync_interval_hours
+            "auto_sync_enabled": request.auto_sync_enabled,
+            "sync_interval_hours": request.sync_interval_hours
         }
         
     except Exception as e:
