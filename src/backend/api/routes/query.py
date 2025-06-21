@@ -11,23 +11,12 @@ import time
 import logging
 from datetime import datetime
 
-from ...core.rag_pipeline import RAGPipeline
-from ...core.embeddings import EmbeddingService
-from ...utils.vector_store import VectorStoreManager
+from ...core.rag_pipeline import rag_pipeline
 from ...middleware.mock_tenant import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Local dependency functions (will be overridden by main app)
-def get_embedding_service() -> EmbeddingService:
-    """Get embedding service - will be overridden by main app dependency."""
-    return EmbeddingService()
-
-def get_vector_store_manager() -> VectorStoreManager:
-    """Get vector store manager - will be overridden by main app dependency."""
-    return VectorStoreManager()
 
 # Request/Response Models
 class QueryRequest(BaseModel):
@@ -74,31 +63,15 @@ class QueryHistory(BaseModel):
     page_size: int = Field(..., description="Number of queries per page")
 
 
-# Dependency to get RAG pipeline
-async def get_rag_pipeline(
-    embedding_service: EmbeddingService = Depends(get_embedding_service),
-    vector_store_manager: VectorStoreManager = Depends(get_vector_store_manager),
-    tenant_id: str = Depends(get_current_tenant_id)
-) -> RAGPipeline:
-    """Get RAG pipeline for the current tenant."""
-    try:
-        return RAGPipeline(
-            embedding_service=embedding_service,
-            vector_store_manager=vector_store_manager,
-            tenant_id=tenant_id
-        )
-    except Exception as e:
-        logger.error(f"Failed to initialize RAG pipeline for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to initialize query processing service"
-        )
+# Use the global RAG pipeline instance
+def get_rag_pipeline():
+    """Get the global RAG pipeline instance."""
+    return rag_pipeline
 
 
 @router.post("/query", response_model=QueryResponse)
 async def process_query(
     request: QueryRequest,
-    rag_pipeline: RAGPipeline = Depends(get_rag_pipeline),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """
@@ -116,9 +89,7 @@ async def process_query(
         # Process the query through RAG pipeline
         result = await rag_pipeline.process_query(
             query=request.query,
-            max_sources=request.max_sources,
-            include_metadata=request.include_metadata,
-            rerank=request.rerank
+            tenant_id=tenant_id
         )
         
         processing_time = time.time() - start_time
@@ -126,15 +97,15 @@ async def process_query(
         # Convert result to response format
         sources = [
             SourceCitation(
-                document_id=source.get('document_id', ''),
+                document_id=str(i),
                 filename=source.get('filename', ''),
-                chunk_text=source.get('chunk_text', ''),
-                page_number=source.get('page_number'),
-                confidence_score=source.get('confidence_score', 0.0),
+                chunk_text=source.get('content', '')[:200] + "...",
+                page_number=None,
+                confidence_score=source.get('confidence', 0.0),
                 chunk_index=source.get('chunk_index', 0),
                 metadata=source.get('metadata', {})
             )
-            for source in result.get('sources', [])
+            for i, source in enumerate(result.get('sources', []))
         ]
         
         response = QueryResponse(
@@ -145,9 +116,7 @@ async def process_query(
             processing_time=processing_time,
             metadata={
                 'tenant_id': tenant_id,
-                'model_used': result.get('model_used', 'unknown'),
-                'total_chunks_searched': result.get('total_chunks_searched', 0),
-                'reranked': request.rerank
+                'context_used': result.get('context_used', 0)
             }
         )
         
