@@ -232,6 +232,7 @@ user_uploads/
 processed_files/
 reports/
 exports/
+cache/
 
 # Docker volumes (if mounted locally)
 docker_data/

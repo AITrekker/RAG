@@ -1,0 +1,38 @@
+# Use Node.js LTS base image
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies for building native modules
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    git \
+    wget
+
+# Copy package files first for better caching
+COPY src/frontend/package*.json ./
+
+# Install dependencies (use npm install to handle platform differences)
+RUN npm install --legacy-peer-deps
+
+# Copy source code
+COPY src/frontend .
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S react -u 1001 -G nodejs && \
+    chown -R react:nodejs /app
+USER react
+
+# Expose port for Vite dev server
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
+
+# Start development server
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"] 

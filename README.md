@@ -76,3 +76,16 @@ This `README` outlines the plan for the initial MVP. We have a comprehensive roa
 - **Phase 7:** Integration and Scaling
 
 For a detailed breakdown of all current and future tasks, please see the `tasks/tasks-prd-enterprise-rag-pipeline.md` file.
+
+🎯 Usage Examples:
+# Backend (Python)
+python scripts/run_backend.py --debug --port 8080
+python scripts/run_backend.py --host 0.0.0.0
+
+# Frontend (Bash)
+./scripts/run_frontend.sh --port 4000
+./scripts/run_frontend.sh --host 0.0.0.0 --install
+
+# Frontend (PowerShell)
+.\scripts\run_frontend.ps1 -Port 4000
+.\scripts\run_frontend.ps1 -HostAddress 0.0.0.0 -Install
