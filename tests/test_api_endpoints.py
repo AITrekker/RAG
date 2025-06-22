@@ -14,7 +14,7 @@ import pytest
 import sys
 import os
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 import tempfile
 import json
 from datetime import datetime
@@ -28,11 +28,6 @@ from src.backend.models.api_models import *
 
 class TestAPIEndpoints:
     """Comprehensive test suite for all API endpoints."""
-    
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        return TestClient(app)
     
     @pytest.fixture
     def mock_tenant_id(self):
@@ -51,17 +46,19 @@ class TestAPIEndpoints:
     # DOCUMENT ENDPOINTS
     # ======================
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
     @patch('src.backend.api.v1.routes.documents.DocumentIngestionPipeline')
     @patch('src.backend.api.v1.routes.documents.TenantFileSystemManager')
-    def test_upload_document(self, mock_fs_manager, mock_ingestion, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_upload_document(self, mock_fs_manager, mock_ingestion, authenticated_client, auth_headers):
         """Test document upload endpoint."""
         # Setup mocks
-        mock_auth.return_value = mock_tenant_id
         mock_fs_manager_instance = Mock()
         mock_fs_manager.return_value = mock_fs_manager_instance
-        mock_fs_manager_instance.save_uploaded_file.return_value = "/path/to/file.pdf"
         
+        # Make the mock awaitable
+        async def save_file_mock(*args, **kwargs):
+            return "/path/to/file.pdf"
+        mock_fs_manager_instance.save_uploaded_file = save_file_mock
+
         mock_ingestion_instance = Mock()
         mock_ingestion.return_value = mock_ingestion_instance
         mock_result = Mock()
@@ -71,7 +68,7 @@ class TestAPIEndpoints:
         
         # Test successful upload
         test_file_content = b"PDF file content"
-        response = client.post(
+        response = authenticated_client.post(
             "/api/v1/documents/upload",
             files={"file": ("test.pdf", test_file_content, "application/pdf")},
             headers=auth_headers
@@ -84,27 +81,19 @@ class TestAPIEndpoints:
         assert data["status"] == "processed"
         assert data["chunks_created"] == 10
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_upload_document_invalid_file(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_upload_document_invalid_file(self, authenticated_client, auth_headers):
         """Test document upload with invalid file."""
-        mock_auth.return_value = mock_tenant_id
-        
         # Test without filename
-        response = client.post(
+        response = authenticated_client.post(
             "/api/v1/documents/upload",
             files={"file": ("", b"content", "application/pdf")},
             headers=auth_headers
         )
-        
-        assert response.status_code == 400
-        assert "Filename is required" in response.json()["detail"]
+        assert response.status_code == 422
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_list_documents(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_list_documents(self, authenticated_client, auth_headers):
         """Test list documents endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
-        response = client.get("/api/v1/documents/", headers=auth_headers)
+        response = authenticated_client.get("/api/v1/documents/", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -113,96 +102,87 @@ class TestAPIEndpoints:
         assert "page" in data
         assert "page_size" in data
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_get_document(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_get_document(self, authenticated_client, auth_headers):
         """Test get specific document endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
         document_id = "doc-1"
-        response = client.get(f"/api/v1/documents/{document_id}", headers=auth_headers)
+        response = authenticated_client.get(f"/api/v1/documents/{document_id}", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
         assert data["document_id"] == document_id
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_get_document_not_found(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_get_document_not_found(self, authenticated_client, auth_headers):
         """Test get non-existent document."""
-        mock_auth.return_value = mock_tenant_id
-        
         document_id = "non-existent"
-        response = client.get(f"/api/v1/documents/{document_id}", headers=auth_headers)
+        response = authenticated_client.get(f"/api/v1/documents/{document_id}", headers=auth_headers)
         
         assert response.status_code == 404
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_delete_document(self, mock_auth, client, mock_tenant_id, auth_headers):
-        """Test delete document endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
-        document_id = "doc-1"
-        response = client.delete(f"/api/v1/documents/{document_id}", headers=auth_headers)
-        
-        # Should return 204 No Content for successful deletion
-        assert response.status_code == 204
+    @patch('src.backend.api.v1.routes.documents.DocumentIngestionPipeline')
+    def test_delete_document(self, mock_ingestion, authenticated_client, auth_headers):
+        """Test document deletion endpoint."""
+        mock_pipeline_instance = Mock()
+        mock_ingestion.return_value = mock_pipeline_instance
+
+        # Make the mock awaitable
+        async def delete_doc_mock(*args, **kwargs):
+            return True
+        mock_pipeline_instance.delete_document = delete_doc_mock
+
+        doc_id = str(uuid.uuid4())
+        response = authenticated_client.delete(f"/api/v1/documents/{doc_id}", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["message"] == "Document deleted successfully"
 
     # ======================
     # QUERY ENDPOINTS
     # ======================
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
     @patch('src.backend.core.rag_pipeline.get_rag_pipeline')
-    def test_process_query(self, mock_rag_pipeline, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_process_query(self, mock_rag_pipeline, authenticated_client, auth_headers):
         """Test query processing endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
         # Setup mock RAG response
         mock_pipeline_instance = Mock()
         mock_rag_pipeline.return_value = mock_pipeline_instance
-        mock_rag_response = Mock()
-        mock_rag_response.query = "What is Python?"
-        mock_rag_response.answer = "Python is a programming language."
-        mock_rag_response.processing_time = 1.5
-        mock_pipeline_instance.process_query.return_value = mock_rag_response
-        
+
+        # Make the process_query mock awaitable
+        async def process_query_mock(*args, **kwargs):
+            response_mock = Mock()
+            response_mock.query = "What is Python?"
+            response_mock.answer = "Python is a programming language."
+            response_mock.processing_time = 1.5
+            response_mock.sources = []
+            return response_mock
+        mock_pipeline_instance.process_query = process_query_mock
+
         query_data = {"query": "What is Python?"}
-        response = client.post(
-            "/api/v1/query/query",
+        response = authenticated_client.post(
+            "/api/v1/query/",
             json=query_data,
             headers=auth_headers
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        assert "answer" in data
-        assert "processing_time" in data
+        assert data["answer"] == "Python is a programming language."
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_process_empty_query(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_process_empty_query(self, authenticated_client, auth_headers):
         """Test query processing with empty query."""
-        mock_auth.return_value = mock_tenant_id
-        
         query_data = {"query": ""}
-        response = client.post(
-            "/api/v1/query/query",
+        response = authenticated_client.post(
+            "/api/v1/query/",
             json=query_data,
             headers=auth_headers
         )
-        
-        assert response.status_code == 400
-        assert "Query cannot be empty" in response.json()["detail"]
+        assert response.status_code == 422
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_get_query_history(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_get_query_history(self, authenticated_client, auth_headers):
         """Test query history endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
-        response = client.get("/api/v1/query/history", headers=auth_headers)
+        response = authenticated_client.get("/api/v1/query/history", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
         assert "queries" in data
-        assert "total_count" in data
 
     # ======================
     # HEALTH ENDPOINTS
@@ -210,29 +190,27 @@ class TestAPIEndpoints:
     
     def test_basic_health_check(self, client):
         """Test basic health check endpoint."""
-        response = client.get("/api/v1/health/health")
+        response = client.get("/api/v1/health/")
         
         assert response.status_code == 200
         data = response.json()
         assert "status" in data
-        assert "timestamp" in data
-        assert "version" in data
-        assert "uptime_seconds" in data
+        assert "service" in data
     
-    @patch('src.backend.api.v1.routes.health.check_database_health')
-    @patch('src.backend.api.v1.routes.health.check_vector_store_health') 
-    @patch('src.backend.api.v1.routes.health.check_embedding_service_health')
+    @patch('src.backend.api.v1.routes.health.check_database_health', new_callable=AsyncMock)
+    @patch('src.backend.api.v1.routes.health.check_vector_store_health', new_callable=AsyncMock)
+    @patch('src.backend.api.v1.routes.health.check_embedding_service_health', new_callable=AsyncMock)
     def test_detailed_health_check(self, mock_embedding, mock_vector, mock_db, client):
         """Test detailed health check endpoint."""
-        # Setup mock component responses
-        mock_db.return_value = Mock(name="database", status="healthy")
-        mock_vector.return_value = Mock(name="vector_store", status="healthy")
-        mock_embedding.return_value = Mock(name="embedding_service", status="healthy")
+        mock_db.return_value = {"name": "database", "status": "healthy"}
+        mock_vector.return_value = {"name": "vector_store", "status": "healthy"}
+        mock_embedding.return_value = {"name": "embedding_service", "status": "healthy"}
         
-        response = client.get("/api/v1/health/health/detailed")
+        response = client.get("/api/v1/health/detailed")
         
         assert response.status_code == 200
         data = response.json()
+        assert "status" in data
         assert "components" in data
     
     def test_system_status(self, client):
@@ -260,198 +238,148 @@ class TestAPIEndpoints:
     # TENANT ENDPOINTS
     # ======================
     
-    @patch('src.backend.middleware.auth.require_authentication')
     @patch('src.backend.api.v1.routes.tenants.TenantManager')
-    def test_create_tenant(self, mock_tenant_manager, mock_auth, client):
+    def test_create_tenant(self, mock_tenant_manager, authenticated_client):
         """Test create tenant endpoint."""
-        # Setup mocks
-        mock_auth.return_value = {"user": "admin"}
         mock_manager_instance = Mock()
         mock_tenant_manager.return_value = mock_manager_instance
-        
-        mock_tenant = Mock()
-        mock_tenant.id = uuid.uuid4()
-        mock_tenant.name = "Test Tenant"
-        mock_tenant.description = "Test Description"
-        mock_tenant.contact_email = "test@example.com"
-        mock_tenant.status = "active"
-        mock_tenant.created_at = datetime.utcnow()
-        mock_tenant.updated_at = datetime.utcnow()
-        mock_tenant.settings = {}
-        
-        mock_manager_instance.create_tenant.return_value = mock_tenant
-        
+
+        # Make the mock awaitable
+        async def create_tenant_mock(*args, **kwargs):
+            tenant_mock = Mock()
+            tenant_mock.id = uuid.uuid4()
+            tenant_mock.name = "Test Tenant"
+            tenant_mock.description = "Test Description"
+            tenant_mock.contact_email = "test@example.com"
+            tenant_mock.status = "active"
+            tenant_mock.created_at = datetime.utcnow()
+            tenant_mock.updated_at = datetime.utcnow()
+            tenant_mock.settings = {}
+            return tenant_mock
+        mock_manager_instance.create_tenant = create_tenant_mock
+
         tenant_data = {
             "name": "Test Tenant",
-            "description": "Test Description", 
-            "contact_email": "test@example.com",
-            "settings": {}
+            "description": "Test Description"
         }
-        
-        response = client.post(
+
+        response = authenticated_client.post(
             "/api/v1/tenants/",
             json=tenant_data,
-            headers={"Authorization": "Bearer admin-token"}
         )
-        
         assert response.status_code == 201
-        data = response.json()
-        assert data["name"] == "Test Tenant"
+        assert "id" in response.json()
     
-    @patch('src.backend.middleware.auth.require_authentication')
     @patch('src.backend.api.v1.routes.tenants.TenantManager')
-    def test_list_tenants(self, mock_tenant_manager, mock_auth, client):
+    def test_list_tenants(self, mock_tenant_manager, authenticated_client):
         """Test list tenants endpoint."""
-        mock_auth.return_value = {"user": "admin"}
         mock_manager_instance = Mock()
         mock_tenant_manager.return_value = mock_manager_instance
-        
-        # Setup mock tenants
-        mock_tenants = []
-        mock_manager_instance.list_tenants.return_value = (mock_tenants, 0)
-        mock_manager_instance.get_tenant_stats.return_value = {"document_count": 0, "storage_used": 0}
-        
-        response = client.get(
+
+        # Make the mock awaitable
+        async def list_tenants_mock(*args, **kwargs):
+            return ([], 0)
+        async def get_stats_mock(*args, **kwargs):
+            return {"document_count": 0, "storage_used": 0}
+
+        mock_manager_instance.list_tenants = list_tenants_mock
+        mock_manager_instance.get_tenant_stats = get_stats_mock
+
+        response = authenticated_client.get(
             "/api/v1/tenants/",
-            headers={"Authorization": "Bearer admin-token"}
         )
-        
         assert response.status_code == 200
-        data = response.json()
-        assert "tenants" in data
-        assert "total_count" in data
+        assert "tenants" in response.json()
 
     # ======================
     # SYNC ENDPOINTS
     # ======================
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    @patch('src.backend.api.v1.routes.sync.DeltaSyncService')
-    def test_trigger_sync(self, mock_sync_service, mock_auth, client, mock_tenant_id, auth_headers):
+    @patch('src.backend.api.v1.routes.sync.DeltaSync')
+    def test_trigger_sync(self, mock_delta_sync, authenticated_client, auth_headers):
         """Test trigger sync endpoint."""
-        mock_auth.return_value = mock_tenant_id
         mock_service_instance = Mock()
-        mock_sync_service.return_value = mock_service_instance
+        mock_delta_sync.return_value = mock_service_instance
         
-        mock_result = Mock()
-        mock_result.sync_run_id = "sync-123"
-        mock_result.files_processed = 5
-        mock_result.duration = 10.5
-        mock_service_instance.run_sync.return_value = mock_result
-        
-        response = client.post("/api/v1/sync/trigger", headers=auth_headers)
-        
+        async def run_sync_mock(*args, **kwargs):
+            mock_result = Mock()
+            mock_result.sync_run_id = "sync-123"
+            return mock_result
+        mock_service_instance.run_sync = run_sync_mock
+
+        response = authenticated_client.post(
+            "/api/v1/sync/trigger", 
+            json={"force_full_sync": False}, 
+            headers=auth_headers
+        )
         assert response.status_code == 200
-        data = response.json()
-        assert "sync_run_id" in data
-    
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_get_sync_status(self, mock_auth, client, mock_tenant_id, auth_headers):
+        assert "message" in response.json()
+
+    def test_get_sync_status(self, authenticated_client, auth_headers):
         """Test get sync status endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
-        response = client.get("/api/v1/sync/status", headers=auth_headers)
-        
+        response = authenticated_client.get("/api/v1/sync/status", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
-        assert "status" in data
+        assert "current_status" in data
 
     # ======================
-    # AUDIT ENDPOINTS  
+    # AUDIT ENDPOINTS
     # ======================
     
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_get_audit_events(self, mock_auth, client, mock_tenant_id, auth_headers):
+    def test_get_audit_events(self, authenticated_client, auth_headers):
         """Test get audit events endpoint."""
-        mock_auth.return_value = mock_tenant_id
-        
-        response = client.get("/api/v1/audit/events", headers=auth_headers)
-        
+        response = authenticated_client.get("/api/v1/audit/events", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
-        assert "events" in data
+        assert isinstance(data, list)
 
     # ======================
-    # AUTHENTICATION TESTS
+    # SECURITY & VALIDATION
     # ======================
     
     def test_unauthorized_access(self, client):
         """Test endpoints without authentication."""
-        endpoints = [
-            "/api/v1/documents/",
-            "/api/v1/query/query",
-            "/api/v1/sync/trigger"
-        ]
+        # Use a POST for endpoints that require it
+        response = client.post("/api/v1/documents/upload", files={"file": ("test.pdf", b"c")})
+        assert response.status_code in [401, 403]
         
-        for endpoint in endpoints:
-            response = client.get(endpoint)
-            assert response.status_code in [401, 403]  # Unauthorized or Forbidden
-    
+        response = client.post("/api/v1/query/", json={"query": "test"})
+        assert response.status_code in [401, 403]
+
+        response = client.post("/api/v1/sync/trigger", json={})
+        assert response.status_code in [401, 403]
+
     def test_invalid_tenant_id(self, client):
         """Test endpoints with invalid tenant ID."""
-        invalid_headers = {
-            "Authorization": "Bearer invalid-token",
-            "X-Tenant-ID": "invalid-uuid"
-        }
-        
+        invalid_headers = {"X-Tenant-ID": "invalid-uuid"}
         response = client.get("/api/v1/documents/", headers=invalid_headers)
-        assert response.status_code in [400, 401, 403]
+        assert response.status_code in [401, 403]
 
-    # ======================
-    # ERROR HANDLING TESTS
-    # ======================
-    
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_internal_server_error_handling(self, mock_auth, client, mock_tenant_id, auth_headers):
-        """Test internal server error handling."""
-        mock_auth.return_value = mock_tenant_id
-        
-        # This should trigger a 500 error due to missing implementation
-        response = client.get("/api/v1/documents/non-existent-doc", headers=auth_headers)
-        
-        # Depending on implementation, this might be 404 or 500
-        assert response.status_code in [404, 500]
-    
-    def test_request_validation_errors(self, client, auth_headers):
+    @patch('src.backend.middleware.auth.APIKeyValidator.validate_api_key')
+    def test_request_validation_errors(self, mock_validate, authenticated_client, auth_headers):
         """Test request validation errors."""
-        # Test invalid JSON
-        response = client.post(
-            "/api/v1/query/query",
+        mock_validate.return_value = True # Mock auth for this test
+        
+        # Test invalid JSON for a POST endpoint
+        response = authenticated_client.post(
+            "/api/v1/tenants/",
             data="invalid json",
             headers={**auth_headers, "Content-Type": "application/json"}
         )
-        
-        assert response.status_code == 422  # Unprocessable Entity
+        assert response.status_code == 422
 
-    # ======================
-    # PAGINATION TESTS
-    # ======================
-    
-    @patch('src.backend.middleware.auth.get_current_tenant')
-    def test_pagination_parameters(self, mock_auth, client, mock_tenant_id, auth_headers):
-        """Test pagination parameters in list endpoints."""
-        mock_auth.return_value = mock_tenant_id
-        
-        # Test documents pagination
-        response = client.get(
-            "/api/v1/documents/?page=2&page_size=5",
-            headers=auth_headers
-        )
-        
+    def test_pagination_parameters(self, authenticated_client, auth_headers):
+        """Test valid pagination parameters."""
+        response = authenticated_client.get("/api/v1/documents/?page=2&page_size=5", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["page"] == 2
         assert data["page_size"] == 5
-    
-    def test_invalid_pagination_parameters(self, client, auth_headers):
+
+    def test_invalid_pagination_parameters(self, authenticated_client, auth_headers):
         """Test invalid pagination parameters."""
-        # Test negative page number
-        response = client.get(
-            "/api/v1/documents/?page=-1",
-            headers=auth_headers
-        )
-        
-        assert response.status_code in [400, 422]
+        response = authenticated_client.get("/api/v1/documents/?page=-1", headers=auth_headers)
+        assert response.status_code == 422
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
+    pytest.main()

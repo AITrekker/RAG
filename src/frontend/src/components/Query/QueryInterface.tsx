@@ -42,6 +42,12 @@ export const QueryInterface: React.FC<QueryInterfaceProps> = ({
     
     if (!query.trim() || isProcessing) return;
     
+    // Client-side validation for minimum query length
+    if (query.trim().length < 3) {
+      setError('Query must be at least 3 characters long');
+      return;
+    }
+    
     setIsProcessing(true);
     setError(null);
     setResult(null);
@@ -59,26 +65,38 @@ export const QueryInterface: React.FC<QueryInterfaceProps> = ({
           rerank: true
         });
         
-        // Convert API response to component format
+        // Convert API response to component format with proper fallbacks
         const result: QueryResult = {
-          id: apiResponse.query_id,
+          id: (apiResponse as any).query_id || `query_${Date.now()}`, // Generate ID if missing
           answer: apiResponse.answer,
-          sources: apiResponse.sources.map(source => ({
-            id: source.document_id,
-            filename: source.filename,
-            chunk_text: source.chunk_text,
+          sources: (apiResponse.sources || []).map((source: any) => ({
+            id: source.document_id || source.id || `source_${Math.random()}`,
+            filename: source.filename || 'Unknown Document',
+            chunk_text: source.chunk_text || source.text || '',
             page: source.page_number,
-            confidence: source.confidence_score
+            confidence: source.confidence_score || source.score
           })),
           query: apiResponse.query,
-          timestamp: apiResponse.timestamp,
+          timestamp: (apiResponse as any).timestamp || new Date().toISOString(), // Generate timestamp if missing
           processing_time: apiResponse.processing_time
         };
         
         setResult(result);
       }
     } catch (err: any) {
-      setError(err.error || err.message || 'An error occurred while processing your query');
+      console.error('Query error:', err);
+      // Better error handling for validation errors
+      if (err.status_code === 422) {
+        // Handle validation errors more gracefully
+        const errorDetail = err.error;
+        if (typeof errorDetail === 'string' && errorDetail.includes('at least 3 characters')) {
+          setError('Query must be at least 3 characters long');
+        } else {
+          setError('Invalid query format. Please check your input and try again.');
+        }
+      } else {
+        setError(err.error || err.message || 'An error occurred while processing your query');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -137,13 +155,18 @@ export const QueryInterface: React.FC<QueryInterfaceProps> = ({
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-500">
               Press Enter to search, Shift+Enter for new line
+              {query.trim() && query.trim().length < 3 && (
+                <span className="text-red-500 ml-2">
+                  (Minimum 3 characters required)
+                </span>
+              )}
             </div>
             <button
               type="submit"
-              disabled={!query.trim() || isProcessing}
+              disabled={!query.trim() || query.trim().length < 3 || isProcessing}
                              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                style={{
-                 backgroundColor: query.trim() && !isProcessing ? primaryColor : undefined
+                 backgroundColor: query.trim() && query.trim().length >= 3 && !isProcessing ? primaryColor : undefined
                }}
             >
               {isProcessing ? (

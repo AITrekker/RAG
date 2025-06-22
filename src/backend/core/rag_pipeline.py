@@ -62,11 +62,14 @@ class RAGPipeline:
             retrieved_chunks = await self._retrieve_context(query, tenant_id)
             if not retrieved_chunks:
                 logger.warning(f"No relevant context found for query: '{query}'")
+                processing_time = time.time() - start_time
                 return RAGResponse(
                     answer="I could not find any relevant information in your documents to answer this question.",
                     sources=[],
                     query=query,
-                    confidence=0.0
+                    confidence=0.0,
+                    processing_time=processing_time,
+                    llm_metadata=None
                 )
         except Exception as e:
             logger.error(f"Error during context retrieval for tenant '{tenant_id}': {e}", exc_info=True)
@@ -115,7 +118,7 @@ class RAGPipeline:
             return []
 
         logger.info(f"Searching vector store for tenant '{tenant_id}'...")
-        vector_store = self.vector_store_manager.get_vector_store(tenant_id)
+        vector_store = self.vector_store_manager.get_collection_for_tenant(tenant_id)
         
         search_results = vector_store.query(
             query_embeddings=query_embedding.tolist(),

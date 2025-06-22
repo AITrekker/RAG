@@ -178,7 +178,18 @@ class VectorStoreManager:
         if not tenant_id:
             raise TenantSecurityError("No tenant ID provided for vector store operation.")
         
-        vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
+        try:
+            vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
+        except ValueError as e:
+            if "not registered" in str(e):
+                # Auto-register tenant with default settings
+                from ..core.tenant_isolation import TenantTier
+                logger.info(f"Auto-registering tenant '{tenant_id}' for vector store access")
+                self.isolation_strategy.register_tenant(tenant_id, TenantTier.BASIC)
+                vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
+            else:
+                raise
+        
         scoped_collection_name = f"{vector_config['collection_prefix']}{collection_name}"
         
         return create_tenant_collection(self.client, tenant_id, scoped_collection_name)

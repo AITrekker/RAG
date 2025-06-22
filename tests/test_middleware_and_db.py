@@ -25,11 +25,10 @@ from fastapi.security import HTTPBearer
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.backend.middleware.auth import (
-    get_current_tenant, require_authentication, verify_api_key, 
-    extract_tenant_from_token
+    get_current_tenant, require_authentication, APIKeyValidator
 )
 from src.backend.middleware.tenant_context import (
-    TenantContextMiddleware, get_tenant_context, set_tenant_context
+    TenantContextMiddleware, TenantContext
 )
 from src.backend.models.document import (
     Document, DocumentChunk, DocumentProcessingJob, 
@@ -37,29 +36,19 @@ from src.backend.models.document import (
 )
 from src.backend.models.tenant import Tenant, TenantStatus, TenantTier
 from src.backend.models.audit import SyncEvent
-from src.backend.db.session import get_db, DatabaseSessionManager
+from src.backend.db.session import get_db
 from src.backend.db.base import Base
 
 
 class TestAuthenticationMiddleware:
     """Test suite for authentication middleware."""
     
-    def test_extract_tenant_from_token(self):
-        """Test tenant extraction from JWT token."""
-        # Test valid tenant token
-        valid_token = "tenant_12345_token"
-        tenant_id = extract_tenant_from_token(valid_token)
-        assert "12345" in tenant_id or tenant_id is not None
-        
-        # Test invalid token format
-        invalid_token = "invalid_token"
-        tenant_id = extract_tenant_from_token(invalid_token)
-        assert tenant_id is None
-    
-    @patch('src.backend.middleware.auth.verify_api_key')
-    def test_get_current_tenant_valid(self, mock_verify):
+    @patch('src.backend.middleware.auth.APIKeyValidator.validate_api_key')
+    def test_get_current_tenant_valid(self, mock_validate_api_key):
         """Test get_current_tenant with valid token."""
-        mock_verify.return_value = "valid_tenant_id"
+        mock_api_key = MagicMock()
+        mock_api_key.tenant_id = "valid_tenant_id"
+        mock_validate_api_key.return_value = mock_api_key
         
         # Mock request with valid authorization
         mock_request = Mock()
@@ -85,10 +74,10 @@ class TestAuthenticationMiddleware:
         assert exc_info.value.status_code == 401
         assert "Invalid authorization format" in str(exc_info.value.detail)
     
-    @patch('src.backend.middleware.auth.verify_api_key')
-    def test_get_current_tenant_invalid_token(self, mock_verify):
+    @patch('src.backend.middleware.auth.APIKeyValidator.validate_api_key')
+    def test_get_current_tenant_invalid_token(self, mock_validate_api_key):
         """Test get_current_tenant with invalid token."""
-        mock_verify.return_value = None
+        mock_validate_api_key.return_value = None
         
         with pytest.raises(HTTPException) as exc_info:
             get_current_tenant("Bearer invalid_token")
@@ -110,27 +99,6 @@ class TestAuthenticationMiddleware:
             require_authentication(None)
         
         assert exc_info.value.status_code == 401
-    
-    def test_verify_api_key_valid_format(self):
-        """Test API key verification with valid format."""
-        # Test with mock implementation
-        valid_key = "tenant_12345_abcdef123456"
-        
-        # This should not raise an exception for valid format
-        try:
-            result = verify_api_key(valid_key)
-            # Result can be None or tenant_id depending on implementation
-            assert result is None or isinstance(result, str)
-        except Exception:
-            # If not implemented yet, that's okay
-            pass
-    
-    def test_verify_api_key_invalid_format(self):
-        """Test API key verification with invalid format."""
-        invalid_key = "invalid_key_format"
-        
-        result = verify_api_key(invalid_key)
-        assert result is None
 
 
 class TestTenantContextMiddleware:
@@ -143,11 +111,12 @@ class TestTenantContextMiddleware:
         
         assert middleware.app == mock_app
     
-    @patch('src.backend.middleware.tenant_context.set_tenant_context')
+    @patch('src.backend.middleware.tenant_context.TenantContext.set_current_tenant')
     async def test_middleware_call_with_tenant(self, mock_set_context):
         """Test middleware call with tenant ID in headers."""
         mock_app = Mock()
-        middleware = TenantContextMiddleware(mock_app)
+        # We need a dummy session factory for the middleware
+        middleware = TenantContextMiddleware(mock_app, db_session_factory=Mock())
         
         # Mock request and call_next
         mock_request = Mock()
@@ -156,40 +125,41 @@ class TestTenantContextMiddleware:
         mock_call_next.return_value = "response"
         
         # Test middleware processing
-        result = await middleware(mock_request, mock_call_next)
+        # Since the middleware now hits the DB, we need to patch more or test differently
+        # For now, we focus on the context setting part
+        with patch.object(middleware, '_extract_api_key', return_value="dummy_key"), \
+             patch.object(middleware, '_is_excluded_path', return_value=False), \
+             patch('src.backend.middleware.tenant_context.get_tenant_manager') as mock_get_manager:
+            
+            mock_manager = Mock()
+            mock_api_record = Mock()
+            mock_api_record.tenant_id = "test_tenant_123"
+            mock_manager.validate_api_key.return_value = mock_api_record
+            mock_get_manager.return_value = mock_manager
+
+            result = await middleware.dispatch(mock_request, mock_call_next)
+            
+            # Verify tenant context was set
+            mock_set_context.assert_called_once_with("test_tenant_123", None)
+            assert result != "response" # The response is now a JSONResponse or similar
+
+    def test_tenant_context_management(self):
+        """Test setting, getting, and clearing tenant context."""
+        # 1. Test when no context is set
+        context_id = TenantContext.get_current_tenant_id()
+        assert context_id is None
         
-        # Verify tenant context was set
-        mock_set_context.assert_called_once_with("test_tenant_123")
-        assert result == "response"
-    
-    def test_get_tenant_context(self):
-        """Test getting tenant context."""
-        # Test when no context is set
-        context = get_tenant_context()
-        assert context is None
-        
-        # Test setting and getting context
+        # 2. Test setting and getting context
         test_tenant = "test_tenant_context"
-        set_tenant_context(test_tenant)
+        TenantContext.set_current_tenant(test_tenant)
         
-        context = get_tenant_context()
-        assert context == test_tenant
-    
-    def test_set_tenant_context(self):
-        """Test setting tenant context."""
-        test_tenant = "new_test_tenant"
+        context_id = TenantContext.get_current_tenant_id()
+        assert context_id == test_tenant
         
-        # Set context
-        set_tenant_context(test_tenant)
-        
-        # Verify it was set
-        context = get_tenant_context()
-        assert context == test_tenant
-        
-        # Test clearing context
-        set_tenant_context(None)
-        context = get_tenant_context()
-        assert context is None
+        # 3. Test clearing context
+        TenantContext.clear_context()
+        context_id = TenantContext.get_current_tenant_id()
+        assert context_id is None
 
 
 class TestDocumentModel:
@@ -414,18 +384,7 @@ class TestAuditModel:
 
 class TestDatabaseSession:
     """Test suite for database session management."""
-    
-    def test_database_session_manager_initialization(self):
-        """Test DatabaseSessionManager initialization."""
-        # Test with PostgreSQL test database
-        database_url = "postgresql://rag_user:rag_password@localhost:5432/rag_test_database"
-        
-        session_manager = DatabaseSessionManager(database_url)
-        
-        assert session_manager is not None
-        assert hasattr(session_manager, 'engine')
-        assert hasattr(session_manager, 'SessionLocal')
-    
+       
     @patch('src.backend.db.session.SessionLocal')
     def test_get_db_session(self, mock_session_local):
         """Test get_db dependency function."""

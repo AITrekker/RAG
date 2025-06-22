@@ -204,4 +204,56 @@ class DocumentListResponse(BaseModel):
 class DocumentUpdateRequest(BaseModel):
     """Request model for updating document metadata."""
     metadata: Optional[Dict[str, Any]] = Field(None, description="Updated metadata")
-    tags: Optional[List[str]] = Field(None, description="Updated tags") 
+    tags: Optional[List[str]] = Field(None, description="Updated tags")
+
+
+# Sync-related models needed by sync.py
+class SyncStatusResponse(BaseModel):
+    """Response model for sync status."""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    sync_enabled: bool = Field(..., description="Whether sync is enabled")
+    last_sync_time: Optional[datetime] = Field(None, description="Last sync timestamp")
+    last_sync_success: Optional[bool] = Field(None, description="Whether last sync was successful")
+    sync_interval_minutes: int = Field(..., description="Sync interval in minutes")
+    file_watcher_active: bool = Field(..., description="Whether file watcher is active")
+    pending_changes: int = Field(default=0, description="Number of pending changes")
+    current_status: str = Field(..., description="Current sync status")
+
+
+class SyncTriggerRequest(BaseModel):
+    """Request model for triggering sync."""
+    force_full_sync: bool = Field(default=False, description="Whether to force full sync")
+
+
+class SyncConfigRequest(BaseModel):
+    """Request model for sync configuration."""
+    sync_interval_minutes: int = Field(..., ge=1, description="Sync interval in minutes")
+    auto_sync_enabled: bool = Field(..., description="Whether auto sync is enabled")
+    ignore_patterns: Optional[List[str]] = Field(None, description="File patterns to ignore")
+    webhooks: Optional[List['WebhookConfigRequest']] = Field(None, description="Webhook configurations")
+
+
+class WebhookConfigRequest(BaseModel):
+    """Request model for webhook configuration."""
+    url: str = Field(..., description="Webhook URL")
+    secret: Optional[str] = Field(None, description="Webhook secret")
+    events: List[str] = Field(..., description="Events to subscribe to")
+    timeout: int = Field(default=30, description="Timeout in seconds")
+    retry_count: int = Field(default=3, description="Number of retries")
+
+
+class SyncMetricsResponse(BaseModel):
+    """Response model for sync metrics."""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    total_syncs: int = Field(..., description="Total number of syncs")
+    successful_syncs: int = Field(..., description="Number of successful syncs")
+    failed_syncs: int = Field(..., description="Number of failed syncs")
+    average_duration: float = Field(..., description="Average sync duration in seconds")
+    total_files_processed: int = Field(..., description="Total files processed")
+    total_errors: int = Field(..., description="Total number of errors")
+    last_sync_time: Optional[datetime] = Field(None, description="Last sync timestamp")
+    success_rate: float = Field(..., description="Success rate percentage")
+
+
+# Update forward references
+SyncConfigRequest.model_rebuild() 

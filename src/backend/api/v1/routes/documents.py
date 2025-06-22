@@ -18,6 +18,7 @@ from src.backend.db.session import get_db
 from src.backend.middleware.auth import get_current_tenant, require_authentication
 from src.backend.core.document_ingestion import DocumentIngestionPipeline
 from src.backend.utils.tenant_filesystem import TenantFileSystemManager
+from src.backend.utils.vector_store import get_vector_store_manager
 from src.backend.models.api_models import (
     DocumentResponse, DocumentListResponse, DocumentUploadResponse,
     DocumentMetadata, DocumentUpdateRequest
@@ -35,10 +36,16 @@ def get_filesystem_manager() -> TenantFileSystemManager:
 # Dependency to get document ingestion pipeline
 def get_ingestion_pipeline(
     tenant_id: str = Security(get_current_tenant),
-    db: Session = Depends(get_db)
+    # db: Session = Depends(get_db) - This is no longer needed at the pipeline level
 ) -> DocumentIngestionPipeline:
     """Dependency to get document ingestion pipeline."""
-    return DocumentIngestionPipeline(tenant_id=tenant_id, db=db)
+    # The pipeline now gets the vector_store_manager from a global instance
+    # And other managers are initialized within its constructor.
+    # The `db` session is passed to the pipeline's methods, not its constructor.
+    return DocumentIngestionPipeline(
+        tenant_id=tenant_id,
+        vector_store_manager=get_vector_store_manager()
+    )
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)

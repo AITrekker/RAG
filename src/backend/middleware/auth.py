@@ -1,341 +1,593 @@
 """
-Authentication and Authorization for the Enterprise RAG Platform API.
+API Authentication and Security Middleware
 
-This module provides the core security middleware for the FastAPI application.
-It handles API key-based authentication, ensuring that incoming requests are
-valid and associated with a specific tenant.
-
-Key features include:
-- API key extraction from request headers (`X-API-Key` or `Authorization: Bearer`).
-- Secure validation of API keys against a stored (hashed) collection.
-- A simple, in-memory rate-limiting mechanism to prevent abuse.
-- Dependency injection functions (`require_authentication`, `require_permission`)
-  to easily protect API endpoints.
-- Management of a user context dictionary that is passed to downstream
-  route handlers.
+This module provides comprehensive API authentication, rate limiting,
+and security features for the Enterprise RAG Platform.
 """
 
-from fastapi import Request, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
-from typing import Optional, Dict, Any
-import time
 import hashlib
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
+import secrets
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, Tuple
+from functools import wraps
+import redis
+import json
 
+from fastapi import HTTPException, Request, Response, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security.utils import get_authorization_scheme_param
+from sqlalchemy.orm import Session
+
+from ..models.tenant import TenantApiKey, Tenant
+from ..db.session import get_db
 from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Security scheme for API keys
-security = HTTPBearer(auto_error=False)
 
-# Rate limiting storage (in production, use Redis)
-rate_limit_storage: Dict[str, deque] = defaultdict(deque)
-
-# API key storage (in production, use database)
-# Format: {api_key_hash: {tenant_id, permissions, created_at, last_used}}
-API_KEYS = {
-    # Example API keys (hashed)
-    hashlib.sha256("dev-api-key-123".encode()).hexdigest(): {
-        "tenant_id": "default",
-        "permissions": ["read", "write"],
-        "created_at": datetime.utcnow(),
-        "last_used": datetime.utcnow(),
-        "name": "Development Key"
+class SecurityConfig:
+    """Security configuration constants."""
+    
+    # Rate limiting defaults
+    DEFAULT_RATE_LIMIT_PER_MINUTE = 60
+    DEFAULT_RATE_LIMIT_PER_HOUR = 1000
+    DEFAULT_RATE_LIMIT_PER_DAY = 10000
+    
+    # API key settings
+    API_KEY_LENGTH = 32
+    API_KEY_PREFIX_LENGTH = 8
+    
+    # Security headers
+    SECURITY_HEADERS = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
     }
-}
 
 
-class RateLimitExceeded(HTTPException):
-    """Custom exception for rate limit exceeded."""
-    def __init__(self, detail: str = "Rate limit exceeded"):
-        super().__init__(status_code=429, detail=detail)
-
-
-class AuthenticationError(HTTPException):
-    """Custom exception for authentication errors."""
-    def __init__(self, detail: str = "Authentication failed"):
-        super().__init__(status_code=401, detail=detail)
-
-
-def hash_api_key(api_key: str) -> str:
-    """Hash an API key for secure storage."""
-    return hashlib.sha256(api_key.encode()).hexdigest()
-
-
-def validate_api_key(api_key: str) -> Optional[Dict[str, Any]]:
-    """Validate an API key and return associated metadata."""
-    if not api_key:
-        return None
+class RateLimiter:
+    """Redis-based rate limiter with tenant-specific limits."""
     
-    api_key_hash = hash_api_key(api_key)
-    key_info = API_KEYS.get(api_key_hash)
+    def __init__(self):
+        self.redis_client = None
+        self.fallback_cache = {}  # In-memory fallback
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        
+        # Initialize Redis connection
+        if settings.redis_url:
+            try:
+                import redis
+                self.redis_client = redis.from_url(
+                    settings.redis_url,
+                    password=settings.redis_password,
+                    decode_responses=True
+                )
+                # Test connection
+                self.redis_client.ping()
+                self.logger.info("Connected to Redis for rate limiting")
+            except Exception as e:
+                self.logger.warning(f"Redis connection failed, using in-memory fallback: {e}")
+                self.redis_client = None
     
-    if key_info:
-        # Update last used timestamp
-        key_info["last_used"] = datetime.utcnow()
-        logger.info(f"Valid API key used for tenant: {key_info['tenant_id']}")
-        return key_info
+    def _get_rate_limit_key(self, identifier: str, window: str) -> str:
+        """Generate rate limit key for Redis."""
+        return f"rate_limit:{identifier}:{window}"
     
-    logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
-    return None
+    def _get_current_window(self, window_type: str) -> str:
+        """Get current time window identifier."""
+        now = datetime.now(timezone.utc)
+        
+        if window_type == "minute":
+            return now.strftime("%Y%m%d%H%M")
+        elif window_type == "hour":
+            return now.strftime("%Y%m%d%H")
+        elif window_type == "day":
+            return now.strftime("%Y%m%d")
+        else:
+            raise ValueError(f"Invalid window type: {window_type}")
+    
+    def check_rate_limit(
+        self, 
+        identifier: str, 
+        limits: Dict[str, int],
+        increment: bool = True
+    ) -> Tuple[bool, Dict[str, int]]:
+        """
+        Check rate limits for an identifier.
+        
+        Args:
+            identifier: Unique identifier (e.g., API key, IP address)
+            limits: Dict with 'minute', 'hour', 'day' limits
+            increment: Whether to increment counters
+            
+        Returns:
+            Tuple of (allowed, current_counts)
+        """
+        current_counts = {}
+        
+        for window_type, limit in limits.items():
+            if limit <= 0:
+                continue
+                
+            window = self._get_current_window(window_type)
+            key = self._get_rate_limit_key(identifier, f"{window_type}:{window}")
+            
+            # Get current count
+            if self.redis_client:
+                try:
+                    current = self.redis_client.get(key)
+                    current_count = int(current) if current else 0
+                except Exception as e:
+                    self.logger.error(f"Redis error: {e}")
+                    # Fallback to in-memory
+                    current_count = self.fallback_cache.get(key, 0)
+            else:
+                current_count = self.fallback_cache.get(key, 0)
+            
+            current_counts[window_type] = current_count
+            
+            # Check limit
+            if current_count >= limit:
+                return False, current_counts
+            
+            # Increment if requested
+            if increment:
+                if self.redis_client:
+                    try:
+                        self.redis_client.incr(key)
+                        # Set expiration based on window type
+                        if window_type == "minute":
+                            self.redis_client.expire(key, 120)  # 2 minutes
+                        elif window_type == "hour":
+                            self.redis_client.expire(key, 7200)  # 2 hours
+                        elif window_type == "day":
+                            self.redis_client.expire(key, 172800)  # 2 days
+                    except Exception as e:
+                        self.logger.error(f"Redis error: {e}")
+                        self.fallback_cache[key] = current_count + 1
+                else:
+                    self.fallback_cache[key] = current_count + 1
+        
+        return True, current_counts
 
 
-def check_rate_limit(identifier: str, max_requests: int = 100, window_minutes: int = 60) -> bool:
+class APIKeyValidator:
+    """Validates API keys and manages authentication."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        
+    def generate_api_key(self) -> Tuple[str, str, str]:
+        """
+        Generate a new API key.
+        
+        Returns:
+            Tuple of (full_key, key_hash, key_prefix)
+        """
+        # Generate random key
+        key_bytes = secrets.token_bytes(SecurityConfig.API_KEY_LENGTH)
+        full_key = key_bytes.hex()
+        
+        # Create prefix for identification
+        key_prefix = full_key[:SecurityConfig.API_KEY_PREFIX_LENGTH]
+        
+        # Hash for storage
+        key_hash = hashlib.sha256(full_key.encode()).hexdigest()
+        
+        return full_key, key_hash, key_prefix
+    
+    def validate_api_key(self, api_key: str, db: Session) -> Optional[TenantApiKey]:
+        """
+        Validate an API key and return the associated tenant key record.
+        """
+        if not api_key or len(api_key) < SecurityConfig.API_KEY_PREFIX_LENGTH:
+            return None
+        
+        try:
+            # Hash the provided key
+            key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+            
+            # Look up in database
+            tenant_key = db.query(TenantApiKey).filter(
+                TenantApiKey.key_hash == key_hash,
+                TenantApiKey.is_active == True
+            ).first()
+            
+            if not tenant_key:
+                return None
+            
+            # Check expiration
+            if tenant_key.expires_at and tenant_key.expires_at < datetime.now(timezone.utc):
+                self.logger.warning(f"Expired API key used: {tenant_key.key_prefix}")
+                return None
+            
+            # Update usage statistics
+            tenant_key.last_used_at = datetime.now(timezone.utc)
+            tenant_key.usage_count += 1
+            db.commit()
+            
+            return tenant_key
+            
+        except Exception as e:
+            self.logger.error(f"Error validating API key: {e}")
+            return None
+
+
+class SecurityMiddleware:
+    """Main security middleware for API authentication and protection."""
+    
+    def __init__(self):
+        self.rate_limiter = RateLimiter()
+        self.api_key_validator = APIKeyValidator()
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        
+    async def __call__(self, request: Request, call_next):
+        """Process request through security middleware."""
+        start_time = time.time()
+        
+        # Add security headers to response
+        response = await call_next(request)
+        
+        for header, value in SecurityConfig.SECURITY_HEADERS.items():
+            response.headers[header] = value
+        
+        # Add processing time header
+        process_time = time.time() - start_time
+        response.headers["X-Process-Time"] = str(process_time)
+        
+        return response
+    
+    def authenticate_request(self, request: Request, db: Session) -> Tuple[Optional[str], Optional[TenantApiKey]]:
+        """
+        Authenticate a request and return tenant_id and tenant_key if valid.
+        """
+        # Extract API key from Authorization header
+        authorization = request.headers.get("Authorization")
+        if not authorization:
+            return None, None
+        
+        scheme, credentials = get_authorization_scheme_param(authorization)
+        if scheme.lower() != "bearer":
+            return None, None
+        
+        # Validate API key
+        tenant_key = self.api_key_validator.validate_api_key(credentials, db)
+        if not tenant_key:
+            return None, None
+        
+        # Get tenant information
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key.tenant_id).first()
+        if not tenant or tenant.status != "active":
+            return None, None
+        
+        return tenant.tenant_id, tenant_key
+    
+    def check_rate_limits(self, tenant_key: TenantApiKey, request: Request) -> Tuple[bool, Dict]:
+        """Check rate limits for a tenant API key."""
+        # Get rate limits from tenant or use defaults
+        tenant = tenant_key.tenant  # Assuming relationship is set up
+        
+        limits = {
+            "minute": getattr(tenant, 'rate_limit_per_minute', SecurityConfig.DEFAULT_RATE_LIMIT_PER_MINUTE),
+            "hour": getattr(tenant, 'rate_limit_per_hour', SecurityConfig.DEFAULT_RATE_LIMIT_PER_HOUR),
+            "day": getattr(tenant, 'rate_limit_per_day', SecurityConfig.DEFAULT_RATE_LIMIT_PER_DAY)
+        }
+        
+        # Use API key as identifier
+        identifier = f"api_key:{tenant_key.key_prefix}"
+        
+        return self.rate_limiter.check_rate_limit(identifier, limits)
+    
+    def validate_request_size(self, request: Request) -> bool:
+        """Validate request size limits."""
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                size = int(content_length)
+                max_size = settings.max_file_size_mb * 1024 * 1024  # Convert to bytes
+                return size <= max_size
+            except ValueError:
+                return False
+        return True
+
+
+# Global security middleware instance
+security_middleware = SecurityMiddleware()
+
+
+def require_api_key(scopes: List[str] = None):
     """
-    Check if the request is within rate limits.
+    Decorator to require API key authentication for endpoints.
     
     Args:
-        identifier: Unique identifier (API key hash, IP, etc.)
-        max_requests: Maximum requests allowed in the window
-        window_minutes: Time window in minutes
-    
-    Returns:
-        True if within limits, False if exceeded
+        scopes: List of required scopes for the endpoint
     """
-    now = time.time()
-    window_start = now - (window_minutes * 60)
-    
-    # Get or create request queue for this identifier
-    requests = rate_limit_storage[identifier]
-    
-    # Remove old requests outside the window
-    while requests and requests[0] < window_start:
-        requests.popleft()
-    
-    # Check if we're within limits
-    if len(requests) >= max_requests:
-        return False
-    
-    # Add current request
-    requests.append(now)
-    
-    return True
-
-
-async def get_api_key_from_header(request: Request) -> Optional[str]:
-    """Extract API key from request headers."""
-    # Check X-API-Key header first
-    api_key = request.headers.get("X-API-Key")
-    if api_key:
-        return api_key
-    
-    # Check Authorization header (Bearer token)
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        return auth_header[7:]  # Remove "Bearer " prefix
-    
-    return None
-
-
-async def authenticate_request(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
-) -> Dict[str, Any]:
-    """
-    Authenticate API request and return user context.
-    
-    This dependency can be used to protect endpoints that require authentication.
-    """
-    # Skip authentication for health checks, documentation, and OPTIONS requests (CORS preflight)
-    if (request.url.path in ["/", "/health", "/api/v1/health", "/docs", "/redoc", "/openapi.json"] or 
-        request.method == "OPTIONS"):
-        return {"authenticated": False, "tenant_id": None}
-    
-    # Get API key from headers
-    api_key = await get_api_key_from_header(request)
-    
-    # If no API key provided, check if endpoint allows anonymous access
-    if not api_key:
-        # For development, allow some endpoints without authentication
-        if settings.debug and request.url.path.startswith("/api/v1/query"):
-            return {
-                "authenticated": False,
-                "tenant_id": "default",
-                "permissions": ["read"]
-            }
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Extract request and db from function arguments
+            request = kwargs.get('request') or args[0] if args else None
+            db = kwargs.get('db') or next(get_db())
+            
+            if not request:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Request object not found"
+                )
+            
+            # Authenticate request
+            tenant_id, tenant_key = security_middleware.authenticate_request(request, db)
+            
+            if not tenant_id or not tenant_key:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or missing API key",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+            
+            # Check scopes if specified
+            if scopes:
+                key_scopes = tenant_key.scopes or []
+                if not any(scope in key_scopes for scope in scopes):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Insufficient permissions"
+                    )
+            
+            # Check rate limits
+            allowed, current_counts = security_middleware.check_rate_limits(tenant_key, request)
+            
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded",
+                    headers={
+                        "X-RateLimit-Limit-Minute": str(current_counts.get('minute', 0)),
+                        "X-RateLimit-Limit-Hour": str(current_counts.get('hour', 0)),
+                        "X-RateLimit-Limit-Day": str(current_counts.get('day', 0))
+                    }
+                )
+            
+            # Validate request size
+            if not security_middleware.validate_request_size(request):
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Request too large"
+                )
+            
+            # Add tenant context to kwargs
+            kwargs['tenant_id'] = tenant_id
+            kwargs['tenant_key'] = tenant_key
+            
+            return await func(*args, **kwargs)
         
-        raise AuthenticationError("API key required")
-    
-    # Validate API key
-    key_info = validate_api_key(api_key)
-    if not key_info:
-        raise AuthenticationError("Invalid API key")
-    
-    # Check rate limiting
-    api_key_hash = hash_api_key(api_key)
-    if not check_rate_limit(api_key_hash, max_requests=1000, window_minutes=60):
-        logger.warning(f"Rate limit exceeded for API key: {api_key[:10]}...")
-        raise RateLimitExceeded("API rate limit exceeded")
-    
-    # Return authentication context
-    return {
-        "authenticated": True,
-        "tenant_id": key_info["tenant_id"],
-        "permissions": key_info["permissions"],
-        "api_key_name": key_info.get("name", "Unknown"),
-        "api_key_hash": api_key_hash
-    }
+        return wrapper
+    return decorator
 
 
-async def require_authentication(
-    auth_context: Dict[str, Any] = Depends(authenticate_request)
-) -> Dict[str, Any]:
-    """
-    Dependency that requires authentication.
-    
-    Use this for endpoints that must have valid authentication.
-    """
-    if not auth_context.get("authenticated", False):
-        raise AuthenticationError("Authentication required")
-    
-    return auth_context
-
-
-async def require_permission(permission: str):
-    """
-    Dependency factory for permission-based access control.
-    
-    Usage: Depends(require_permission("write"))
-    """
-    async def permission_checker(
-        auth_context: Dict[str, Any] = Depends(require_authentication)
-    ) -> Dict[str, Any]:
-        permissions = auth_context.get("permissions", [])
-        if permission not in permissions:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Permission '{permission}' required"
-            )
-        return auth_context
-    
-    return permission_checker
-
-
-async def get_current_user_context(
-    request: Request,
-    auth_context: Dict[str, Any] = Depends(authenticate_request)
-) -> Dict[str, Any]:
-    """
-    Get current user context with optional authentication.
-    
-    This allows endpoints to work with or without authentication.
-    """
-    # Add request metadata
-    auth_context.update({
-        "ip_address": request.client.host if request.client else "unknown",
-        "user_agent": request.headers.get("User-Agent", "unknown"),
-        "request_id": getattr(request.state, "request_id", "unknown")
-    })
-    
-    return auth_context
-
-
-# Middleware for request logging and security headers
-async def security_middleware(request: Request, call_next):
-    """Security middleware for adding security headers and logging."""
-    
-    # Log request
-    logger.info(
-        f"Request: {request.method} {request.url.path} "
-        f"from {request.client.host if request.client else 'unknown'}"
-    )
-    
-    # Process request
-    response = await call_next(request)
-    
-    # Add security headers
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    
-    if not settings.debug:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    
-    return response
-
-
-# Utility functions for API key management
-def create_api_key(tenant_id: str, name: str, permissions: list) -> str:
+def create_api_key(tenant_id: str, key_name: str, scopes: List[str], db: Session, expires_days: int = None) -> str:
     """
     Create a new API key for a tenant.
     
-    In production, this would be stored in a database.
+    Returns:
+        The full API key (return this to the user only once)
     """
-    import secrets
+    validator = APIKeyValidator()
+    full_key, key_hash, key_prefix = validator.generate_api_key()
     
-    # Generate secure random API key
-    api_key = f"rag_{secrets.token_urlsafe(32)}"
-    api_key_hash = hash_api_key(api_key)
+    # Calculate expiration
+    expires_at = None
+    if expires_days:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
     
-    # Store API key info
-    API_KEYS[api_key_hash] = {
-        "tenant_id": tenant_id,
-        "permissions": permissions,
-        "created_at": datetime.utcnow(),
-        "last_used": None,
-        "name": name
-    }
+    # Get tenant
+    tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+    if not tenant:
+        raise ValueError(f"Tenant {tenant_id} not found")
     
-    logger.info(f"Created API key '{name}' for tenant {tenant_id}")
-    return api_key
+    # Create database record
+    tenant_key = TenantApiKey(
+        tenant_id=tenant.id,
+        key_name=key_name,
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        scopes=scopes,
+        is_active=True,
+        expires_at=expires_at,
+        usage_count=0,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
+    )
+    
+    db.add(tenant_key)
+    db.commit()
+    
+    logger.info(f"Created API key {key_prefix} for tenant {tenant_id}")
+    
+    return full_key
 
 
-def revoke_api_key(api_key: str) -> bool:
-    """
-    Revoke an API key.
-    
-    Returns True if key was found and revoked, False otherwise.
-    """
-    api_key_hash = hash_api_key(api_key)
-    
-    if api_key_hash in API_KEYS:
-        key_info = API_KEYS.pop(api_key_hash)
-        logger.info(f"Revoked API key '{key_info.get('name', 'unknown')}' for tenant {key_info.get('tenant_id')}")
-        return True
-    
-    return False
+def revoke_api_key(key_prefix: str, db: Session) -> bool:
+    """Revoke an API key by its prefix."""
+    try:
+        tenant_key = db.query(TenantApiKey).filter(
+            TenantApiKey.key_prefix == key_prefix
+        ).first()
+        
+        if tenant_key:
+            tenant_key.is_active = False
+            tenant_key.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            logger.info(f"Revoked API key {key_prefix}")
+            return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error revoking API key {key_prefix}: {e}")
+        return False
 
 
-def list_api_keys(tenant_id: str) -> list:
-    """
-    List all API keys for a tenant.
-    
-    Returns list of API key info (without the actual keys).
-    """
-    keys = []
-    for key_hash, key_info in API_KEYS.items():
-        if key_info["tenant_id"] == tenant_id:
-            keys.append({
-                "hash": key_hash[:16] + "...",  # Partial hash for identification
-                "name": key_info["name"],
-                "permissions": key_info["permissions"],
-                "created_at": key_info["created_at"],
-                "last_used": key_info["last_used"]
-            })
-    
-    return keys
+def get_api_usage_stats(tenant_id: str, db: Session, days: int = 30) -> Dict:
+    """Get API usage statistics for a tenant."""
+    try:
+        tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+        if not tenant:
+            return {}
+        
+        # Get API keys
+        api_keys = db.query(TenantApiKey).filter(
+            TenantApiKey.tenant_id == tenant.id
+        ).all()
+        
+        total_usage = sum(key.usage_count for key in api_keys)
+        active_keys = len([key for key in api_keys if key.is_active])
+        
+        return {
+            'tenant_id': tenant_id,
+            'total_api_keys': len(api_keys),
+            'active_api_keys': active_keys,
+            'total_usage_count': total_usage,
+            'api_keys': [
+                {
+                    'key_prefix': key.key_prefix,
+                    'key_name': key.key_name,
+                    'is_active': key.is_active,
+                    'usage_count': key.usage_count,
+                    'last_used_at': key.last_used_at.isoformat() if key.last_used_at else None,
+                    'expires_at': key.expires_at.isoformat() if key.expires_at else None,
+                    'scopes': key.scopes
+                }
+                for key in api_keys
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting API usage stats for tenant {tenant_id}: {e}")
+        return {}
 
 
-async def get_current_tenant(
-    request: Request,
-    auth_context: Dict[str, Any] = Depends(authenticate_request)
-) -> str:
+# FastAPI Security dependencies
+security = HTTPBearer()
+
+
+def get_current_tenant(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """
-    Dependency to get the tenant_id from the authentication context.
-    """
-    # For OPTIONS requests (CORS preflight), return a default tenant
-    if request.method == "OPTIONS":
-        return "default"
+    FastAPI dependency to get current tenant from API key.
     
-    tenant_id = auth_context.get("tenant_id")
-    if not tenant_id:
+    Args:
+        credentials: HTTP Bearer credentials from FastAPI security
+        
+    Returns:
+        Tenant ID string
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    if not credentials or not credentials.credentials:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not determine tenant ID from request.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key",
+            headers={"WWW-Authenticate": "Bearer"}
         )
-    return tenant_id 
+    
+    # Get database session
+    db = next(get_db())
+    
+    try:
+        # Validate API key
+        validator = APIKeyValidator()
+        tenant_key = validator.validate_api_key(credentials.credentials, db)
+        
+        if not tenant_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        # Update last used timestamp
+        tenant_key.last_used_at = datetime.now(timezone.utc)
+        tenant_key.usage_count += 1
+        db.commit()
+        
+        return tenant_key.tenant.tenant_id
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating API key: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service error"
+        )
+    finally:
+        db.close()
+
+
+def require_authentication(credentials: HTTPAuthorizationCredentials = Depends(security)) -> TenantApiKey:
+    """
+    FastAPI dependency to require authentication and return tenant key.
+    
+    Args:
+        credentials: HTTP Bearer credentials from FastAPI security
+        
+    Returns:
+        TenantApiKey object
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Get database session
+    db = next(get_db())
+    
+    try:
+        # Validate API key
+        validator = APIKeyValidator()
+        tenant_key = validator.validate_api_key(credentials.credentials, db)
+        
+        if not tenant_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        # Check if key is expired
+        if tenant_key.expires_at and tenant_key.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key has expired",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        # Update last used timestamp
+        tenant_key.last_used_at = datetime.now(timezone.utc)
+        tenant_key.usage_count += 1
+        db.commit()
+        
+        return tenant_key
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating API key: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service error"
+        )
+    finally:
+        db.close() 

@@ -22,6 +22,13 @@ This directory contains a comprehensive test suite for the Enterprise RAG Platfo
 | `test_auditing.py` | **Audit System Testing** | Audit logging and event tracking |
 | `test_real_rag.py` | **Live System Testing** | Real RAG functionality with actual server |
 
+### 🧪 Standalone API Test Scripts (Legacy)
+
+The following scripts were used for direct API testing against a running server but have since been deprecated in favor of the `pytest` suite in `test_api_endpoints.py`. They are preserved here for historical context but are no longer maintained.
+
+- **`test_all_api_endpoints.py`**: A comprehensive script that tests all known API endpoints.
+- **`quick_api_test.py`**: A focused test script for rapidly validating core working endpoints during development.
+
 ### 🎯 Functional Area Coverage
 
 #### **API Layer (100% Coverage)**

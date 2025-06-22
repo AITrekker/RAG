@@ -119,8 +119,25 @@ class ApiClient {
     if (error.response) {
       // Server responded with error status
       const data = error.response.data as any;
+      let errorMessage = 'Server error';
+      
+      if (data.detail) {
+        // Handle FastAPI validation errors
+        if (Array.isArray(data.detail)) {
+          // FastAPI validation error format
+          const validationErrors = data.detail.map((err: any) => 
+            `${err.loc?.join('.')} - ${err.msg || err.type}`
+          ).join(', ');
+          errorMessage = `Validation error: ${validationErrors}`;
+        } else if (typeof data.detail === 'string') {
+          errorMessage = data.detail;
+        }
+      } else if (data.error) {
+        errorMessage = data.error;
+      }
+      
       return {
-        error: data.error || data.detail || 'Server error',
+        error: errorMessage,
         status_code: error.response.status,
         request_id: data.request_id,
       };

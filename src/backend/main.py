@@ -14,14 +14,19 @@ import time
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any
+import hashlib
+from datetime import datetime, timezone, timedelta
+import uuid
 
-from .config.settings import get_settings
-from .api.v1.routes import query, tenants, sync, health, audit, documents
-from .core.embeddings import get_embedding_service, EmbeddingService
-from .core.rag_pipeline import get_rag_pipeline
-from .utils.vector_store import VectorStoreManager
-from .middleware.tenant_context import TenantContextMiddleware
-from .middleware.auth import require_authentication
+from src.backend.config.settings import get_settings
+from src.backend.api.v1.routes import query, tenants, sync, health, audit, documents
+from src.backend.core.embeddings import get_embedding_service, EmbeddingService
+from src.backend.core.rag_pipeline import get_rag_pipeline
+from src.backend.utils.vector_store import VectorStoreManager
+from src.backend.middleware.tenant_context import TenantContextMiddleware
+from src.backend.middleware.auth import require_authentication
+from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
+from scripts.migrate_db import run_migrations
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,21 +45,115 @@ async def get_current_tenant_id() -> str:
     return "default"
 
 
+def create_default_tenant_and_api_key():
+    """Create default tenant and API key directly in the database."""
+    try:
+        from src.backend.db.session import get_db
+        from sqlalchemy import text
+        
+        db = next(get_db())
+        
+        # Check if default tenant exists
+        result = db.execute(text("SELECT id FROM tenants WHERE tenant_id = 'default'")).fetchone()
+        
+        if not result:
+            logger.info("Creating default tenant...")
+            now = datetime.now(timezone.utc)
+            
+            # Create default tenant
+            db.execute(text("""
+                INSERT INTO tenants (
+                    id, tenant_id, name, display_name, tier, isolation_level, status,
+                    created_at, updated_at, max_documents, max_storage_mb,
+                    max_api_calls_per_day, max_concurrent_queries, contact_email
+                ) VALUES (
+                    gen_random_uuid(), 'default', 'Default Tenant', 'Default Development Tenant', 
+                    'basic', 'logical', 'active', :now, :now, 1000, 5000, 10000, 10, 'dev@example.com'
+                )
+            """), {"now": now})
+            
+            # Get the newly created tenant
+            result = db.execute(text("SELECT id FROM tenants WHERE tenant_id = 'default'")).fetchone()
+        
+        if result:
+            tenant_id = result[0]
+            logger.info(f"Default tenant found/created with ID: {tenant_id}")
+            
+            # Check if API key already exists
+            existing_key = db.execute(text("""
+                SELECT id FROM tenant_api_keys 
+                WHERE tenant_id = :tenant_id AND key_name = 'Default Dev Key'
+            """), {"tenant_id": tenant_id}).fetchone()
+            
+            if not existing_key:
+                logger.info("Creating default API key...")
+                now = datetime.now(timezone.utc)
+                expires_at = now + timedelta(days=365)
+                
+                # Hash the API key
+                api_key = "dev-api-key-123"
+                key_hash = hashlib.sha256(api_key.encode('utf-8')).hexdigest()
+                
+                # Insert the new API key
+                db.execute(text("""
+                    INSERT INTO tenant_api_keys (
+                        id, tenant_id, key_name, key_hash, key_prefix, scopes, 
+                        created_at, updated_at, expires_at, is_active, usage_count
+                    ) VALUES (
+                        gen_random_uuid(), :tenant_id, 'Default Dev Key', :key_hash, 'dev-api', 
+                        '{}', :now, :now, :expires_at, true, 0
+                    )
+                """), {
+                    "tenant_id": tenant_id,
+                    "key_hash": key_hash,
+                    "now": now,
+                    "expires_at": expires_at
+                })
+                
+                db.commit()
+                logger.info("Default API key created successfully")
+            else:
+                logger.info("Default API key already exists")
+        
+        db.close()
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create default tenant and API key: {e}", exc_info=True)
+        return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
     # Startup
     logger.info("Starting Enterprise RAG Platform API...")
     
+    # Skip database migrations for now - run manually if needed
+    logger.info("Skipping database migrations (run manually if needed)")
+    logger.info("Use: python scripts/simple_api_key_setup.py")
+    
     global embedding_service, vector_store_manager
     
     try:
+        # Initialize monitoring system
+        logger.info("Initializing monitoring system...")
+        initialize_monitoring()
+        
         # Initialize services using singleton getters
         logger.info("Initializing embedding service...")
         embedding_service = get_embedding_service()
         
         logger.info("Initializing vector store manager...")
-        from .utils.vector_store import get_vector_store_manager
+        from src.backend.utils.vector_store import get_vector_store_manager
+        
+        # Register default tenant in isolation strategy
+        logger.info("Registering default tenant...")
+        from src.backend.core.tenant_isolation import get_tenant_isolation_strategy, TenantTier
+        isolation_strategy = get_tenant_isolation_strategy()
+        isolation_strategy.register_tenant("default", TenantTier.BASIC)
+        logger.info("Default tenant registered in isolation strategy")
+        
         vector_store_manager = get_vector_store_manager()
         
         # Store services in app state for dependency injection
@@ -73,6 +172,10 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Enterprise RAG Platform API...")
     
     try:
+        # Shutdown monitoring system
+        logger.info("Shutting down monitoring system...")
+        shutdown_monitoring()
+        
         # Cleanup services if needed
         if embedding_service:
             # Add any cleanup logic for embedding service
@@ -120,37 +223,8 @@ if not settings.debug:
 # app.add_middleware(TenantContextMiddleware, db_session_factory=get_db_session)
 
 
-# Performance monitoring middleware
-@app.middleware("http")
-async def performance_middleware(request: Request, call_next):
-    """Monitor API performance and log slow requests."""
-    start_time = time.time()
-    
-    # Add request ID for tracing
-    request_id = f"{int(time.time() * 1000)}-{hash(request.url.path) % 10000}"
-    
-    response = await call_next(request)
-    
-    process_time = time.time() - start_time
-    
-    # Log performance metrics
-    logger.info(
-        f"Request {request_id}: {request.method} {request.url.path} "
-        f"completed in {process_time:.3f}s with status {response.status_code}"
-    )
-    
-    # Warn about slow requests
-    if process_time > 5.0:  # 5 second threshold
-        logger.warning(
-            f"Slow request detected: {request.method} {request.url.path} "
-            f"took {process_time:.3f}s"
-        )
-    
-    # Add performance headers
-    response.headers["X-Process-Time"] = str(process_time)
-    response.headers["X-Request-ID"] = request_id
-    
-    return response
+# Add comprehensive monitoring middleware
+app.middleware("http")(monitoring_middleware)
 
 
 # Global exception handler
@@ -206,19 +280,19 @@ def get_vector_store_manager_dependency() -> VectorStoreManager:
 # Include API routes
 app.include_router(
     health.router,
-    prefix="/api/v1",
+    prefix="/api/v1/health",
     tags=["health"]
 )
 
 app.include_router(
     query.router,
-    prefix="/api/v1",
+    prefix="/api/v1/query",
     tags=["query"]
 )
 
 app.include_router(
     tenants.router,
-    prefix="/api/v1",
+    prefix="/api/v1/tenants",
     tags=["tenants"]
 )
 

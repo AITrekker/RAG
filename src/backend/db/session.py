@@ -8,16 +8,21 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 try:
+    # Get production-ready database configuration
+    db_config = settings.get_database_config()
+    
     # Configure PostgreSQL-specific engine settings
     engine_kwargs = {
-        "pool_pre_ping": True,
-        "pool_size": settings.database_pool_size,
-        "max_overflow": settings.database_max_overflow,
-        "pool_recycle": 3600,  # Recycle connections every hour
+        "pool_pre_ping": db_config["pool_pre_ping"],
+        "pool_size": db_config["pool_size"],
+        "max_overflow": db_config["max_overflow"],
+        "pool_recycle": db_config["pool_recycle"],
+        "pool_timeout": db_config["pool_timeout"],
+        "connect_args": db_config["connect_args"],
         "echo": settings.debug,  # Log SQL queries in debug mode
     }
     
-    engine = create_engine(settings.database_url, **engine_kwargs)
+    engine = create_engine(db_config["url"], **engine_kwargs)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     logger.info("Database engine and session created successfully.")
 except Exception as e:

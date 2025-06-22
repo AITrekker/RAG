@@ -1,211 +1,488 @@
 """
-Delta Synchronization Service for the Enterprise RAG Platform.
+Delta Synchronization System for Enterprise RAG Platform
 
-This service is responsible for comparing a source directory (e.g., an
-'uploads' folder) with a target directory (the source-of-truth 'documents'
-folder for a tenant) and applying the necessary changes.
-
-The delta sync process involves three main operations:
-1.  **Inclusion**: Adding new files that exist in the source but not the target.
-2.  **Update**: Updating files in the target that have been modified in the source.
-3.  **Deletion**: Removing files from the target that are no longer in the source.
-
-This service orchestrates the file operations and triggers the necessary
-processing pipelines (e.g., document ingestion, embedding removal).
+This module implements intelligent document synchronization that processes only
+changed documents, reducing computational overhead and improving efficiency.
 """
 
-import logging
-from pathlib import Path
-from typing import Dict, List, Tuple, Set
-import hashlib
 import os
-import shutil
-from .document_ingestion import DocumentIngestionPipeline
+import hashlib
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Dict, Optional, Set, Tuple
+from dataclasses import dataclass
+from enum import Enum
+
 from sqlalchemy.orm import Session
-from .auditing import AuditLogger
+from sqlalchemy import text
+
+from ..models.document import Document, DocumentStatus
+from ..models.audit import SyncEvent
+from ..db.session import get_db
+from ..config.settings import get_settings
+from .document_processor import DocumentProcessor
+from .tenant_manager import TenantManager
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
-class DeltaSyncService:
+class ChangeType(Enum):
+    """Types of document changes."""
+    ADDED = "added"
+    MODIFIED = "modified"
+    DELETED = "deleted"
+    MOVED = "moved"
+
+
+@dataclass
+class DocumentChange:
+    """Represents a change to a document."""
+    file_path: str
+    change_type: ChangeType
+    file_hash: Optional[str] = None
+    file_size: Optional[int] = None
+    old_path: Optional[str] = None  # For moved files
+    modification_time: Optional[datetime] = None
+
+
+@dataclass
+class SyncResult:
+    """Results from a synchronization run."""
+    sync_run_id: str
+    tenant_id: str
+    total_files_scanned: int
+    files_added: int
+    files_modified: int
+    files_deleted: int
+    files_moved: int
+    errors: List[str]
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    success: bool = False
+
+
+class DeltaSync:
     """
-    Manages the delta synchronization between a source and target directory.
+    Delta synchronization manager that efficiently processes document changes.
     """
-
-    def __init__(self, tenant_id: str, db: Session, ingestion_pipeline: DocumentIngestionPipeline, sync_run_id: str, audit_logger: AuditLogger):
-        self.tenant_id = tenant_id
-        self.db = db
-        self.ingestion_pipeline = ingestion_pipeline
-        self.sync_run_id = sync_run_id
-        self.audit_logger = audit_logger
-        # Placeholder for directory paths; these will be determined dynamically.
-        self.source_dir = Path(f"/data/tenants/{tenant_id}/uploads")
-        self.target_dir = Path(f"/data/tenants/{tenant_id}/documents")
-        logger.info(f"Initialized DeltaSyncService for tenant '{self.tenant_id}'")
-
-    def run_sync(self):
+    
+    def __init__(self, tenant_manager: TenantManager, document_processor: DocumentProcessor):
+        self.tenant_manager = tenant_manager
+        self.document_processor = document_processor
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+    
+    def calculate_file_hash(self, file_path: Path) -> str:
+        """Calculate SHA-256 hash of a file."""
+        hasher = hashlib.sha256()
+        try:
+            with open(file_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hasher.hexdigest()
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except Exception as e:
+            self.logger.error(f"Error calculating hash for {file_path}: {e}")
+            return None
+    
+    def scan_directory(self, directory: Path, tenant_id: str) -> Dict[str, Dict]:
         """
-        Executes the full delta synchronization process.
-        """
-        logger.info(f"Starting delta sync for tenant '{self.tenant_id}'...")
-        
-        # 1. Detect changes
-        new_files, updated_files, deleted_files = self._detect_changes()
-        
-        # 2. Process changes
-        self._process_inclusions(new_files)
-        self._process_updates(updated_files)
-        self._process_deletions(deleted_files)
-        
-        logger.info(f"Delta sync completed for tenant '{self.tenant_id}'.")
-
-    def _detect_changes(self) -> Tuple[List[Path], List[Path], List[Path]]:
-        """
-        Compares the source and target directories to find differences.
+        Scan directory and build current file state map.
         
         Returns:
-            A tuple containing lists of new, updated, and deleted file paths relative to the source dir.
+            Dict mapping file paths to file metadata
         """
-        logger.info(f"Detecting changes between {self.source_dir} and {self.target_dir}")
+        current_files = {}
         
-        source_files = {p.relative_to(self.source_dir): self._get_file_hash(p) for p in self.source_dir.rglob('*') if p.is_file()}
-        target_files = {p.relative_to(self.target_dir): self._get_file_hash(p) for p in self.target_dir.rglob('*') if p.is_file()}
-
-        new_files = [self.source_dir / f for f in source_files if f not in target_files]
-        deleted_files = [self.target_dir / f for f in target_files if f not in source_files]
+        if not directory.exists():
+            self.logger.warning(f"Directory does not exist: {directory}")
+            return current_files
         
-        updated_files = []
-        potential_updates = [f for f in source_files if f in target_files]
-
-        for file_rel_path in potential_updates:
-            source_hash = source_files[file_rel_path]
-            target_hash = target_files[file_rel_path]
-            if source_hash != target_hash:
-                updated_files.append(self.source_dir / file_rel_path)
-
-        logger.info(f"Found {len(new_files)} new, {len(updated_files)} updated, {len(deleted_files)} deleted files.")
-        return new_files, updated_files, deleted_files
-        
-    def _get_file_hash(self, file_path: Path) -> str:
-        """Calculates the SHA256 hash of a file."""
-        sha256 = hashlib.sha256()
         try:
-            with open(file_path, "rb") as f:
-                while chunk := f.read(8192):
-                    sha256.update(chunk)
-            return sha256.hexdigest()
-        except IOError:
-            logger.warning(f"Could not read file for hashing: {file_path}", exc_info=True)
-            return ""
-
-    def _process_inclusions(self, files: List[Path]):
-        """Processes new files to be added."""
-        if not files:
-            return
-        logger.info(f"Processing {len(files)} new files...")
-        for src_path in files:
-            relative_path = src_path.relative_to(self.source_dir)
-            target_path = self.target_dir / relative_path
-            try:
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                shutil.copy2(src_path, target_path)
-                logger.info(f"Copied new file from {src_path} to {target_path}")
-
-                # Now, ingest the document from its new source-of-truth location
-                _, __ = self.ingestion_pipeline.ingest_document(self.db, target_path)
-                
-                self.audit_logger.log_sync_event(
-                    self.db, self.sync_run_id, self.tenant_id, "FILE_ADDED", "SUCCESS",
-                    f"Successfully ingested new file: {relative_path}",
-                    metadata={"filename": str(relative_path), "path": str(target_path)}
-                )
-
-            except Exception as e:
-                logger.error(f"Failed to process new file {src_path}: {e}", exc_info=True)
-                self.audit_logger.log_sync_event(
-                    self.db, self.sync_run_id, self.tenant_id, "FILE_ADDED", "FAILURE",
-                    f"Failed to ingest new file: {relative_path}",
-                    metadata={"filename": str(relative_path), "error": str(e)}
-                )
-        
-    def _process_updates(self, files: List[Path]):
-        """Processes modified files to be updated."""
-        if not files:
-            return
-        logger.info(f"Processing {len(files)} updated files...")
-        for src_path in files:
-            relative_path = src_path.relative_to(self.source_dir)
-            target_path = self.target_dir / relative_path
-            try:
-                # Overwrite the existing file
-                shutil.copy2(src_path, target_path)
-                logger.info(f"Copied updated file from {src_path} to {target_path}")
-
-                # The ingestion pipeline handles versioning internally.
-                _, __ = self.ingestion_pipeline.ingest_document(self.db, target_path)
-                
-                self.audit_logger.log_sync_event(
-                    self.db, self.sync_run_id, self.tenant_id, "FILE_UPDATED", "SUCCESS",
-                    f"Successfully ingested updated file: {relative_path}",
-                    metadata={"filename": str(relative_path), "path": str(target_path)}
-                )
-
-            except Exception as e:
-                logger.error(f"Failed to process updated file {src_path}: {e}", exc_info=True)
-                self.audit_logger.log_sync_event(
-                    self.db, self.sync_run_id, self.tenant_id, "FILE_UPDATED", "FAILURE",
-                    f"Failed to ingest updated file: {relative_path}",
-                    metadata={"filename": str(relative_path), "error": str(e)}
-                )
-        
-    def _process_deletions(self, files: List[Path]):
+            # Get supported file extensions
+            supported_extensions = set(settings.supported_file_types)
+            
+            for file_path in directory.rglob("*"):
+                if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+                    try:
+                        relative_path = str(file_path.relative_to(directory))
+                        stat = file_path.stat()
+                        
+                        current_files[relative_path] = {
+                            'full_path': str(file_path),
+                            'size': stat.st_size,
+                            'mtime': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                            'hash': None  # Will be calculated only if needed
+                        }
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error processing file {file_path}: {e}")
+                        
+        except Exception as e:
+            self.logger.error(f"Error scanning directory {directory}: {e}")
+            
+        return current_files
+    
+    def get_stored_file_state(self, tenant_id: str, db: Session) -> Dict[str, Dict]:
         """
-        Processes files to be deleted from the target directory and all associated data.
-        """
-        if not files:
-            return
-        logger.info(f"Processing {len(files)} deleted files...")
+        Get the current state of files from the database.
         
-        from ..models.document import Document # Local import to avoid circular dependency issues at module level
-
-        for target_path in files:
-            relative_path = target_path.relative_to(self.target_dir)
-            try:
-                filename = target_path.name
+        Returns:
+            Dict mapping file paths to stored metadata
+        """
+        stored_files = {}
+        
+        try:
+            documents = db.query(Document).filter(
+                Document.tenant_id == tenant_id,
+                Document.status != DocumentStatus.ARCHIVED
+            ).all()
+            
+            for doc in documents:
+                stored_files[doc.file_path] = {
+                    'id': doc.id,
+                    'hash': doc.file_hash,
+                    'size': doc.file_size,
+                    'version': doc.version,
+                    'status': doc.status,
+                    'updated_at': doc.updated_at
+                }
                 
-                doc_to_delete = self.db.query(Document).filter(
-                    Document.tenant_id == self.tenant_id,
-                    Document.filename == filename,
-                    Document.is_current_version == True
-                ).first()
-
-                if not doc_to_delete:
-                    logger.warning(f"Could not find DB record for deleted file: {filename}. It might have been deleted manually.")
-                    # Still remove the file from the target directory if it exists
-                    if target_path.exists():
-                        target_path.unlink()
-                        logger.info(f"Removed orphaned file from target: {target_path}")
-                    continue
-
-                # Use the pipeline to delete all associated data (DB records, vector embeddings)
-                self.ingestion_pipeline.delete_document(self.db, doc_to_delete.id)
+        except Exception as e:
+            self.logger.error(f"Error retrieving stored file state for tenant {tenant_id}: {e}")
+            
+        return stored_files
+    
+    def detect_changes(
+        self, 
+        current_files: Dict[str, Dict], 
+        stored_files: Dict[str, Dict]
+    ) -> List[DocumentChange]:
+        """
+        Detect changes between current and stored file states.
+        """
+        changes = []
+        current_paths = set(current_files.keys())
+        stored_paths = set(stored_files.keys())
+        
+        # Find added files
+        for path in current_paths - stored_paths:
+            file_info = current_files[path]
+            changes.append(DocumentChange(
+                file_path=path,
+                change_type=ChangeType.ADDED,
+                file_size=file_info['size'],
+                modification_time=file_info['mtime']
+            ))
+        
+        # Find deleted files
+        for path in stored_paths - current_paths:
+            changes.append(DocumentChange(
+                file_path=path,
+                change_type=ChangeType.DELETED
+            ))
+        
+        # Find potentially modified files
+        for path in current_paths & stored_paths:
+            current_info = current_files[path]
+            stored_info = stored_files[path]
+            
+            # Check if file size or modification time changed
+            if (current_info['size'] != stored_info['size'] or
+                current_info['mtime'] > stored_info['updated_at']):
                 
-                # Finally, delete the file from the source-of-truth directory
-                if target_path.exists():
-                    target_path.unlink()
-                    logger.info(f"Deleted file from target directory: {target_path}")
+                # Calculate hash to confirm actual content change
+                current_hash = self.calculate_file_hash(Path(current_info['full_path']))
+                if current_hash and current_hash != stored_info['hash']:
+                    changes.append(DocumentChange(
+                        file_path=path,
+                        change_type=ChangeType.MODIFIED,
+                        file_hash=current_hash,
+                        file_size=current_info['size'],
+                        modification_time=current_info['mtime']
+                    ))
+        
+        return changes
+    
+    def process_document_change(
+        self, 
+        change: DocumentChange, 
+        tenant_id: str, 
+        tenant_path: Path,
+        db: Session
+    ) -> bool:
+        """Process a single document change."""
+        try:
+            if change.change_type == ChangeType.ADDED:
+                return self._process_added_document(change, tenant_id, tenant_path, db)
+            elif change.change_type == ChangeType.MODIFIED:
+                return self._process_modified_document(change, tenant_id, tenant_path, db)
+            elif change.change_type == ChangeType.DELETED:
+                return self._process_deleted_document(change, tenant_id, db)
+            else:
+                self.logger.warning(f"Unsupported change type: {change.change_type}")
+                return False
                 
-                self.audit_logger.log_sync_event(
-                    self.db, self.sync_run_id, self.tenant_id, "FILE_DELETED", "SUCCESS",
-                    f"Successfully deleted file: {relative_path}",
-                    metadata={"filename": str(relative_path)}
+        except Exception as e:
+            self.logger.error(f"Error processing change {change.file_path}: {e}")
+            return False
+    
+    def _process_added_document(
+        self, 
+        change: DocumentChange, 
+        tenant_id: str, 
+        tenant_path: Path,
+        db: Session
+    ) -> bool:
+        """Process a newly added document."""
+        full_path = tenant_path / change.file_path
+        
+        if not change.file_hash:
+            change.file_hash = self.calculate_file_hash(full_path)
+        
+        # Use document processor to ingest the new document
+        success = self.document_processor.process_document(
+            file_path=str(full_path),
+            tenant_id=tenant_id,
+            db=db
+        )
+        
+        if success:
+            self.logger.info(f"Successfully added document: {change.file_path}")
+        else:
+            self.logger.error(f"Failed to add document: {change.file_path}")
+            
+        return success
+    
+    def _process_modified_document(
+        self, 
+        change: DocumentChange, 
+        tenant_id: str, 
+        tenant_path: Path,
+        db: Session
+    ) -> bool:
+        """Process a modified document."""
+        full_path = tenant_path / change.file_path
+        
+        # Archive the old version
+        try:
+            old_doc = db.query(Document).filter(
+                Document.tenant_id == tenant_id,
+                Document.file_path == change.file_path,
+                Document.status != DocumentStatus.ARCHIVED
+            ).first()
+            
+            if old_doc:
+                # Update old document to archived status
+                old_doc.status = DocumentStatus.ARCHIVED
+                old_doc.updated_at = datetime.now(timezone.utc)
+                
+                # Process the updated document as a new version
+                success = self.document_processor.process_document(
+                    file_path=str(full_path),
+                    tenant_id=tenant_id,
+                    db=db,
+                    version=old_doc.version + 1
                 )
-
-            except Exception as e:
-                logger.error(f"Failed to process deleted file {target_path}: {e}", exc_info=True)
-                self.audit_logger.log_sync_event(
-                    self.db, self.sync_run_id, self.tenant_id, "FILE_DELETED", "FAILURE",
-                    f"Failed to delete file: {relative_path}",
-                    metadata={"filename": str(relative_path), "error": str(e)}
-                ) 
+                
+                if success:
+                    self.logger.info(f"Successfully updated document: {change.file_path}")
+                    db.commit()
+                    return True
+                else:
+                    self.logger.error(f"Failed to update document: {change.file_path}")
+                    db.rollback()
+                    return False
+            else:
+                # Document not found in database, treat as new
+                return self._process_added_document(change, tenant_id, tenant_path, db)
+                
+        except Exception as e:
+            self.logger.error(f"Error updating document {change.file_path}: {e}")
+            db.rollback()
+            return False
+    
+    def _process_deleted_document(self, change: DocumentChange, tenant_id: str, db: Session) -> bool:
+        """Process a deleted document."""
+        try:
+            # Mark document as archived instead of deleting
+            docs = db.query(Document).filter(
+                Document.tenant_id == tenant_id,
+                Document.file_path == change.file_path,
+                Document.status != DocumentStatus.ARCHIVED
+            ).all()
+            
+            for doc in docs:
+                doc.status = DocumentStatus.ARCHIVED
+                doc.updated_at = datetime.now(timezone.utc)
+            
+            # TODO: Also clean up associated chunks and embeddings
+            
+            db.commit()
+            self.logger.info(f"Successfully archived deleted document: {change.file_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error archiving document {change.file_path}: {e}")
+            db.rollback()
+            return False
+    
+    def log_sync_event(
+        self, 
+        sync_run_id: str, 
+        tenant_id: str, 
+        event_type: str, 
+        status: str, 
+        message: str = None,
+        metadata: Dict = None,
+        db: Session = None
+    ):
+        """Log a synchronization event."""
+        if not db:
+            db = next(get_db())
+        
+        try:
+            event = SyncEvent(
+                sync_run_id=sync_run_id,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                status=status,
+                message=message,
+                event_metadata=metadata or {}
+            )
+            
+            db.add(event)
+            db.commit()
+            
+        except Exception as e:
+            self.logger.error(f"Error logging sync event: {e}")
+            db.rollback()
+    
+    def synchronize_tenant(self, tenant_id: str) -> SyncResult:
+        """
+        Perform delta synchronization for a specific tenant.
+        """
+        sync_run_id = f"sync_{tenant_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        start_time = datetime.now(timezone.utc)
+        
+        result = SyncResult(
+            sync_run_id=sync_run_id,
+            tenant_id=tenant_id,
+            total_files_scanned=0,
+            files_added=0,
+            files_modified=0,
+            files_deleted=0,
+            files_moved=0,
+            errors=[],
+            start_time=start_time
+        )
+        
+        db = next(get_db())
+        
+        try:
+            # Log sync start
+            self.log_sync_event(
+                sync_run_id, tenant_id, "SYNC_START", "IN_PROGRESS",
+                f"Starting delta sync for tenant {tenant_id}", db=db
+            )
+            
+            # Get tenant documents directory
+            tenant_config = self.tenant_manager.get_tenant_config(tenant_id)
+            if not tenant_config:
+                raise Exception(f"Tenant {tenant_id} not found")
+            
+            tenant_path = Path(tenant_config.documents_path)
+            
+            # Scan current files
+            current_files = self.scan_directory(tenant_path, tenant_id)
+            result.total_files_scanned = len(current_files)
+            
+            # Get stored file state
+            stored_files = self.get_stored_file_state(tenant_id, db)
+            
+            # Detect changes
+            changes = self.detect_changes(current_files, stored_files)
+            
+            self.logger.info(f"Detected {len(changes)} changes for tenant {tenant_id}")
+            
+            # Process each change
+            for change in changes:
+                success = self.process_document_change(change, tenant_id, tenant_path, db)
+                
+                if success:
+                    if change.change_type == ChangeType.ADDED:
+                        result.files_added += 1
+                    elif change.change_type == ChangeType.MODIFIED:
+                        result.files_modified += 1
+                    elif change.change_type == ChangeType.DELETED:
+                        result.files_deleted += 1
+                    elif change.change_type == ChangeType.MOVED:
+                        result.files_moved += 1
+                else:
+                    result.errors.append(f"Failed to process {change.file_path}: {change.change_type}")
+            
+            result.success = len(result.errors) == 0
+            result.end_time = datetime.now(timezone.utc)
+            
+            # Log sync completion
+            self.log_sync_event(
+                sync_run_id, tenant_id, "SYNC_COMPLETE", 
+                "SUCCESS" if result.success else "PARTIAL_SUCCESS",
+                f"Sync completed. Added: {result.files_added}, Modified: {result.files_modified}, "
+                f"Deleted: {result.files_deleted}, Errors: {len(result.errors)}",
+                metadata={
+                    'total_scanned': result.total_files_scanned,
+                    'files_added': result.files_added,
+                    'files_modified': result.files_modified,
+                    'files_deleted': result.files_deleted,
+                    'error_count': len(result.errors)
+                },
+                db=db
+            )
+            
+        except Exception as e:
+            result.errors.append(str(e))
+            result.success = False
+            result.end_time = datetime.now(timezone.utc)
+            
+            self.logger.error(f"Sync failed for tenant {tenant_id}: {e}")
+            
+            # Log sync failure
+            self.log_sync_event(
+                sync_run_id, tenant_id, "SYNC_FAILED", "FAILURE",
+                f"Sync failed: {str(e)}", db=db
+            )
+            
+        finally:
+            db.close()
+        
+        return result
+    
+    def get_sync_history(self, tenant_id: str, limit: int = 50) -> List[Dict]:
+        """Get synchronization history for a tenant."""
+        db = next(get_db())
+        
+        try:
+            events = db.query(SyncEvent).filter(
+                SyncEvent.tenant_id == tenant_id,
+                SyncEvent.event_type.in_(["SYNC_START", "SYNC_COMPLETE", "SYNC_FAILED"])
+            ).order_by(SyncEvent.timestamp.desc()).limit(limit).all()
+            
+            return [
+                {
+                    'sync_run_id': event.sync_run_id,
+                    'timestamp': event.timestamp.isoformat(),
+                    'event_type': event.event_type,
+                    'status': event.status,
+                    'message': event.message,
+                    'metadata': event.event_metadata
+                }
+                for event in events
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving sync history for tenant {tenant_id}: {e}")
+            return []
+        finally:
+            db.close() 
