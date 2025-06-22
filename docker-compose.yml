@@ -29,8 +29,7 @@ services:
     container_name: rag_backend
     environment:
       - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_database
-      - CHROMA_PERSIST_DIRECTORY=/app/data/chroma
-      - UPLOAD_DIRECTORY=/app/data/uploads
+      # Using chroma_db and tenant-specific uploads instead of global directories
       - CUDA_VISIBLE_DEVICES=0
       - TRANSFORMERS_CACHE=/app/cache/transformers
     ports:

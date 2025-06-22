@@ -5,6 +5,10 @@
 SELECT 'CREATE DATABASE rag_database'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'rag_database');
 
+-- Create test database if it doesn't exist
+SELECT 'CREATE DATABASE rag_test_database'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'rag_test_database');
+
 -- Connect to the main database
 \c rag_database;
 

@@ -145,7 +145,7 @@ pip install black flake8 mypy
 # Set up test environment
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 export RAG_ENV="test"
-export DATABASE_URL="sqlite:///test.db"
+export DATABASE_URL="postgresql://rag_user:rag_password@localhost:5432/rag_test_database"
 
 # Optional: GPU testing
 export CUDA_VISIBLE_DEVICES="0"  # For RTX 5070 tests
@@ -174,7 +174,7 @@ markers =
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `RAG_ENV` | Environment mode | `test` |
-| `DATABASE_URL` | Test database URL | `sqlite:///test.db` |
+| `DATABASE_URL` | Test database URL | `postgresql://rag_user:rag_password@localhost:5432/rag_test_database` |
 | `CHROMA_HOST` | Vector store host | `localhost` |
 | `CHROMA_PORT` | Vector store port | `8000` |
 | `LOG_LEVEL` | Logging level | `INFO` |

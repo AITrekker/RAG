@@ -26,7 +26,7 @@ The Enterprise RAG Platform has been designed with complete separation between t
 ### Backend Layer
 - **Technology**: FastAPI + Python 3.11
 - **Port**: 8000
-- **Database**: SQLAlchemy with SQLite/PostgreSQL
+- **Database**: SQLAlchemy with PostgreSQL
 - **Vector Store**: ChromaDB
 - **Authentication**: API key-based with tenant isolation
 - **Documentation**: Auto-generated OpenAPI/Swagger docs
@@ -169,7 +169,7 @@ VITE_APP_TITLE=Enterprise RAG Platform
 
 ### Backend Environment Variables
 ```bash
-DATABASE_URL=sqlite:///./data/rag_dev.db
+DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_database
 CHROMA_PERSIST_DIRECTORY=./data/chroma
 UPLOAD_DIRECTORY=./data/uploads
 TRANSFORMERS_CACHE=./cache/transformers
@@ -187,7 +187,7 @@ CORS_ORIGINS=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhos
 ### Production
 - Frontend: Static build deployed to CDN/web server
 - Backend: Containerized FastAPI with reverse proxy
-- Database: PostgreSQL with connection pooling
+- Database: PostgreSQL with connection pooling and optimized settings
 - Vector Store: ChromaDB cluster
 - Authentication: JWT tokens with refresh mechanism
 

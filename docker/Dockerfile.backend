@@ -20,8 +20,8 @@ COPY requirements.txt .
 # We exclude torch, torchvision, and torchaudio as they are already in the base image.
 RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
 
-# Create necessary directories
-RUN mkdir -p /app/data/chroma /app/data/uploads /app/cache/transformers /app/logs
+# Create necessary directories (using chroma_db and tenant uploads instead)
+RUN mkdir -p /app/cache/transformers /app/logs
 
 # Copy application code
 COPY src/backend /app/src/backend

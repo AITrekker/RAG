@@ -92,9 +92,8 @@ def setup_environment():
     # Default environment variables
     env_vars = {
         'PYTHONPATH': str(project_root),
-        'DATABASE_URL': 'sqlite:///./data/rag_dev.db',
-        'CHROMA_PERSIST_DIRECTORY': str(project_root / 'data' / 'chroma'),
-        'UPLOAD_DIRECTORY': str(project_root / 'data' / 'uploads'),
+        'DATABASE_URL': 'postgresql://rag_user:rag_password@localhost:5432/rag_database',
+        # Using chroma_db and tenant-specific uploads instead of global directories
         'HF_HOME': str(project_root / 'cache' / 'transformers'),
         'HF_HUB_DISABLE_SYMLINKS_WARNING': '1',
         'LOG_LEVEL': 'DEBUG',
@@ -115,11 +114,9 @@ def setup_environment():
             os.environ[key] = value
             print(f"🔧 Set {key}={value}")
     
-    # Create necessary directories
+    # Create necessary directories (PostgreSQL setup - chroma_db and tenant uploads used instead)
     directories = [
         project_root / 'data',
-        project_root / 'data' / 'uploads',
-        project_root / 'data' / 'chroma',
         project_root / 'cache',
         project_root / 'cache' / 'transformers',
         project_root / 'logs'

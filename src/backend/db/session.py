@@ -8,11 +8,16 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 try:
-    engine = create_engine(
-        settings.database_url,
-        pool_pre_ping=True,
-        connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {}
-    )
+    # Configure PostgreSQL-specific engine settings
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "pool_size": settings.database_pool_size,
+        "max_overflow": settings.database_max_overflow,
+        "pool_recycle": 3600,  # Recycle connections every hour
+        "echo": settings.debug,  # Log SQL queries in debug mode
+    }
+    
+    engine = create_engine(settings.database_url, **engine_kwargs)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     logger.info("Database engine and session created successfully.")
 except Exception as e:

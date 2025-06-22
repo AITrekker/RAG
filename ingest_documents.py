@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """
-Document Ingestion Script for Enterprise RAG Platform
+DEPRECATED: Document Ingestion Script for Enterprise RAG Platform
 
-This script processes real documents and sets up the vector store for actual RAG queries.
+⚠️  WARNING: This script is deprecated and incompatible with PostgreSQL.
+
+This legacy script was designed for SQLite and is no longer maintained.
+Use the proper backend API endpoints for document ingestion instead.
+
+For document ingestion, use:
+1. Start the backend server: python src/backend/main.py
+2. Use the API endpoints in src/backend/api/v1/routes/documents.py
+3. Or use the frontend interface
+
+This file is kept for reference only.
 """
 
 import os
@@ -337,36 +347,30 @@ rag_pipeline = RAGPipeline()
     print("✅ Updated RAG service to use real documents")
 
 def main():
-    """Main ingestion process."""
+    """Main function - shows deprecation warning."""
     
-    print("🚀 Enterprise RAG Platform - Document Ingestion\n")
-    
-    # Check if documents directory exists
-    if not os.path.exists("documents"):
-        print("❌ Documents directory not found!")
-        print("   Run: python setup_documents.py first")
-        return
-    
-    print("1. Setting up database...")
-    setup_database()
-    
-    print("\n2. Processing documents...")
-    processed_count = scan_and_process_documents()
-    
-    print("\n3. Updating RAG service...")
-    update_rag_service()
-    
-    print(f"\n🎉 Document ingestion complete!")
-    print(f"   📊 Processed {processed_count} documents")
-    print(f"   🔍 Ready for real queries!")
-    
-    print(f"\n🎯 Next Steps:")
-    print("1. Restart your backend server: python run_backend.py")
-    print("2. Try asking questions about your documents!")
-    print("3. Example queries:")
-    print("   • 'What are the work hours?'")
-    print("   • 'How do I request vacation?'")
-    print("   • 'What file formats are supported?'")
+    print("⚠️  DEPRECATED SCRIPT")
+    print("=" * 50)
+    print("This document ingestion script is deprecated.")
+    print("It was designed for SQLite and is incompatible with PostgreSQL.")
+    print()
+    print("🎯 Use these alternatives instead:")
+    print()
+    print("1. Backend API (Recommended):")
+    print("   • Start: python src/backend/main.py")
+    print("   • Upload via: POST /api/v1/documents/upload")
+    print("   • View docs: http://localhost:8000/docs")
+    print()
+    print("2. Frontend Interface:")
+    print("   • Start: cd src/frontend && npm run dev")
+    print("   • Access: http://localhost:3000")
+    print()
+    print("3. Docker Compose (Full Stack):")
+    print("   • Start: docker-compose up")
+    print("   • Access: http://localhost:80")
+    print()
+    print("📚 See README.md for complete setup instructions.")
+    print("=" * 50)
 
 if __name__ == "__main__":
     main() 

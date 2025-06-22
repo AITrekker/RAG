@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     
     # Database settings
     database_url: str = Field(
-        default="sqlite:///./rag_platform.db", 
+        default="postgresql://rag_user:rag_password@localhost:5432/rag_database", 
         env="DATABASE_URL"
     )
     database_pool_size: int = Field(default=10, env="DATABASE_POOL_SIZE")
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     
     # Vector store settings
     vector_store_type: str = Field(default="chroma", env="VECTOR_STORE_TYPE")
-    vector_store_path: str = Field(default="./vector_store", env="VECTOR_STORE_PATH")
+    vector_store_path: str = Field(default="./data/chroma_db", env="VECTOR_STORE_PATH")
     vector_store_host: Optional[str] = Field(default=None, env="VECTOR_STORE_HOST")
     vector_store_port: Optional[int] = Field(default=None, env="VECTOR_STORE_PORT")
     
@@ -256,10 +256,13 @@ def get_production_settings() -> Settings:
 
 
 def get_test_settings() -> Settings:
-    """Get test-specific settings."""
+    """Get test-specific settings with test database."""
     settings = get_settings()
-    settings.database_url = "sqlite:///:memory:"
-    settings.vector_store_path = "./test_vector_store"
+    # Override for testing - use a separate test database
+    settings.database_url = "postgresql://rag_user:rag_password@localhost:5432/rag_test_database"
+    settings.vector_store_path = "./test_chroma_db"
     settings.documents_path = "./test_documents"
     settings.mock_llm_responses = True
+    settings.debug = True
+    settings.log_level = "DEBUG"
     return settings 

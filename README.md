@@ -25,7 +25,7 @@ The system follows a modular RAG architecture:
 
 1.  **File Ingestion & Sync:** A file system watcher monitors designated folders for each tenant. A sync process detects new, updated, and deleted files.
 2.  **Document Processing Pipeline:** LlamaIndex orchestrates the processing of documents. It loads content, splits it into chunks, and generates vector embeddings using a Hugging Face `transformers` model running on a local GPU.
-3.  **Metadata & Vector Storage:** A PostgreSQL/SQLite database stores file metadata, versions, and sync status. A vector store (e.g., FAISS, Chroma) stores the embeddings for efficient similarity search. All data is isolated by a `tenant_id`.
+3.  **Metadata & Vector Storage:** A PostgreSQL database stores file metadata, versions, and sync status. A vector store (e.g., FAISS, Chroma) stores the embeddings for efficient similarity search. All data is isolated by a `tenant_id`.
 4.  **RAG Query Pipeline:**
     - An incoming query is processed.
     - A hybrid search retrieves relevant document chunks by filtering on metadata and performing a vector search.
@@ -97,7 +97,7 @@ sequenceDiagram
 
 - **Backend:** Python, FastAPI
 - **RAG & ML:** LlamaIndex, Hugging Face `transformers`, PyTorch
-- **Database:** SQLAlchemy, Alembic (for migrations), SQLite (for local dev), PostgreSQL (for prod)
+- **Database:** SQLAlchemy, Alembic (for migrations), PostgreSQL
 - **Vector Store:** Chroma / FAISS (to be decided)
 - **Deployment:** Docker, Docker Compose
 - **Frontend:** React, TypeScript (as per plan)

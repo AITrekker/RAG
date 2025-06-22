@@ -417,8 +417,8 @@ class TestDatabaseSession:
     
     def test_database_session_manager_initialization(self):
         """Test DatabaseSessionManager initialization."""
-        # Test with SQLite in-memory database
-        database_url = "sqlite:///:memory:"
+        # Test with PostgreSQL test database
+        database_url = "postgresql://rag_user:rag_password@localhost:5432/rag_test_database"
         
         session_manager = DatabaseSessionManager(database_url)
         
@@ -447,13 +447,13 @@ class TestDatabaseSession:
     
     def test_database_connection_string_validation(self):
         """Test database connection string validation."""
-        # Test valid SQLite URL
-        valid_url = "sqlite:///test.db"
+        # Test valid PostgreSQL URL
+        valid_url = "postgresql://rag_user:rag_password@localhost:5432/rag_test_database"
         try:
             session_manager = DatabaseSessionManager(valid_url)
             assert session_manager is not None
         except Exception:
-            # Might fail if database file doesn't exist, that's okay
+            # Might fail if database server is not running, that's okay for unit tests
             pass
         
         # Test invalid URL format

@@ -119,7 +119,7 @@ def main():
     
     print(f"\n🎯 Next Steps:")
     print("1. Add your own documents to the 'documents/default/' folders")
-    print("2. Run the document ingestion script: python ingest_documents.py")
+    print("2. Use the backend API for document ingestion (see README.md)")
     print("3. Test queries with your real documents!")
     
     print(f"\n📁 Document locations:")

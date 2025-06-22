@@ -151,8 +151,7 @@ def setup_project_structure() -> bool:
         "docker/chroma",
         "docker/nginx",
         "tests",
-        "data/uploads",
-        "data/chroma",
+        "data/chroma_db",  # Using chroma_db instead of chroma
         "data/postgres",
         "data/redis",
         "cache/transformers",
@@ -252,8 +251,7 @@ LOG_LEVEL=INFO # DEBUG, INFO, WARNING, ERROR
 # For local development, these are often managed by docker-compose or direct execution scripts.
 # For production, these should be set explicitly.
 DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_database
-CHROMA_PERSIST_DIRECTORY=./data/chroma
-UPLOAD_DIRECTORY=./data/uploads
+# Using chroma_db and tenant-specific uploads instead
 TRANSFORMERS_CACHE=./cache/transformers
 # Set to 0 to use the first available GPU, or "-1" to force CPU.
 CUDA_VISIBLE_DEVICES=0
@@ -395,7 +393,7 @@ logs/
 
 # Database
 *.db
-*.sqlite
+# Remove SQLite patterns - using PostgreSQL only
 
 # Node.js
 node_modules/
