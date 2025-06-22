@@ -185,7 +185,7 @@ class ApiClient {
 
   // Sync API methods
   async triggerSync(request: SyncRequest = {}): Promise<SyncResponse> {
-    const response = await this.client.post<SyncResponse>('/sync', request);
+    const response = await this.client.post<SyncResponse>('/sync/trigger', request);
     return response.data;
   }
 

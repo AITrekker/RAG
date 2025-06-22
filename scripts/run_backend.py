@@ -9,6 +9,7 @@ import sys
 import subprocess
 import platform
 import json
+import argparse
 from pathlib import Path
 
 def print_banner():
@@ -84,7 +85,7 @@ def check_dependencies():
     
     return True
 
-def setup_environment():
+def setup_environment(log_level="INFO"):
     """Set up environment variables"""
     # Get project root (parent of scripts directory)
     project_root = Path(__file__).parent.parent.absolute()
@@ -96,7 +97,7 @@ def setup_environment():
         # Using chroma_db and tenant-specific uploads instead of global directories
         'HF_HOME': str(project_root / 'cache' / 'transformers'),
         'HF_HUB_DISABLE_SYMLINKS_WARNING': '1',
-        'LOG_LEVEL': 'DEBUG',
+        'LOG_LEVEL': log_level.upper(),  # Set from command line argument
         'DEBUG': 'true',
         'CORS_ORIGINS': '["http://localhost:3000", "http://127.0.0.1:3000"]'
     }
@@ -128,7 +129,7 @@ def setup_environment():
     print("✅ Environment setup complete")
     return project_root
 
-def run_backend(project_root, debug=False, port=8000, host="127.0.0.1"):
+def run_backend(project_root, debug=False, port=8000, host="127.0.0.1", log_level="info"):
     """Run the FastAPI backend"""
     backend_path = project_root / 'src' / 'backend'
     
@@ -145,7 +146,7 @@ def run_backend(project_root, debug=False, port=8000, host="127.0.0.1"):
         'src.backend.main:app',
         '--host', host,
         '--port', str(port),
-        '--log-level', 'debug' if debug else 'info'
+        '--log-level', log_level
     ]
     
     if debug:
@@ -177,7 +178,37 @@ def run_backend(project_root, debug=False, port=8000, host="127.0.0.1"):
         return False
 
 def main():
-    """Main execution function"""
+    """
+    Main execution function.
+    Parses command line arguments and starts the backend server.
+    """
+    parser = argparse.ArgumentParser(description="Run the RAG Platform Backend directly.")
+    parser.add_argument(
+        '--host',
+        type=str,
+        default='127.0.0.1',
+        help='Host to bind the server to (default: 127.0.0.1)'
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=8000,
+        help='Port to run the server on (default: 8000)'
+    )
+    parser.add_argument(
+        '--log-level',
+        type=str,
+        default='info',
+        choices=['debug', 'info', 'warning', 'error', 'critical'],
+        help='Set the application log level (default: info)'
+    )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug mode with auto-reloading'
+    )
+    args = parser.parse_args()
+
     print_banner()
     
     # Pre-flight checks
@@ -192,7 +223,7 @@ def main():
         sys.exit(1)
     
     print("\n🔧 Setting up environment...")
-    project_root = setup_environment()
+    project_root = setup_environment(args.log_level)
     
     print("\n🖥️  System information:")
     print(f"   OS: {platform.system()} {platform.release()}")
@@ -202,31 +233,14 @@ def main():
     print("\n🎮 GPU Information:")
     check_cuda_availability()
     
-    # Parse command line arguments
-    debug = '--debug' in sys.argv or '-d' in sys.argv
-    
-    # Get port from arguments
-    port = 8000
-    if '--port' in sys.argv:
-        try:
-            port_idx = sys.argv.index('--port')
-            port = int(sys.argv[port_idx + 1])
-        except (IndexError, ValueError):
-            print("⚠️  Invalid port specified, using default 8000")
-    
-    # Get host from arguments
-    host = "127.0.0.1"
-    if '--host' in sys.argv:
-        try:
-            host_idx = sys.argv.index('--host')
-            host = sys.argv[host_idx + 1]
-        except IndexError:
-            print("⚠️  Invalid host specified, using default 127.0.0.1")
-    
     print(f"\n🚀 Starting RAG Platform Backend...")
-    success = run_backend(project_root, debug=debug, port=port, host=host)
-    
-    if not success:
+    if not run_backend(
+        project_root, 
+        debug=args.debug, 
+        port=args.port, 
+        host=args.host, 
+        log_level=args.log_level
+    ):
         sys.exit(1)
 
 if __name__ == "__main__":
@@ -240,6 +254,7 @@ if __name__ == "__main__":
         print("  --debug, -d     Enable debug mode with auto-reload")
         print("  --port PORT     Specify port (default: 8000)")
         print("  --host HOST     Specify host (default: 127.0.0.1)")
+        print("  --log-level LEVEL Set the application log level (default: info)")
         print("  --help, -h      Show this help message")
         print()
         print("Examples:")

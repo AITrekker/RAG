@@ -12,6 +12,9 @@ try:
     db_config = settings.get_database_config()
     
     # Configure PostgreSQL-specific engine settings
+    # Only enable SQL logging at DEBUG level, not just when debug=True
+    enable_sql_logging = settings.log_level.upper() == "DEBUG"
+    
     engine_kwargs = {
         "pool_pre_ping": db_config["pool_pre_ping"],
         "pool_size": db_config["pool_size"],
@@ -19,7 +22,7 @@ try:
         "pool_recycle": db_config["pool_recycle"],
         "pool_timeout": db_config["pool_timeout"],
         "connect_args": db_config["connect_args"],
-        "echo": settings.debug,  # Log SQL queries in debug mode
+        "echo": enable_sql_logging,  # Only log SQL queries at DEBUG level
     }
     
     engine = create_engine(db_config["url"], **engine_kwargs)

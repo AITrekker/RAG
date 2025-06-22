@@ -28,11 +28,24 @@ from src.backend.middleware.auth import require_authentication
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
 from scripts.migrate_db import run_migrations
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+# Configure logging from settings
 settings = get_settings()
+log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+logging.basicConfig(level=log_level)
+
+# Configure SQLAlchemy logging specifically - cover all SQLAlchemy loggers
+sqlalchemy_loggers = [
+    'sqlalchemy.engine',
+    'sqlalchemy.engine.Engine', 
+    'sqlalchemy.pool',
+    'sqlalchemy.dialects',
+    'sqlalchemy.orm'
+]
+for logger_name in sqlalchemy_loggers:
+    sqlalchemy_logger = logging.getLogger(logger_name)
+    sqlalchemy_logger.setLevel(log_level)
+
+logger = logging.getLogger(__name__)
 
 # Global services that need to be initialized
 embedding_service: EmbeddingService = None
