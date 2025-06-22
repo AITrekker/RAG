@@ -30,6 +30,8 @@ from ..models.document import (
     Document, DocumentChunk, DocumentStatus, DocumentType, ChunkType,
     create_document_from_file, create_document_chunk
 )
+from ..utils.html_processor import HTMLProcessor
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,7 @@ class DocumentProcessor:
         self.pdf_reader = PDFReader()
         self.docx_reader = DocxReader()
         self.unstructured_reader = UnstructuredReader()
+        self.html_processor = HTMLProcessor()
         
         # Initialize text splitter
         self.text_splitter = TokenTextSplitter(
@@ -274,28 +277,24 @@ class DocumentProcessor:
         return hash_sha256.hexdigest()
     
     def _extract_content(self, file_path: str, document_type: DocumentType) -> Dict[str, Any]:
-        """Extract content from file based on document type."""
-        try:
-            if document_type == DocumentType.PDF:
-                return self._extract_pdf_content(file_path)
-            elif document_type == DocumentType.WORD:
-                return self._extract_word_content(file_path)
-            elif document_type in [DocumentType.TEXT, DocumentType.MARKDOWN]:
-                return self._extract_text_content(file_path)
-            elif document_type == DocumentType.HTML:
-                return self._extract_html_content(file_path)
-            else:
-                return {
-                    'success': False,
-                    'error': f"Unsupported document type: {document_type}"
-                }
-        except Exception as e:
-            logger.error(f"Content extraction error for {file_path}: {str(e)}")
-            return {
-                'success': False,
-                'error': f"Content extraction failed: {str(e)}"
-            }
-    
+        """
+        Extract content from file based on its type.
+        
+        Delegates to specialized extraction methods for each document type.
+        """
+        if document_type == DocumentType.PDF:
+            return self._extract_pdf_content(file_path)
+        elif document_type == DocumentType.WORD:
+            return self._extract_word_content(file_path)
+        elif document_type in [DocumentType.TEXT, DocumentType.MARKDOWN]:
+            return self._extract_text_content(file_path)
+        elif document_type == DocumentType.HTML:
+            return self.html_processor.extract_content(file_path)
+        else:
+            logger.warning(f"Unsupported document type: {document_type}, attempting generic extraction")
+            # Fallback for other text-based formats
+            return self._extract_text_content(file_path)
+
     def _extract_pdf_content(self, file_path: str) -> Dict[str, Any]:
         """Extract content from PDF file."""
         try:
@@ -360,82 +359,40 @@ class DocumentProcessor:
                 'error': f"Word document extraction error: {str(e)}"
             }
     
-    def _extract_text_content(self, file_path: str) -> Dict[str, Any]:
-        """Extract content from plain text file."""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+    def _extract_text_content(self, file_path: str, encoding: str = 'utf-8') -> Dict[str, Any]:
+        """
+        Extract content from a text-based file (TXT, MD).
+        
+        Uses UnstructuredReader for robust text extraction.
+        
+        Args:
+            file_path: Path to the text file
+            encoding: File encoding
             
-            # Try to extract title from first line if it looks like a title
-            lines = content.split('\n')
-            title = None
-            if lines and len(lines[0]) < 100 and not lines[0].startswith(' '):
-                title = lines[0].strip()
+        Returns:
+            Dictionary containing extracted content and metadata
+        """
+        try:
+            # For simple text files, UnstructuredReader is effective
+            documents = self.unstructured_reader.load_data(file=Path(file_path))
+            
+            if not documents:
+                return {'success': False, 'error': "Failed to load text content"}
+
+            content = "\n\n".join([doc.get_content() for doc in documents])
+            metadata = documents[0].metadata if documents else {}
+            title = metadata.get('title', Path(file_path).stem)
             
             return {
                 'success': True,
                 'content': content,
                 'title': title,
                 'page_count': 1,
-                'language': 'en',  # Could use language detection here
-                'metadata': {}
-            }
-            
-        except UnicodeDecodeError:
-            # Try with different encoding
-            try:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
-                return {
-                    'success': True,
-                    'content': content,
-                    'title': None,
-                    'page_count': 1,
-                    'language': 'en',
-                    'metadata': {'encoding': 'latin-1'}
-                }
-            except Exception as e:
-                return {
-                    'success': False,
-                    'error': f"Text file encoding error: {str(e)}"
-                }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f"Text file extraction error: {str(e)}"
-            }
-    
-    def _extract_html_content(self, file_path: str) -> Dict[str, Any]:
-        """Extract content from HTML file."""
-        try:
-            documents = self.unstructured_reader.load_data(file=Path(file_path))
-            
-            if not documents:
-                return {
-                    'success': False,
-                    'error': "No content extracted from HTML"
-                }
-            
-            # Combine all document content
-            content = "\n\n".join([doc.text for doc in documents])
-            
-            # Extract metadata
-            metadata = documents[0].metadata if documents else {}
-            
-            return {
-                'success': True,
-                'content': content,
-                'title': metadata.get('title'),
-                'page_count': 1,
-                'language': metadata.get('language', 'en'),
                 'metadata': metadata
             }
-            
         except Exception as e:
-            return {
-                'success': False,
-                'error': f"HTML extraction error: {str(e)}"
-            }
+            logger.error(f"Error extracting content from text file {file_path}: {e}")
+            return {'success': False, 'error': f"Text extraction failed: {e}"}
     
     def _create_chunks(
         self, 
@@ -564,7 +521,8 @@ class DocumentProcessor:
 # Utility functions
 def create_default_processor() -> DocumentProcessor:
     """Create document processor with default configuration."""
-    return DocumentProcessor(ChunkingConfig())
+    config = ChunkingConfig(**settings.get_chunking_config())
+    return DocumentProcessor(config)
 
 
 def create_optimized_processor(chunk_size: int = 768, overlap: int = 64) -> DocumentProcessor:

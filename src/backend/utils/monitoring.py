@@ -1,6 +1,17 @@
 """
-Response Time Monitoring System for RAG Platform
-Performance tracking, alerting, and analytics
+Performance Monitoring and Alerting for the Enterprise RAG Platform.
+
+This module provides a `ResponseTimeMonitor` class that is responsible for
+tracking the performance of various components within the application.
+It records metrics such as duration, success/failure of operations, and
+associated metadata.
+
+Key features include:
+- A central, thread-safe monitor for recording performance metrics.
+- In-memory storage of recent metrics using a deque for efficiency.
+- Calculation of performance statistics (e.g., average, median, min/max duration).
+- A simple alerting mechanism for when operations exceed defined thresholds.
+- Singleton management to ensure a single monitor instance is used application-wide.
 """
 
 import logging
@@ -236,14 +247,15 @@ def record_llm_time(duration: float, model_name: str, tokens: int = 0) -> None:
     )
 
 
-def record_query_time(duration: float, sources_found: int = 0) -> None:
-    """Record query processing time"""
+def record_rag_pipeline_time(duration: float, tenant_id: str, success: bool = True) -> None:
+    """Record the total time for a RAG pipeline query."""
     monitor = get_performance_monitor()
     monitor.record_metric(
-        component="query_processor",
-        operation="process_query",
+        component="rag_pipeline",
+        operation="query",
         duration=duration,
-        metadata={"sources_found": sources_found}
+        metadata={"tenant_id": tenant_id},
+        success=success
     )
 
 

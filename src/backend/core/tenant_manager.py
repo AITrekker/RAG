@@ -1,8 +1,20 @@
 """
-Tenant Management Service for Enterprise RAG Platform
+Tenant Management Service for the Enterprise RAG Platform.
 
-Comprehensive service for managing tenant lifecycle, configuration, and isolation.
-Handles tenant creation, updates, deactivation, and resource management.
+This module provides the `TenantManager` class, which is the core service
+for handling all aspects of a tenant's lifecycle. It is responsible for
+creating, configuring, updating, and deleting tenants.
+
+The manager integrates with various other components to ensure that when a
+tenant is created, all necessary resources are provisioned correctly across
+the different layers of the platform. This includes:
+- Interacting with the `TenantIsolationStrategy` to apply the correct data
+  segregation policies.
+- Using the `TenantFilesystemManager` to create the necessary directory
+  structures.
+- Setting up collections in the vector store via the `ChromaManager`.
+- Managing tenant-specific API keys for secure access.
+- Suspending, reactivating, and tracking tenant usage statistics.
 
 Author: Enterprise RAG Platform Team
 """
@@ -15,10 +27,6 @@ import secrets
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from ..models.tenant import (
-    Tenant, TenantConfiguration, TenantUsageStats, TenantApiKey, TenantDocument,
-    create_default_tenant_config
-)
 from ..core.tenant_isolation import (
     get_tenant_isolation_strategy, TenantTier, IsolationLevel, TenantSecurityError
 )
@@ -48,7 +56,7 @@ class TenantManager:
         contact_email: Optional[str] = None,
         contact_name: Optional[str] = None,
         custom_config: Optional[Dict[str, Any]] = None
-    ) -> Tenant:
+    ) -> "Tenant":
         """
         Create a new tenant with complete setup
         
@@ -64,6 +72,7 @@ class TenantManager:
         Returns:
             Created tenant instance
         """
+        from ..models.tenant import Tenant
         try:
             # Validate tenant_id format
             if not self._validate_tenant_id(tenant_id):
@@ -93,11 +102,6 @@ class TenantManager:
             
             self.db.add(tenant)
             self.db.flush()  # Get the ID
-            
-            # Create default configurations
-            default_configs = create_default_tenant_config(tenant_id)
-            for config in default_configs:
-                self.db.add(config)
             
             # Create filesystem structure
             try:
@@ -136,7 +140,7 @@ class TenantManager:
             logger.error(f"Failed to create tenant {tenant_id}: {str(e)}")
             raise
     
-    def get_tenant(self, tenant_id: str, include_stats: bool = False) -> Optional[Tenant]:
+    def get_tenant(self, tenant_id: str, include_stats: bool = False) -> Optional["Tenant"]:
         """
         Get tenant by ID with optional statistics
         
@@ -147,6 +151,7 @@ class TenantManager:
         Returns:
             Tenant instance or None if not found
         """
+        from ..models.tenant import Tenant
         tenant = self.db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
         
         if tenant and include_stats:
@@ -162,7 +167,7 @@ class TenantManager:
         tier: Optional[TenantTier] = None,
         limit: int = 100,
         offset: int = 0
-    ) -> List[Tenant]:
+    ) -> List["Tenant"]:
         """
         List tenants with optional filtering
         
@@ -175,6 +180,7 @@ class TenantManager:
         Returns:
             List of tenant instances
         """
+        from ..models.tenant import Tenant
         query = self.db.query(Tenant)
         
         if status:
@@ -189,7 +195,7 @@ class TenantManager:
         self,
         tenant_id: str,
         updates: Dict[str, Any]
-    ) -> Tenant:
+    ) -> "Tenant":
         """
         Update tenant properties
         
@@ -222,7 +228,7 @@ class TenantManager:
         logger.info(f"Updated tenant {tenant_id} with fields: {list(updates.keys())}")
         return tenant
     
-    def suspend_tenant(self, tenant_id: str, reason: str = "") -> Tenant:
+    def suspend_tenant(self, tenant_id: str, reason: str = "") -> "Tenant":
         """
         Suspend a tenant (temporarily disable)
         
@@ -248,19 +254,14 @@ class TenantManager:
         if not tenant.custom_config:
             tenant.custom_config = {}
         tenant.custom_config['suspension_reason'] = reason
-        tenant.custom_config['suspended_at'] = tenant.suspended_at.isoformat()
         
-        # Deactivate API keys
-        api_keys = self.db.query(TenantApiKey).filter(TenantApiKey.tenant_id == tenant_id).all()
-        for key in api_keys:
-            key.is_active = False
-        
+        self.db.add(tenant)
         self.db.commit()
         
-        logger.warning(f"Suspended tenant {tenant_id}: {reason}")
+        logger.info(f"Suspended tenant {tenant_id} for reason: {reason}")
         return tenant
-    
-    def reactivate_tenant(self, tenant_id: str) -> Tenant:
+
+    def reactivate_tenant(self, tenant_id: str) -> "Tenant":
         """
         Reactivate a suspended tenant
         
@@ -275,28 +276,23 @@ class TenantManager:
             raise ValueError(f"Tenant {tenant_id} not found")
         
         if tenant.status != "suspended":
-            raise ValueError(f"Tenant {tenant_id} is not suspended")
+            return tenant
         
         tenant.status = "active"
+        tenant.activated_at = datetime.now(timezone.utc)
         tenant.suspended_at = None
         tenant.updated_at = datetime.now(timezone.utc)
         
-        # Remove suspension info from custom config
-        if tenant.custom_config:
-            tenant.custom_config.pop('suspension_reason', None)
-            tenant.custom_config.pop('suspended_at', None)
+        # Remove suspension reason
+        if tenant.custom_config and 'suspension_reason' in tenant.custom_config:
+            del tenant.custom_config['suspension_reason']
         
-        # Reactivate API keys (user can disable specific ones if needed)
-        api_keys = self.db.query(TenantApiKey).filter(TenantApiKey.tenant_id == tenant_id).all()
-        for key in api_keys:
-            if not key.is_expired():
-                key.is_active = True
-        
+        self.db.add(tenant)
         self.db.commit()
         
         logger.info(f"Reactivated tenant {tenant_id}")
         return tenant
-    
+
     def delete_tenant(
         self,
         tenant_id: str,
@@ -304,124 +300,105 @@ class TenantManager:
         backup: bool = True
     ) -> Dict[str, Any]:
         """
-        Delete a tenant and all associated data
+        Permanently delete a tenant and all associated data
         
         Args:
             tenant_id: Unique tenant identifier
-            force: Force deletion even if tenant has active resources
-            backup: Create backup before deletion
+            force: Skip checks and force deletion
+            backup: Create a backup before deletion
             
         Returns:
-            Deletion results
+            Deletion status report
         """
         tenant = self.get_tenant(tenant_id)
         if not tenant:
             raise ValueError(f"Tenant {tenant_id} not found")
         
+        if tenant.status == "active" and not force:
+            raise ValueError("Active tenants must be suspended before deletion. Use force=True to override.")
+        
         deletion_results = {
-            'tenant_id': tenant_id,
-            'success': False,
-            'backup_created': False,
-            'backup_path': None,
-            'resources_removed': {
-                'database_records': 0,
-                'filesystem_data': 0,
-                'vector_collections': 0,
-                'api_keys': 0
-            },
-            'errors': []
+            "tenant_id": tenant_id,
+            "status": "pending",
+            "backup_path": None,
+            "deleted_resources": [],
+            "errors": []
         }
         
+        # 1. Backup tenant data (optional)
+        if backup:
+            try:
+                backup_info = self.filesystem_manager.archive_tenant_data(tenant_id)
+                deletion_results["backup_path"] = backup_info.get("archive_path")
+                deletion_results["deleted_resources"].append("filesystem_backup")
+                logger.info(f"Created backup for tenant {tenant_id} at {backup_info.get('archive_path')}")
+            except Exception as e:
+                msg = f"Failed to backup tenant {tenant_id}: {str(e)}"
+                deletion_results["errors"].append(msg)
+                logger.error(msg)
+                if not force:
+                    raise
+        
+        # 2. Delete from vector store
         try:
-            # Check for active resources
-            if not force:
-                active_documents = self.db.query(TenantDocument).filter(
-                    TenantDocument.tenant_id == tenant_id,
-                    TenantDocument.status.in_(['processing', 'pending'])
-                ).count()
-                
-                if active_documents > 0:
-                    raise ValueError(f"Tenant has {active_documents} active documents. Use force=True to override.")
+            vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
+            if vector_config['type'] == 'collection_isolation':
+                collections = self.vector_store.list_collections()
+                prefix = vector_config['collection_prefix']
+                for collection in collections:
+                    if collection.startswith(prefix):
+                        try:
+                            self.vector_store.delete_collection(collection)
+                            deletion_results["deleted_resources"].append(f"vector_collection:{collection}")
+                        except Exception as e:
+                            deletion_results["errors"].append(f"Failed to delete collection {collection}: {str(e)}")
             
-            # Create backup if requested
-            if backup:
-                try:
-                    backup_result = self.filesystem_manager.archive_tenant_data(tenant_id)
-                    if backup_result['success']:
-                        deletion_results['backup_created'] = True
-                        deletion_results['backup_path'] = backup_result['archive_path']
-                except Exception as e:
-                    deletion_results['errors'].append(f"Backup failed: {str(e)}")
-            
-            # Remove database records
-            try:
-                # Delete related records (cascade should handle most)
-                api_keys_count = self.db.query(TenantApiKey).filter(TenantApiKey.tenant_id == tenant_id).count()
-                self.db.query(TenantApiKey).filter(TenantApiKey.tenant_id == tenant_id).delete()
-                
-                configs_count = self.db.query(TenantConfiguration).filter(TenantConfiguration.tenant_id == tenant_id).count()
-                self.db.query(TenantConfiguration).filter(TenantConfiguration.tenant_id == tenant_id).delete()
-                
-                stats_count = self.db.query(TenantUsageStats).filter(TenantUsageStats.tenant_id == tenant_id).count()
-                self.db.query(TenantUsageStats).filter(TenantUsageStats.tenant_id == tenant_id).delete()
-                
-                docs_count = self.db.query(TenantDocument).filter(TenantDocument.tenant_id == tenant_id).count()
-                self.db.query(TenantDocument).filter(TenantDocument.tenant_id == tenant_id).delete()
-                
-                # Delete tenant record
-                self.db.delete(tenant)
-                self.db.commit()
-                
-                deletion_results['resources_removed']['database_records'] = (
-                    1 + api_keys_count + configs_count + stats_count + docs_count
-                )
-                
-            except Exception as e:
-                deletion_results['errors'].append(f"Database cleanup failed: {str(e)}")
-                self.db.rollback()
-            
-            # Remove filesystem data
-            try:
-                cleanup_result = self.filesystem_manager.cleanup_tenant_structure(tenant_id, force)
-                if cleanup_result['success']:
-                    deletion_results['resources_removed']['filesystem_data'] = cleanup_result['removed_files']
-                else:
-                    deletion_results['errors'].extend(cleanup_result['errors'])
-            except Exception as e:
-                deletion_results['errors'].append(f"Filesystem cleanup failed: {str(e)}")
-            
-            # Remove vector store collections
-            try:
-                vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
-                if vector_config['type'] == 'separate_instance':
-                    # Remove entire instance
-                    deletion_results['resources_removed']['vector_collections'] = 1
-                else:
-                    # Remove collections with tenant prefix
-                    collections = self.vector_store.list_collections()
-                    prefix = vector_config['collection_prefix']
-                    removed_count = 0
-                    for collection in collections:
-                        if collection.startswith(prefix):
-                            try:
-                                self.vector_store.delete_collection(collection)
-                                removed_count += 1
-                            except Exception:
-                                pass
-                    deletion_results['resources_removed']['vector_collections'] = removed_count
-            except Exception as e:
-                deletion_results['errors'].append(f"Vector store cleanup failed: {str(e)}")
-            
-            deletion_results['success'] = len(deletion_results['errors']) == 0
-            
-            if deletion_results['success']:
-                logger.info(f"Successfully deleted tenant {tenant_id}")
-            else:
-                logger.warning(f"Tenant {tenant_id} deletion completed with errors: {deletion_results['errors']}")
-            
+            logger.info(f"Deleted vector store data for tenant {tenant_id}")
         except Exception as e:
-            deletion_results['errors'].append(str(e))
-            logger.error(f"Failed to delete tenant {tenant_id}: {str(e)}")
+            msg = f"Failed to delete vector store data for tenant {tenant_id}: {str(e)}"
+            deletion_results["errors"].append(msg)
+            logger.error(msg)
+            if not force:
+                raise
+        
+        # 3. Delete from filesystem
+        try:
+            cleanup_info = self.filesystem_manager.cleanup_tenant_structure(tenant_id, force=True)
+            if cleanup_info['success']:
+                deletion_results["deleted_resources"].append("filesystem_data")
+                logger.info(f"Deleted filesystem data for tenant {tenant_id}")
+            else:
+                deletion_results["errors"].extend(cleanup_info.get('errors', []))
+        except Exception as e:
+            msg = f"Failed to delete filesystem data for tenant {tenant_id}: {str(e)}"
+            deletion_results["errors"].append(msg)
+            logger.error(msg)
+            if not force:
+                raise
+        
+        # 4. Delete from database
+        try:
+            # Delete related records first
+            self.db.query(TenantApiKey).filter(TenantApiKey.tenant_id == tenant_id).delete()
+            self.db.query(TenantUsageStats).filter(TenantUsageStats.tenant_id == tenant_id).delete()
+            self.db.query(TenantDocument).filter(TenantDocument.tenant_id == tenant_id).delete()
+            
+            # Delete the tenant record
+            self.db.delete(tenant)
+            self.db.commit()
+            
+            deletion_results["deleted_resources"].append("database_records")
+            logger.info(f"Deleted database records for tenant {tenant_id}")
+        except Exception as e:
+            self.db.rollback()
+            msg = f"Failed to delete database records for tenant {tenant_id}: {str(e)}"
+            deletion_results["errors"].append(msg)
+            logger.error(msg)
+            if not force:
+                raise
+        
+        deletion_results["status"] = "completed"
+        logger.info(f"Successfully deleted tenant {tenant_id}")
         
         return deletion_results
     
@@ -431,7 +408,7 @@ class TenantManager:
         key_name: str,
         scopes: Optional[List[str]] = None,
         expires_in_days: Optional[int] = None
-    ) -> Tuple[str, TenantApiKey]:
+    ) -> Tuple[str, "TenantApiKey"]:
         """
         Generate a new API key for a tenant
         
@@ -442,8 +419,9 @@ class TenantManager:
             expires_in_days: Days until expiration (None for no expiration)
             
         Returns:
-            Tuple of (raw_key, api_key_record)
+            A tuple of (raw_api_key, TenantApiKey_instance)
         """
+        from ..models.tenant import TenantApiKey
         tenant = self.get_tenant(tenant_id)
         if not tenant:
             raise ValueError(f"Tenant {tenant_id} not found")
@@ -460,7 +438,7 @@ class TenantManager:
         expires_at = None
         if expires_in_days:
             expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
-        
+            
         # Create API key record
         api_key = TenantApiKey(
             tenant_id=tenant_id,
@@ -477,17 +455,18 @@ class TenantManager:
         logger.info(f"Generated API key '{key_name}' for tenant {tenant_id}")
         return raw_key, api_key
     
-    def validate_api_key(self, raw_key: str) -> Optional[TenantApiKey]:
+    def validate_api_key(self, raw_key: str) -> Optional["TenantApiKey"]:
         """
-        Validate an API key and return the associated record
+        Validate an API key and return the associated tenant key object
         
         Args:
             raw_key: Raw API key string
             
         Returns:
-            API key record if valid, None otherwise
+            The TenantApiKey instance if valid, else None
         """
-        if not raw_key.startswith("rag_"):
+        from ..models.tenant import TenantApiKey
+        if not raw_key or ":" not in raw_key:
             return None
         
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
@@ -507,112 +486,66 @@ class TenantManager:
         tenant_id: str,
         period_type: str = "daily",
         limit: int = 30
-    ) -> List[TenantUsageStats]:
+    ) -> List["TenantUsageStats"]:
         """
-        Get usage statistics for a tenant
+        Retrieve usage statistics for a tenant
         
         Args:
             tenant_id: Unique tenant identifier
-            period_type: Type of period (daily, weekly, monthly)
-            limit: Maximum number of periods to return
+            period_type: 'daily' or 'monthly'
+            limit: Number of periods to retrieve
             
         Returns:
-            List of usage statistics
+            A list of TenantUsageStats instances
         """
-        return self.db.query(TenantUsageStats).filter(
-            TenantUsageStats.tenant_id == tenant_id,
-            TenantUsageStats.period_type == period_type
-        ).order_by(TenantUsageStats.period_start.desc()).limit(limit).all()
+        from ..models.tenant import TenantUsageStats
+        query = self.db.query(TenantUsageStats).filter_by(tenant_id=tenant_id)
+        
+        if period_type == "daily":
+            query = query.filter(TenantUsageStats.period_type == "daily")
+        elif period_type == "monthly":
+            query = query.filter(TenantUsageStats.period_type == "monthly")
+        
+        return query.order_by(TenantUsageStats.period_start.desc()).limit(limit).all()
     
-    def update_configuration(
+    def get_tenant_configurations(
+        self,
+        tenant_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get all configurations for a tenant, merging defaults with custom settings.
+        """
+        tenant = self.get_tenant(tenant_id)
+        if not tenant:
+            return {}
+        
+        # In a real application, you would merge tenant.custom_config with global defaults
+        return tenant.custom_config or {}
+
+    def update_tenant_configuration(
         self,
         tenant_id: str,
-        category: str,
-        key: str,
-        value: str,
-        value_type: str = "string"
-    ) -> TenantConfiguration:
+        config_updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
-        Update or create a tenant configuration setting
-        
-        Args:
-            tenant_id: Unique tenant identifier
-            category: Configuration category
-            key: Configuration key
-            value: Configuration value
-            value_type: Type of value (string, int, float, bool, json)
-            
-        Returns:
-            Configuration record
+        Update a tenant's custom configuration.
         """
         tenant = self.get_tenant(tenant_id)
         if not tenant:
             raise ValueError(f"Tenant {tenant_id} not found")
         
-        # Find existing config or create new
-        config = self.db.query(TenantConfiguration).filter(
-            TenantConfiguration.tenant_id == tenant_id,
-            TenantConfiguration.category == category,
-            TenantConfiguration.key == key
-        ).first()
+        if not tenant.custom_config:
+            tenant.custom_config = {}
         
-        if config:
-            config.value = value
-            config.value_type = value_type
-            config.updated_at = datetime.now(timezone.utc)
-        else:
-            config = TenantConfiguration(
-                tenant_id=tenant_id,
-                category=category,
-                key=key,
-                value=value,
-                value_type=value_type
-            )
-            self.db.add(config)
-        
+        tenant.custom_config.update(config_updates)
         self.db.commit()
         
-        logger.info(f"Updated configuration {category}.{key} for tenant {tenant_id}")
-        return config
-    
-    def get_tenant_configurations(
-        self,
-        tenant_id: str,
-        category: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Get tenant configurations as a nested dictionary
-        
-        Args:
-            tenant_id: Unique tenant identifier
-            category: Optional category filter
-            
-        Returns:
-            Nested dictionary of configurations
-        """
-        query = self.db.query(TenantConfiguration).filter(
-            TenantConfiguration.tenant_id == tenant_id
-        )
-        
-        if category:
-            query = query.filter(TenantConfiguration.category == category)
-        
-        configs = query.all()
-        result = {}
-        
-        for config in configs:
-            if config.category not in result:
-                result[config.category] = {}
-            result[config.category][config.key] = config.get_typed_value()
-        
-        return result
-    
+        return tenant.custom_config
+
     def _validate_tenant_id(self, tenant_id: str) -> bool:
-        """Validate tenant ID format"""
-        import re
-        # Allow alphanumeric, hyphens, underscores, 3-64 characters
-        pattern = r'^[a-zA-Z0-9_-]{3,64}$'
-        return bool(re.match(pattern, tenant_id))
+        """Validate tenant ID format."""
+        # Must be lowercase, alphanumeric, with dashes
+        return all(c.islower() or c.isdigit() or c == '-' for c in tenant_id)
     
     def _cleanup_failed_tenant_creation(self, tenant_id: str) -> None:
         """Clean up resources from failed tenant creation"""
@@ -640,4 +573,113 @@ class TenantManager:
 
 def get_tenant_manager(db_session: Session) -> TenantManager:
     """Get tenant manager instance with database session"""
-    return TenantManager(db_session) 
+    return TenantManager(db_session)
+
+# Wrapper functions for auth compatibility
+def get_tenant_by_api_key(api_key: str) -> Optional[Dict[str, Any]]:
+    from .database import SessionLocal
+    db = SessionLocal()
+    manager = TenantManager(db)
+    tenant_info = manager.validate_api_key(api_key)
+    if tenant_info:
+        return {
+            "id": tenant_info.tenant.tenant_id,
+            "name": tenant_info.tenant.name,
+            "permissions": tenant_info.scopes,
+            "key_name": tenant_info.key_name
+        }
+    return None
+
+def record_api_key_usage(api_key: str):
+    # This is handled by validate_api_key
+    pass
+
+def create_api_key_for_tenant(tenant_id: str, key_name: str, permissions: List[str]) -> Tuple[str, str]:
+    from .database import SessionLocal
+    db = SessionLocal()
+    manager = TenantManager(db)
+    raw_key, api_key_obj = manager.generate_api_key(tenant_id, key_name, permissions)
+    return raw_key, api_key_obj.key_hash
+
+def get_api_keys_for_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+    from .database import SessionLocal
+    db = SessionLocal()
+    manager = TenantManager(db)
+    keys = db.query(TenantApiKey).filter(TenantApiKey.tenant_id == tenant_id).all()
+    return [
+        {
+            "id": key.id,
+            "key_hash": key.key_hash,
+            "key_name": key.key_name,
+            "permissions": key.scopes,
+            "created_at": key.created_at,
+            "expires_at": key.expires_at,
+            "last_used_at": key.last_used_at,
+        } for key in keys
+    ]
+
+def delete_api_key_for_tenant(api_key_hash: str) -> bool:
+    from .database import SessionLocal
+    db = SessionLocal()
+    key = db.query(TenantApiKey).filter(TenantApiKey.key_hash == api_key_hash).first()
+    if key:
+        key.is_active = False
+        db.commit()
+        return True
+    return False
+
+# --- New Singleton and Wrapper Functions ---
+
+_tenant_manager_instance: Optional[TenantManager] = None
+
+def get_tenant_manager_singleton(db_session: Optional[Session] = None) -> TenantManager:
+    """Get the singleton instance of the TenantManager."""
+    global _tenant_manager_instance
+    if _tenant_manager_instance is None:
+        if db_session is None:
+            from ..models.database import SessionLocal
+            db_session = SessionLocal()
+        _tenant_manager_instance = TenantManager(db_session)
+    return _tenant_manager_instance
+
+def get_tenant_by_api_key(api_key: str) -> Optional[Dict[str, Any]]:
+    """Get tenant info by raw API key."""
+    manager = get_tenant_manager_singleton()
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    api_key_obj = manager.get_api_key(key_hash)
+    
+    if api_key_obj and api_key_obj.is_active and (api_key_obj.expires_at is None or api_key_obj.expires_at > datetime.now(timezone.utc)):
+        tenant = manager.get_tenant(api_key_obj.tenant_id)
+        if tenant and tenant.status == "active":
+            return {
+                "id": tenant.tenant_id,
+                "name": tenant.name,
+                "permissions": api_key_obj.permissions,
+                "key_name": api_key_obj.key_name
+            }
+    return None
+
+def record_api_key_usage(api_key: str):
+    """Record API key usage."""
+    manager = get_tenant_manager_singleton()
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    api_key_obj = manager.get_api_key(key_hash)
+    if api_key_obj and api_key_obj.is_active:
+        api_key_obj.last_used_at = datetime.now(timezone.utc)
+        manager.db.commit()
+
+def create_api_key_for_tenant(tenant_id: str, key_name: str, permissions: List[str]) -> Tuple[str, str]:
+    """Create an API key for a tenant."""
+    manager = get_tenant_manager_singleton()
+    raw_key, api_key_obj = manager.generate_api_key(tenant_id, key_name, permissions)
+    return raw_key, api_key_obj.key_hash
+
+def get_api_keys_for_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+    """Get all API keys for a tenant."""
+    manager = get_tenant_manager_singleton()
+    return manager.get_api_keys(tenant_id)
+
+def delete_api_key_for_tenant(api_key_hash: str) -> bool:
+    """Delete an API key by its hash."""
+    manager = get_tenant_manager_singleton()
+    return manager.delete_api_key(api_key_hash) 

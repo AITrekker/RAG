@@ -245,13 +245,32 @@ class ApiClient {
     return response.data;
   }
 
+  // Audit API methods
+  async getAuditEvents(page: number = 1, pageSize: number = 100): Promise<{
+    events: any[]; // Replace 'any' with a proper SyncEvent model if available
+    total_count: number;
+    page: number;
+    page_size: number;
+  }> {
+    const response = await this.client.get('/audit/events', {
+      params: { offset: (page - 1) * pageSize, limit: pageSize },
+    });
+    // Assuming the API returns a list and we need to structure it for pagination
+    return {
+      events: response.data,
+      total_count: response.headers['x-total-count'] || response.data.length, // Fallback
+      page,
+      page_size: pageSize,
+    };
+  }
+
   // Utility methods
   setApiKey(apiKey: string): void {
     this.client.defaults.headers['X-API-Key'] = apiKey;
   }
 
   setTenantId(tenantId: string): void {
-    this.client.defaults.headers['X-Tenant-ID'] = tenantId;
+    this.client.defaults.headers['X-Tenant-Id'] = tenantId;
   }
 
   // Test connection
@@ -266,8 +285,8 @@ class ApiClient {
   }
 }
 
-// Create and export singleton instance
-export const apiClient = new ApiClient();
+// Export a singleton instance
+export const api = new ApiClient();
 
 // Export types and client
-export default apiClient; 
+export default api; 

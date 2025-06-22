@@ -1,8 +1,19 @@
 """
-Tenant-Specific Folder Structure Management
+Tenant-Specific Filesystem Management for the Enterprise RAG Platform.
 
-Utilities for creating, managing, and maintaining tenant-specific directory structures
-with proper isolation, permissions, and cleanup mechanisms.
+This module provides the `TenantFilesystemManager`, a utility responsible for
+creating, managing, and maintaining the directory structures required for
+each tenant. It ensures that tenant data is properly isolated on the file
+system, in accordance with the policies defined by the `TenantIsolationStrategy`.
+
+Key responsibilities include:
+- Creating a standardized set of directories for a new tenant (e.g., for
+  documents, uploads, cache, logs).
+- Validating the integrity and accessibility of a tenant's directory structure.
+- Calculating storage usage statistics for a tenant.
+- Securely cleaning up and removing all files and directories associated with
+  a tenant upon deletion.
+- Handling file system permissions to enforce data segregation.
 
 Author: Enterprise RAG Platform Team
 """

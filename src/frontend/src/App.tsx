@@ -1,16 +1,26 @@
-import React, { useState } from 'react';
-import { TenantProvider } from './contexts/TenantContext';
+import React, { useState, useEffect } from 'react';
+import { TenantProvider, useTenant } from './contexts/TenantContext';
 import { MainLayout } from './components/Layout/MainLayout';
 import { QueryInterface } from './components/Query/QueryInterface';
 import { SyncStatus } from './components/Sync/SyncStatus';
+import { AuditLogViewer } from './components/Audit/AuditLogViewer';
 import { usePerformanceMonitoring } from './hooks/usePerformanceMonitoring';
+import { api } from './services/api';
 import './App.css';
 
-type ActiveView = 'search' | 'sync' | 'help';
+type ActiveView = 'search' | 'sync' | 'audit' | 'help';
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('search');
   const { measureInteraction } = usePerformanceMonitoring();
+  const { tenant } = useTenant();
+
+  // Set the tenant ID for all API requests whenever the tenant changes
+  useEffect(() => {
+    if (tenant) {
+      api.setTenantId(tenant.id);
+    }
+  }, [tenant]);
 
   const handleViewChange = async (view: ActiveView) => {
     await measureInteraction(`navigation-${view}`, async () => {
@@ -48,6 +58,8 @@ function App() {
             <SyncStatus />
           </div>
         );
+      case 'audit':
+        return <AuditLogViewer />;
       case 'help':
         return (
           <div className="space-y-6">
@@ -89,37 +101,42 @@ function App() {
   };
 
   return (
-    <TenantProvider>
-      <MainLayout>
-        {/* Navigation Tabs */}
-        <div className="mb-8">
-          <nav className="flex space-x-8" aria-label="Tabs">
-            {[
-              { id: 'search', name: 'Search', icon: '🔍' },
-              { id: 'sync', name: 'Sync Status', icon: '🔄' },
-              { id: 'help', name: 'Help', icon: '❓' }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => handleViewChange(tab.id as ActiveView)}
-                className={`${
-                  activeView === tab.id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm transition-colors`}
-              >
-                <span className="mr-2">{tab.icon}</span>
-                {tab.name}
-              </button>
-            ))}
-          </nav>
-        </div>
+    <MainLayout>
+      {/* Navigation Tabs */}
+      <div className="mb-8">
+        <nav className="flex space-x-8" aria-label="Tabs">
+          {[
+            { id: 'search', name: 'Search', icon: '🔍' },
+            { id: 'sync', name: 'Sync Status', icon: '🔄' },
+            { id: 'audit', name: 'Audit Log', icon: '📄' },
+            { id: 'help', name: 'Help', icon: '❓' }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => handleViewChange(tab.id as ActiveView)}
+              className={`${
+                activeView === tab.id
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm transition-colors`}
+            >
+              <span className="mr-2">{tab.icon}</span>
+              {tab.name}
+            </button>
+          ))}
+        </nav>
+      </div>
 
-        {/* Content */}
-        {renderContent()}
-      </MainLayout>
-    </TenantProvider>
+      {/* Content */}
+      {renderContent()}
+    </MainLayout>
   );
 }
 
-export default App;
+const WrappedApp = () => (
+  <TenantProvider>
+    <App />
+  </TenantProvider>
+);
+
+export default WrappedApp;

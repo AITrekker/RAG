@@ -1,116 +1,170 @@
 """
-Enhanced RAG Pipeline with Real Document Processing
+Core RAG (Retrieval-Augmented Generation) Pipeline for the Enterprise Platform.
+
+This module orchestrates the end-to-end process of handling a user query,
+retrieving relevant context from documents, and generating a coherent,
+cited answer using a Large Language Model.
 """
 
-import sqlite3
-import json
+import logging
+import time
 from typing import List, Dict, Any, Optional
-from pathlib import Path
+
+from .embeddings import get_embedding_service, EmbeddingService
+from .llm_service import get_llm_service, LLMService
+from ..utils.vector_store import get_vector_store_manager, VectorStoreManager
+from ..models.api_models import RAGResponse, RAGSource
+from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from ..config.settings import settings
+
+logger = logging.getLogger(__name__)
+
 
 class RAGPipeline:
-    """Real RAG Pipeline that queries actual documents."""
-    
-    def __init__(self, db_path: str = "data/rag_platform.db"):
-        self.db_path = db_path
-    
-    def search_documents(self, query: str, tenant_id: str = "default", limit: int = 5) -> List[Dict[str, Any]]:
-        """Search for relevant document chunks using simple text matching."""
-        
-        if not Path(self.db_path).exists():
-            return []
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Simple keyword search (in production, this would use vector similarity)
-        query_words = query.lower().split()
-        
-        # Search in document chunks
-        cursor.execute("""
-            SELECT 
-                dc.content,
-                dc.chunk_index,
-                d.filename,
-                d.file_path,
-                dc.metadata
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE d.tenant_id = ? AND d.processing_status = 'completed'
-            ORDER BY dc.id
-        """, (tenant_id,))
-        
-        chunks = cursor.fetchall()
-        conn.close()
-        
-        # Score chunks based on keyword matches
-        scored_chunks = []
-        for content, chunk_index, filename, file_path, metadata in chunks:
-            content_lower = content.lower()
-            score = sum(1 for word in query_words if word in content_lower)
-            
-            if score > 0:
-                scored_chunks.append({
-                    'content': content,
-                    'score': score,
-                    'chunk_index': chunk_index,
-                    'filename': filename,
-                    'file_path': file_path,
-                    'metadata': json.loads(metadata) if metadata else {}
-                })
-        
-        # Sort by score and return top results
-        scored_chunks.sort(key=lambda x: x['score'], reverse=True)
-        return scored_chunks[:limit]
-    
-    def generate_response(self, query: str, context_chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Generate response based on retrieved context."""
-        
-        if not context_chunks:
-            return {
-                "answer": "I couldn't find relevant information in your documents to answer this question.",
-                "confidence": 0.0,
-                "sources": []
-            }
-        
-        # Simple response generation (in production, this would use an LLM)
-        relevant_content = []
-        sources = []
-        
-        for chunk in context_chunks:
-            relevant_content.append(chunk['content'][:200] + "...")
-            sources.append({
-                "filename": chunk['filename'],
-                "chunk_index": chunk['chunk_index'],
-                "confidence": min(chunk['score'] * 0.2, 1.0)  # Simple confidence scoring
-            })
-        
-        # Create a basic answer
-        answer = f"Based on your documents, here's what I found:\n\n"
-        answer += "\n\n".join(relevant_content)
-        
-        return {
-            "answer": answer,
-            "confidence": min(len(context_chunks) * 0.2, 0.9),
-            "sources": sources
-        }
-    
-    async def process_query(self, query: str, tenant_id: str = "default") -> Dict[str, Any]:
-        """Process a query and return response with sources."""
-        
-        # Search for relevant documents
-        context_chunks = self.search_documents(query, tenant_id)
-        
-        # Generate response
-        response = self.generate_response(query, context_chunks)
-        
-        return {
-            "query": query,
-            "answer": response["answer"],
-            "confidence": response["confidence"],
-            "sources": response["sources"],
-            "processing_time": 0.5,  # Mock processing time
-            "context_used": len(context_chunks)
-        }
+    """
+    The main pipeline for processing RAG queries. It integrates embedding,
+    vector search, and language model generation to produce answers with citations.
+    """
 
-# Global instance
-rag_pipeline = RAGPipeline()
+    def __init__(
+        self,
+        embedding_service: EmbeddingService,
+        llm_service: LLMService,
+        vector_store_manager: VectorStoreManager,
+    ):
+        """
+        Initializes the RAG pipeline with necessary service components.
+        """
+        self.embedding_service = embedding_service
+        self.llm_service = llm_service
+        self.vector_store_manager = vector_store_manager
+        logger.info("RAGPipeline initialized successfully.")
+
+    async def process_query(self, query: str, tenant_id: str) -> RAGResponse:
+        """
+        Processes a user query through the full RAG pipeline.
+
+        Args:
+            query: The user's question.
+            tenant_id: The ID of the tenant making the request.
+
+        Returns:
+            A RAGResponse object containing the answer, sources, and metadata.
+        """
+        start_time = time.time()
+        logger.info(f"Processing query for tenant '{tenant_id}': '{query}'")
+
+        # 1. Retrieve relevant document chunks
+        try:
+            retrieved_chunks = await self._retrieve_context(query, tenant_id)
+            if not retrieved_chunks:
+                logger.warning(f"No relevant context found for query: '{query}'")
+                return RAGResponse(
+                    answer="I could not find any relevant information in your documents to answer this question.",
+                    sources=[],
+                    query=query,
+                    confidence=0.0
+                )
+        except Exception as e:
+            logger.error(f"Error during context retrieval for tenant '{tenant_id}': {e}", exc_info=True)
+            raise RuntimeError("Failed to retrieve document context.") from e
+
+        # 2. Generate a response using the LLM
+        try:
+            llm_response = await self.llm_service.generate_rag_response(query, retrieved_chunks)
+        except Exception as e:
+            logger.error(f"Error during LLM generation for tenant '{tenant_id}': {e}", exc_info=True)
+            raise RuntimeError("Failed to generate a response from the language model.") from e
+        
+        # 3. Format the final response
+        processing_time = time.time() - start_time
+        logger.info(f"Successfully processed query in {processing_time:.2f} seconds.")
+
+        return RAGResponse(
+            answer=llm_response.text,
+            sources=[RAGSource(**chunk) for chunk in retrieved_chunks],
+            query=query,
+            confidence=self._calculate_confidence(retrieved_chunks),
+            processing_time=processing_time,
+            llm_metadata={
+                "model_name": llm_response.model_name,
+                "total_tokens": llm_response.total_tokens
+            }
+        )
+
+    async def _retrieve_context(self, query: str, tenant_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Retrieves the most relevant document chunks for a given query.
+
+        Args:
+            query: The user's question.
+            tenant_id: The ID of the tenant.
+            top_k: The number of chunks to retrieve.
+
+        Returns:
+            A list of retrieved chunks, each as a dictionary.
+        """
+        logger.info(f"Generating embedding for query: '{query}'")
+        query_embedding = self.embedding_service.encode_texts([query])
+        
+        if query_embedding.size == 0:
+            logger.error("Failed to generate query embedding.")
+            return []
+
+        logger.info(f"Searching vector store for tenant '{tenant_id}'...")
+        vector_store = self.vector_store_manager.get_vector_store(tenant_id)
+        
+        search_results = vector_store.query(
+            query_embeddings=query_embedding.tolist(),
+            n_results=top_k,
+            include=["metadatas", "documents", "distances"]
+        )
+        
+        # The result structure from ChromaDB is a bit nested.
+        retrieved_chunks = []
+        if search_results and search_results['ids'][0]:
+            for i, distance in enumerate(search_results['distances'][0]):
+                metadata = search_results['metadatas'][0][i]
+                chunk_data = {
+                    "id": search_results['ids'][0][i],
+                    "text": search_results['documents'][0][i],
+                    "score": 1 - distance,  # Convert distance to similarity score
+                    "filename": metadata.get("filename"),
+                    "page_number": metadata.get("page_number"),
+                    "chunk_index": metadata.get("chunk_index"),
+                }
+                retrieved_chunks.append(chunk_data)
+
+        logger.info(f"Retrieved {len(retrieved_chunks)} chunks from vector store.")
+        return retrieved_chunks
+    
+    def _calculate_confidence(self, chunks: List[Dict[str, Any]]) -> float:
+        """Calculates a simple confidence score based on retrieval scores."""
+        if not chunks:
+            return 0.0
+        
+        # Average the scores of the retrieved chunks
+        avg_score = sum(chunk.get('score', 0.0) for chunk in chunks) / len(chunks)
+        return round(avg_score, 2)
+
+
+# Singleton instance management
+_rag_pipeline_instance: Optional[RAGPipeline] = None
+
+def get_rag_pipeline() -> RAGPipeline:
+    """
+    Returns a singleton instance of the RAGPipeline.
+    This ensures that all services are initialized only once.
+    """
+    global _rag_pipeline_instance
+    if _rag_pipeline_instance is None:
+        logger.info("Initializing singleton RAGPipeline instance.")
+        _rag_pipeline_instance = RAGPipeline(
+            embedding_service=get_embedding_service(),
+            llm_service=get_llm_service(),
+            vector_store_manager=get_vector_store_manager(),
+        )
+    return _rag_pipeline_instance

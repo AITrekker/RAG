@@ -1,8 +1,16 @@
 """
-Tenant Isolation Strategy for Enterprise RAG Platform
+Tenant Isolation Strategies for the Enterprise RAG Platform.
 
-This module defines the comprehensive tenant isolation strategy across all system components
-to ensure complete data separation and security between tenants.
+This module is central to the multi-tenancy architecture of the platform.
+It defines and implements the strategies for isolating tenant data and
+operations across various layers of the application, including the database,
+file system, vector store, cache, and logging.
+
+The `TenantIsolationStrategy` class provides a configurable mechanism to
+enforce different levels of isolation (e.g., logical, physical, hybrid)
+based on tenant service tiers (e.g., Basic, Premium, Enterprise). This
+ensures that data is segregated securely and that resources are allocated
+appropriately for each tenant.
 
 Author: Enterprise RAG Platform Team
 """
@@ -12,6 +20,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from pathlib import Path
 import uuid
+from ..config.settings import settings
 
 
 class IsolationLevel(Enum):
@@ -39,6 +48,12 @@ class TenantIsolationConfig:
     vector_store_isolation: bool = True
     cache_isolation: bool = True
     logging_isolation: bool = True
+
+
+def get_tenant_from_db(db_session, tenant_id: str):
+    """Helper to fetch a tenant model from the database."""
+    from ..models.tenant import Tenant # Local import to break circular dependency
+    return db_session.query(Tenant).filter_by(tenant_id=tenant_id).first()
 
 
 class TenantIsolationStrategy:
@@ -250,21 +265,63 @@ def get_tenant_scoped_key(tenant_id: str, key: str) -> str:
 
 
 def validate_cross_tenant_access(requesting_tenant: str, target_tenant: str) -> bool:
-    """Validate cross-tenant access attempts"""
-    strategy = get_tenant_isolation_strategy()
-    return strategy.validate_tenant_access(requesting_tenant, target_tenant)
+    """Validate that a tenant can access another tenant's resources (for admin/support)."""
+    # Placeholder for more complex logic
+    return requesting_tenant == "admin" or requesting_tenant == target_tenant
 
 
 # Security decorators and middleware will use these functions
 class TenantSecurityError(Exception):
-    """Raised when tenant security violations are detected"""
+    """Custom exception for tenant isolation violations"""
     pass
 
 
 def ensure_tenant_isolation(func):
-    """Decorator to ensure tenant isolation in function calls"""
+    """Decorator to ensure a function is called with tenant context."""
     def wrapper(*args, **kwargs):
         # Implementation would check tenant context
         # This is a placeholder for the actual security implementation
+        from .tenant_scoped_db import TenantContext
+        if not TenantContext.get_current_tenant():
+            raise TenantSecurityError("Function called without tenant context")
         return func(*args, **kwargs)
-    return wrapper 
+    return wrapper
+
+
+# --- Tenant Scoped Query Logic ---
+
+from sqlalchemy.orm import Query, Session
+from sqlalchemy import and_
+# from ..models.tenant import Tenant, TenantApiKey, TenantDocument, TenantUsageStats
+
+TENANT_AWARE_MODELS = {
+    # Tenant: 'tenant_id',
+    # TenantApiKey: 'tenant_id',
+    # TenantDocument: 'tenant_id',
+    # TenantUsageStats: 'tenant_id',
+}
+
+def apply_tenant_filter(query: Query, model_class: type, tenant_id: str) -> Query:
+    """
+    Apply tenant filtering to a SQLAlchemy query.
+    """
+    if not tenant_id:
+        raise TenantSecurityError("No tenant ID provided for query filtering.")
+
+    if model_class in TENANT_AWARE_MODELS:
+        tenant_column = TENANT_AWARE_MODELS[model_class]
+        tenant_attr = getattr(model_class, tenant_column)
+        return query.filter(tenant_attr == tenant_id)
+
+    if model_class == Tenant:
+        return query.filter(Tenant.tenant_id == tenant_id)
+
+    logger.warning(f"Model {model_class.__name__} is not tenant-aware, query will not be filtered.")
+    return query
+
+def create_scoped_query(session: Session, model_class: type, tenant_id: str) -> Query:
+    """
+    Create a new tenant-scoped query.
+    """
+    query = session.query(model_class)
+    return apply_tenant_filter(query, model_class, tenant_id) 

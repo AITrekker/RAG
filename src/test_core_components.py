@@ -176,10 +176,12 @@ def test_monitoring():
     print_section("Monitoring System Test")
     
     try:
-        from backend.core.monitoring import get_performance_monitor, record_query_time
+        from backend.utils.monitoring import get_performance_monitor
+        import time
+
+        monitor = get_performance_monitor(force_reload=True)
         
         print_test("Monitor initialization")
-        monitor = get_performance_monitor()
         print_success("Performance monitor initialized")
         
         print_test("Metric recording")
@@ -191,7 +193,7 @@ def test_monitoring():
             metadata={"test": True}
         )
         
-        record_query_time(2.3, sources_found=5)
+        record_embedding_time(0.5, "test_model")
         print_success("Metrics recorded successfully")
         
         print_test("Statistics retrieval")
@@ -199,6 +201,13 @@ def test_monitoring():
         print_success("Statistics generated")
         print_info(f"Total operations: {stats['total_operations']}")
         print_info(f"Success rate: {stats['success_rate']:.1%}")
+        
+        # Test convenience functions
+        print_test("Convenience functions")
+        from backend.utils.monitoring import record_embedding_time
+        record_embedding_time(0.5, "test_model")
+        stats = monitor.get_overall_stats()
+        assert stats["total_operations"] == 3
         
         return True
         

@@ -42,7 +42,17 @@ The system follows a modular RAG architecture:
 - **Deployment:** Docker, Docker Compose
 - **Frontend:** React, TypeScript (as per plan)
 
-## 5. Getting Started (Local Development)
+## 5. Backend API Structure
+
+The `src/backend/api` directory defines the web server's endpoints, acting as the primary interface between the frontend and the core backend logic.
+
+-   **`routes/`**: This subdirectory contains the application's routes, with each file corresponding to a distinct set of functionalities:
+    -   **`query.py`**: Exposes the core RAG functionality by providing endpoints to process user queries, retrieve past results, and manage query history.
+    -   **`health.py`**: Offers endpoints to monitor the application's health and the status of its connected services.
+    -   **`sync.py`**: Manages document synchronization, including uploading, deleting, and checking the status of documents.
+    -   **`tenants.py`**: Handles tenant management, allowing for the creation, deletion, and configuration of different tenants.
+
+## 6. Getting Started (Local Development)
 
 1.  **Clone the repository:**
     ```bash
@@ -64,7 +74,7 @@ The system follows a modular RAG architecture:
     - The API will be available at `http://localhost:8000`.
     - The UI will be available at `http://localhost:3000`.
 
-## 6. Project Roadmap
+## 7. Project Roadmap
 
 This `README` outlines the plan for the initial MVP. We have a comprehensive roadmap for future development, including:
 
@@ -89,3 +99,56 @@ python scripts/run_backend.py --host 0.0.0.0
 # Frontend (PowerShell)
 .\scripts\run_frontend.ps1 -Port 4000
 .\scripts\run_frontend.ps1 -HostAddress 0.0.0.0 -Install
+
+## 8. Data Synchronization and Embedding Generation
+
+The platform uses a sophisticated delta synchronization process to keep tenant data up-to-date efficiently. Here's how it works:
+
+### How it Works (The Workflow)
+
+1.  **File Arrival**: An external process (e.g., a OneDrive or Dropbox sync client) is responsible for copying files from a customer's network into a tenant-specific staging directory: `/data/tenants/{tenant_id}/uploads/`.
+2.  **Manual Trigger**: The entire sync and embedding process is kicked off **manually** by an API call. It does not run on an automatic schedule.
+3.  **API Request**: An administrator or an automated script makes a `POST` request to the `/api/v1/sync` endpoint, specifying the tenant ID in the `X-Tenant-Id` header.
+4.  **Delta Detection**: This API call activates the `DeltaSyncService`, which compares the files in the `/uploads` directory with the files in the internal source-of-truth `/documents` directory. By comparing file hashes, it identifies exactly which files are new, which have been updated, and which have been deleted.
+5.  **Processing & Embedding Generation**:
+    *   **New/Updated Files**: The service copies the files from `uploads` to `documents`. It then triggers the `DocumentIngestionPipeline`, which reads the content, splits it into chunks, and **generates vector embeddings** for each chunk. The content and embeddings are stored in the database and vector store.
+    *   **Deleted Files**: The service finds the corresponding document record in the database, instructs the pipeline to delete all associated data (including embeddings), and finally removes the file from the `documents` directory.
+
+### How to Trigger a Sync
+
+The sync process must be triggered for each tenant individually. Use a tool like `curl` or any API client to make a `POST` request.
+
+-   **To sync Tenant 1:**
+    ```bash
+    curl -X POST http://localhost:8000/api/v1/sync -H "X-Tenant-Id: tenant1"
+    ```
+-   **To sync Tenant 2:**
+    ```bash
+    curl -X POST http://localhost:8000/api/v1/sync -H "X-Tenant-Id: tenant2"
+    ```
+
+### How Often to Sync (Automation)
+
+For automation, it is recommended to set up a **cron job** (on Linux/macOS) or a **Scheduled Task** (on Windows) to call these API endpoints at a regular interval (e.g., every hour or once per day), depending on your business requirements.
+
+### 9. Auditing the Sync Process
+
+To provide full visibility and traceability, the system includes a comprehensive auditing feature for the document synchronization process. Every sync run and every individual file operation is recorded in a persistent log in the database.
+
+#### The Benefits of Auditing
+
+*   **Complete Visibility**: See a step-by-step history of every sync run, including what files were added, updated, or deleted.
+*   **Faster Debugging**: If a document fails to process, the audit log will contain the specific error message, making it easy to diagnose the root cause.
+*   **Historical Record**: Maintain a permanent, verifiable ledger of all document operations for security and compliance purposes.
+*   **Foundation for Monitoring**: The audit data can be used to build monitoring dashboards or automated alerts (e.g., get an email if a sync run fails).
+
+#### How It Works
+
+1.  **`sync_events` Table**: A new table in the database, `sync_events`, stores the audit trail.
+2.  **`AuditLogger` Service**: A dedicated service is responsible for writing events to this table.
+3.  **Automatic Logging**: The `DeltaSyncService` automatically calls the `AuditLogger` to record the following events:
+    *   The start and end of each complete sync run.
+    *   The outcome (`SUCCESS` or `FAILURE`) of every individual file operation (add, update, delete).
+    *   Any error messages associated with a failure.
+
+This creates a detailed and permanent record of all data ingestion activities within the system, turning the previously "black box" sync process into a fully transparent and debuggable one.

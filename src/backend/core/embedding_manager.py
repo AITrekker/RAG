@@ -1,6 +1,12 @@
 """
-Embedding Generation Pipeline for RAG Platform
-High-performance pipeline using transformers + CUDA acceleration
+High-performance Embedding Generation for the RAG Platform.
+
+This module provides an `EmbeddingManager` that handles the efficient
+generation of text embeddings using a background worker pool. It supports
+batching, queuing, and prioritization to manage high throughput scenarios.
+The manager interfaces with an underlying `EmbeddingService` (like one based
+on SentenceTransformers) to perform the actual embedding computation, and
+it can automatically persist the generated embeddings into a vector store.
 """
 
 import logging
@@ -17,9 +23,8 @@ import threading
 
 # Internal imports
 from .embeddings import get_embedding_service, EmbeddingService
-from .rag_pipeline import create_documents_from_texts
 from ..config.settings import settings
-from ..utils.vector_store import get_chroma_manager
+from ..utils.vector_store import get_vector_store_manager
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +58,9 @@ class EmbeddingResult:
     error: Optional[str] = None
 
 
-class EmbeddingPipeline:
+class EmbeddingManager:
     """
-    High-performance embedding generation pipeline
+    High-performance embedding generation manager
     Supports batch processing, queuing, and CUDA acceleration
     """
     
@@ -68,7 +73,7 @@ class EmbeddingPipeline:
         auto_persist: bool = True
     ):
         """
-        Initialize embedding pipeline
+        Initialize embedding manager
         
         Args:
             max_batch_size: Maximum batch size for processing
@@ -85,7 +90,7 @@ class EmbeddingPipeline:
         
         # Initialize components
         self.embedding_service = get_embedding_service()
-        self.chroma_manager = get_chroma_manager()
+        self.vector_store_manager = get_vector_store_manager()
         
         # Processing queue and workers
         self.request_queue = queue.PriorityQueue(maxsize=max_queue_size)
@@ -102,7 +107,7 @@ class EmbeddingPipeline:
         # Thread safety
         self._lock = threading.RLock()
         
-        logger.info(f"Embedding pipeline initialized:")
+        logger.info(f"Embedding manager initialized:")
         logger.info(f"  Max batch size: {self.max_batch_size}")
         logger.info(f"  Worker threads: {self.worker_threads}")
         logger.info(f"  Auto persist: {self.auto_persist}")
@@ -243,46 +248,35 @@ class EmbeddingPipeline:
         batches = []
         
         for i in range(0, len(texts), self.max_batch_size):
-            end_idx = min(i + self.max_batch_size, len(texts))
+            end_index = i + self.max_batch_size
             
-            batch_texts = texts[i:end_idx]
-            batch_metadata = metadata[i:end_idx] if metadata else None
-            batch_ids = doc_ids[i:end_idx] if doc_ids else None
+            batch_texts = texts[i:end_index]
+            batch_metadata = metadata[i:end_index] if metadata else None
+            batch_ids = doc_ids[i:end_index] if doc_ids else None
             
             batches.append((batch_texts, batch_metadata, batch_ids))
         
         return batches
     
     def _persist_embeddings(self, request: EmbeddingRequest, embeddings: np.ndarray):
-        """Persist embeddings to vector store"""
+        """Persist embeddings to the vector store."""
         try:
-            # Get tenant collection
-            collection = self.chroma_manager.get_collection_for_tenant(request.tenant_id)
+            collection = self.vector_store_manager.get_collection_for_tenant(request.tenant_id)
             
-            # Prepare data for Chroma
-            ids = request.doc_ids or [f"doc_{i}_{int(time.time())}" for i in range(len(request.texts))]
-            metadatas = request.metadata or [{}] * len(request.texts)
+            # Convert numpy array to list of lists for Chroma
+            embeddings_list = embeddings.tolist()
             
-            # Add tenant info to metadata
-            for meta in metadatas:
-                meta.update({
-                    "tenant_id": request.tenant_id,
-                    "created_at": datetime.now().isoformat(),
-                    "embedding_model": self.embedding_service.model_name
-                })
-            
-            # Add to collection
             collection.add(
-                embeddings=embeddings.tolist(),
+                embeddings=embeddings_list,
                 documents=request.texts,
-                metadatas=metadatas,
-                ids=ids
+                metadatas=request.metadata,
+                ids=request.doc_ids
             )
             
-            logger.info(f"Persisted {len(embeddings)} embeddings for tenant {request.tenant_id}")
+            logger.info(f"Persisted {len(request.texts)} embeddings for tenant {request.tenant_id}")
             
         except Exception as e:
-            logger.error(f"Failed to persist embeddings: {e}")
+            logger.error(f"Failed to persist embeddings for tenant {request.tenant_id}: {e}", exc_info=True)
     
     def submit_request(
         self,
@@ -443,31 +437,32 @@ class EmbeddingPipeline:
         self.stop_workers()
 
 
-# Global pipeline instance
-_embedding_pipeline: Optional[EmbeddingPipeline] = None
+_embedding_manager_instance: Optional[EmbeddingManager] = None
+_embedding_manager_lock = threading.Lock()
 
 
-def get_embedding_pipeline(force_reload: bool = False, **kwargs) -> EmbeddingPipeline:
+def get_embedding_manager(force_reload: bool = False, **kwargs) -> EmbeddingManager:
     """
-    Get or create global embedding pipeline instance
+    Get the singleton instance of the EmbeddingManager.
     
     Args:
-        force_reload: Force creation of new pipeline
-        **kwargs: Additional arguments for EmbeddingPipeline
-        
+        force_reload: If True, creates a new instance.
+        **kwargs: Arguments for EmbeddingManager constructor if a new
+                  instance is created.
+                  
     Returns:
-        EmbeddingPipeline instance
+        The singleton EmbeddingManager instance.
     """
-    global _embedding_pipeline
+    global _embedding_manager_instance
     
-    if _embedding_pipeline is None or force_reload:
-        logger.info("Creating new embedding pipeline")
-        _embedding_pipeline = EmbeddingPipeline(**kwargs)
+    if _embedding_manager_instance is None or force_reload:
+        with _embedding_manager_lock:
+            if _embedding_manager_instance is None or force_reload:
+                logger.info("Creating new EmbeddingManager instance.")
+                _embedding_manager_instance = EmbeddingManager(**kwargs)
     
-    return _embedding_pipeline
+    return _embedding_manager_instance
 
-
-# Convenience functions for common operations
 
 def embed_texts_sync(
     texts: List[str],
@@ -476,19 +471,24 @@ def embed_texts_sync(
     doc_ids: Optional[List[str]] = None
 ) -> EmbeddingResult:
     """
-    Synchronously embed texts using the global pipeline
+    Synchronously embed a list of texts using the global embedding manager.
     
     Args:
-        texts: List of texts to embed
-        tenant_id: Tenant identifier
-        metadata: Optional metadata for each text
-        doc_ids: Optional document IDs
+        texts: List of texts to embed.
+        tenant_id: The tenant ID.
+        metadata: List of metadata dictionaries.
+        doc_ids: List of document IDs.
         
     Returns:
-        EmbeddingResult with generated embeddings
+        An EmbeddingResult object.
     """
-    pipeline = get_embedding_pipeline()
-    return pipeline.process_sync(texts, metadata, doc_ids, tenant_id)
+    manager = get_embedding_manager()
+    return manager.process_sync(
+        texts=texts,
+        metadata=metadata,
+        doc_ids=doc_ids,
+        tenant_id=tenant_id
+    )
 
 
 async def embed_texts_async(
@@ -498,19 +498,24 @@ async def embed_texts_async(
     doc_ids: Optional[List[str]] = None
 ) -> EmbeddingResult:
     """
-    Asynchronously embed texts using the global pipeline
+    Asynchronously embed a list of texts using the global embedding manager.
     
     Args:
-        texts: List of texts to embed
-        tenant_id: Tenant identifier
-        metadata: Optional metadata for each text
-        doc_ids: Optional document IDs
+        texts: List of texts to embed.
+        tenant_id: The tenant ID.
+        metadata: List of metadata dictionaries.
+        doc_ids: List of document IDs.
         
     Returns:
-        EmbeddingResult with generated embeddings
+        An EmbeddingResult object.
     """
-    pipeline = get_embedding_pipeline()
-    return await pipeline.process_async(texts, metadata, doc_ids, tenant_id)
+    manager = get_embedding_manager()
+    return await manager.process_async(
+        texts=texts,
+        metadata=metadata,
+        doc_ids=doc_ids,
+        tenant_id=tenant_id
+    )
 
 
 def embed_documents_from_files(
@@ -519,22 +524,23 @@ def embed_documents_from_files(
     chunk_size: Optional[int] = None
 ) -> List[EmbeddingResult]:
     """
-    Embed documents from files
+    DEPRECATED: This function is complex and couples document processing
+    with embedding. It's recommended to use DocumentIngestionPipeline instead.
     
-    Args:
-        file_paths: List of file paths to process
-        tenant_id: Tenant identifier
-        chunk_size: Override default chunk size
-        
-    Returns:
-        List of EmbeddingResult objects
+    Processes files, chunks them, and embeds the content.
     """
-    # This would integrate with document processing
-    # For now, just a placeholder
-    raise NotImplementedError("Document file processing not yet implemented")
+    raise NotImplementedError(
+        "embed_documents_from_files is deprecated. "
+        "Please use the DocumentIngestionPipeline for a more robust workflow."
+    )
 
 
 def get_pipeline_stats() -> Dict[str, Any]:
-    """Get stats from the global pipeline"""
-    pipeline = get_embedding_pipeline()
-    return pipeline.get_stats() 
+    """
+    Get performance statistics from the global embedding manager.
+    
+    Returns:
+        A dictionary of performance stats.
+    """
+    manager = get_embedding_manager()
+    return manager.get_stats() 

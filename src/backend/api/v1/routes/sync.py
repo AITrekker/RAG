@@ -10,12 +10,19 @@ from typing import List, Optional, Dict, Any
 import logging
 from datetime import datetime
 from enum import Enum
+import uuid
 
 from ...core.document_ingestion import DocumentIngestionPipeline
 from ...core.embeddings import EmbeddingService
 from ...utils.vector_store import VectorStoreManager
 from ...utils.file_monitor import FileMonitor
 from ...middleware.mock_tenant import get_current_tenant_id
+from ...models.database import get_db
+from ...core.tenant_manager import TenantManager
+from ...models.document import Document
+from sqlalchemy.orm import Session
+from ...core.delta_sync import DeltaSyncService
+from ...core.auditing import get_audit_logger
 
 logger = logging.getLogger(__name__)
 
@@ -146,12 +153,12 @@ async def trigger_sync(
     try:
         logger.info(f"Triggering sync for tenant {tenant_id}, type: {request.sync_type}")
         
-        # Generate sync ID
-        sync_id = f"{tenant_id}-{int(datetime.utcnow().timestamp() * 1000)}"
+        # Generate sync run ID
+        sync_run_id = f"sync-{uuid.uuid4()}"
         
         # Create initial sync response
         sync_response = SyncResponse(
-            sync_id=sync_id,
+            sync_id=sync_run_id,
             tenant_id=tenant_id,
             status=SyncStatus.RUNNING,
             sync_type=request.sync_type,
@@ -161,13 +168,13 @@ async def trigger_sync(
         # Add background task for actual sync processing
         background_tasks.add_task(
             process_sync_operation,
-            sync_id=sync_id,
+            sync_run_id=sync_run_id,
             tenant_id=tenant_id,
             pipeline=pipeline,
-            request=request
+            db=next(get_db())
         )
         
-        logger.info(f"Sync operation {sync_id} started for tenant {tenant_id}")
+        logger.info(f"Sync operation {sync_run_id} started for tenant {tenant_id}")
         return sync_response
         
     except Exception as e:
@@ -179,35 +186,40 @@ async def trigger_sync(
 
 
 async def process_sync_operation(
-    sync_id: str,
+    sync_run_id: str,
     tenant_id: str,
     pipeline: DocumentIngestionPipeline,
-    request: SyncRequest
+    db: Session
 ):
-    """Background task to process sync operation."""
+    """Background task to process sync operation using DeltaSyncService."""
+    audit_logger = get_audit_logger()
+    audit_logger.log_sync_event(db, sync_run_id, tenant_id, "SYNC_START", "IN_PROGRESS", "Synchronization process started.")
+    
     try:
-        logger.info(f"Processing sync operation {sync_id} for tenant {tenant_id}")
+        logger.info(f"Processing delta sync operation {sync_run_id} for tenant {tenant_id}")
         
-        # TODO: Implement actual sync processing
-        # This would involve:
-        # 1. Scanning the tenant's document folder
-        # 2. Identifying new/modified/deleted files
-        # 3. Processing documents through the ingestion pipeline
-        # 4. Updating the vector store
-        # 5. Tracking progress and updating sync status
-        
-        # Mock processing for now
-        import asyncio
-        await asyncio.sleep(5)  # Simulate processing time
-        
-        # Update sync status to completed
-        # TODO: Store sync results in database
-        
-        logger.info(f"Sync operation {sync_id} completed successfully")
-        
+        # Initialize the delta sync service
+        delta_sync_service = DeltaSyncService(
+            tenant_id=tenant_id,
+            db=db,
+            ingestion_pipeline=pipeline,
+            sync_run_id=sync_run_id,
+            audit_logger=audit_logger
+        )
+
+        # Run the synchronization
+        delta_sync_service.run_sync()
+
+        logger.info(f"Sync operation {sync_run_id} completed successfully")
+        audit_logger.log_sync_event(db, sync_run_id, tenant_id, "SYNC_END", "SUCCESS", "Synchronization process finished successfully.")
+
     except Exception as e:
-        logger.error(f"Sync operation {sync_id} failed: {e}")
-        # TODO: Update sync status to failed
+        error_message = f"Synchronization failed: {str(e)}"
+        logger.error(f"Sync operation {sync_run_id} failed: {e}", exc_info=True)
+        audit_logger.log_sync_event(db, sync_run_id, tenant_id, "SYNC_END", "FAILURE", error_message, metadata={"error": str(e)})
+        # TODO: Update main sync status in DB
+    finally:
+        db.close()
 
 
 @router.get("/sync/status", response_model=SyncResponse)

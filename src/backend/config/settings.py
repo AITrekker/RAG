@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     embedding_device: str = Field(default="cpu", env="EMBEDDING_DEVICE")
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
+    # LLM settings
+    llm_model: str = Field(
+        default="tiiuae/falcon-7b-instruct", 
+        env="LLM_MODEL"
+    )
+    llm_max_length: int = Field(default=1024, env="LLM_MAX_LENGTH")
+    llm_temperature: float = Field(default=0.6, env="LLM_TEMPERATURE")
+    llm_cache_dir: str = Field(default="./cache/transformers", env="LLM_CACHE_DIR")
+    llm_enable_quantization: bool = Field(default=True, env="LLM_ENABLE_QUANTIZATION")
+    
     # Document processing settings
     max_file_size_mb: int = Field(default=50, env="MAX_FILE_SIZE_MB")
     supported_file_types: List[str] = Field(
@@ -128,6 +138,16 @@ class Settings(BaseSettings):
             "model_name": self.embedding_model,
             "device": self.embedding_device,
             "batch_size": self.embedding_batch_size
+        }
+    
+    def get_llm_config(self) -> dict:
+        """Get LLM service configuration."""
+        return {
+            "model_name": self.llm_model,
+            "max_length": self.llm_max_length,
+            "temperature": self.llm_temperature,
+            "enable_quantization": self.llm_enable_quantization,
+            "cache_dir": self.llm_cache_dir
         }
     
     def get_chunking_config(self) -> dict:

@@ -1,27 +1,193 @@
 """
-Basic Document Ingestion Pipeline implementation.
+Document Ingestion Pipeline for the Enterprise RAG Platform.
+
+This module orchestrates the entire document ingestion process, including
+file monitoring, version control, processing, chunking, embedding generation,
+and storage in both a metadata database and a vector store.
 """
 
-from typing import Dict, Any, List
+import logging
+from pathlib import Path
+from typing import Tuple, Optional, List, Dict, Any
+from sqlalchemy.orm import Session
+
+from .document_processor import DocumentProcessor, create_default_processor
+from .embedding_manager import EmbeddingManager, get_embedding_manager
+from ..models.document import Document
+from ..utils.vector_store import VectorStoreManager
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentIngestionPipeline:
-    """Basic document ingestion pipeline for demo purposes."""
-    
-    def __init__(self, embedding_service=None, vector_store_manager=None, tenant_id: str = "default"):
-        self.embedding_service = embedding_service
-        self.vector_store_manager = vector_store_manager
+    """Orchestrates the document ingestion workflow."""
+
+    def __init__(
+        self,
+        tenant_id: str,
+        vector_store_manager: VectorStoreManager,
+        document_processor: DocumentProcessor = None,
+        embedding_manager: EmbeddingManager = None,
+    ):
         self.tenant_id = tenant_id
-    
+        self.vector_store_manager = vector_store_manager
+        self.document_processor = document_processor or create_default_processor()
+        self.embedding_manager = embedding_manager or get_embedding_manager()
+        logger.info(f"Initialized DocumentIngestionPipeline for tenant '{self.tenant_id}'")
+
+    def check_document_version(self, db: Session, file_path: Path) -> Tuple[bool, Optional[Document]]:
+        """
+        Checks if a document needs to be processed based on its hash.
+
+        Args:
+            db: The database session.
+            file_path: The path to the document file.
+
+        Returns:
+            A tuple containing a boolean indicating if processing is needed,
+            and the previous version of the document if it exists.
+        """
+        file_hash = self.document_processor._calculate_file_hash(str(file_path))
+
+        # Find the current version of the document by filename
+        existing_doc = db.query(Document).filter(
+            Document.tenant_id == self.tenant_id,
+            Document.filename == file_path.name,
+            Document.is_current_version == True
+        ).first()
+
+        if not existing_doc:
+            logger.info(f"Document '{file_path.name}' is new.")
+            return True, None
+
+        if existing_doc.file_hash == file_hash:
+            logger.info(f"Document '{file_path.name}' is unchanged (hash: {file_hash[:8]}).")
+            return False, existing_doc
+
+        logger.info(f"Document '{file_path.name}' has been modified. New version will be created.")
+        return True, existing_doc
+
+    async def ingest_document(self, db: Session, file_path: Path, previous_version: Optional[Document] = None) -> Tuple[Document, List[Dict[str, Any]]]:
+        """
+        Processes, chunks, and embeds a single document, handling versioning.
+
+        Args:
+            db: The database session.
+            file_path: The path to the document file.
+            previous_version: The previous version of the document, if any.
+
+        Returns:
+            A tuple of the new Document object and a list of created chunk dictionaries.
+        """
+        processing_result = self.document_processor.process_file(
+            file_path=str(file_path),
+            tenant_id=self.tenant_id,
+            filename=file_path.name
+        )
+
+        if not processing_result.success:
+            raise RuntimeError(f"Failed to process file: {processing_result.error_message}")
+
+        new_document = processing_result.document
+        chunks = processing_result.chunks
+
+        # --- Versioning Logic ---
+        if previous_version:
+            logger.info(f"Updating version for document '{new_document.filename}'.")
+            previous_version.is_current_version = False
+            db.add(previous_version)
+            new_document.version = previous_version.version + 1
+            new_document.parent_document_id = previous_version.id
+        else:
+            new_document.version = 1
+        
+        db.add(new_document)
+
+        # Generate embeddings for the chunks
+        chunk_contents = [chunk.content for chunk in chunks]
+        
+        embedding_result = await self.embedding_manager.process_async(
+            texts=chunk_contents,
+            tenant_id=self.tenant_id,
+        )
+
+        if not embedding_result.success or embedding_result.embeddings is None:
+            raise RuntimeError(f"Failed to generate embeddings: {embedding_result.error}")
+
+        embeddings = embedding_result.embeddings
+
+        if len(embeddings) != len(chunks):
+            raise RuntimeError("Mismatch between number of chunks and generated embeddings.")
+
+        # Update chunks with embeddings and add to DB
+        for i, chunk in enumerate(chunks):
+            chunk.embedding_vector = embeddings[i]
+            chunk.document_id = new_document.id
+            db.add(chunk)
+
+        # Add chunks to the vector store
+        try:
+            vector_store = self.vector_store_manager.get_vector_store(self.tenant_id)
+            vector_store.add(
+                ids=[str(chunk.id) for chunk in chunks],
+                embeddings=[chunk.embedding_vector for chunk in chunks],
+                documents=[chunk.content for chunk in chunks],
+                metadatas=[chunk.to_dict() for chunk in chunks]
+            )
+            logger.info(f"Added {len(chunks)} chunks to vector store for tenant '{self.tenant_id}'.")
+        except Exception as e:
+            logger.error(f"Failed to add chunks to vector store for tenant '{self.tenant_id}': {e}", exc_info=True)
+            # Rollback DB changes if vector store fails? For now, we'll log the error.
+            raise RuntimeError("Failed to update vector store.") from e
+
+        # Commit all database changes for this document at once
+        db.commit()
+        db.refresh(new_document)
+        for chunk in chunks:
+            db.refresh(chunk)
+            
+        logger.info(f"Successfully ingested and embedded document '{new_document.filename}' (v{new_document.version}).")
+        
+        return new_document, [chunk.to_dict() for chunk in chunks]
+
+    def delete_document(self, db: Session, document_id: int):
+        """
+        Deletes a document and all its associated data.
+
+        Args:
+            db: The database session.
+            document_id: The ID of the document to delete.
+        """
+        logger.info(f"Attempting to delete document with ID: {document_id}")
+        
+        doc_to_delete = db.query(Document).filter(Document.id == document_id).first()
+
+        if not doc_to_delete:
+            logger.warning(f"Document with ID {document_id} not found for deletion.")
+            return
+
+        # 1. Get all chunk IDs before deleting them
+        chunk_ids_to_delete = [str(chunk.id) for chunk in doc_to_delete.chunks]
+
+        # 2. Delete from Vector Store
+        if chunk_ids_to_delete:
+            try:
+                vector_store = self.vector_store_manager.get_vector_store(self.tenant_id)
+                vector_store.delete(ids=chunk_ids_to_delete)
+                logger.info(f"Deleted {len(chunk_ids_to_delete)} chunks from vector store for document {document_id}.")
+            except Exception as e:
+                logger.error(f"Failed to delete chunks from vector store for document {document_id}: {e}", exc_info=True)
+                # We might want to raise an exception here to halt the process
+                # For now, we'll log and continue with DB deletion.
+
+        # 3. Delete from Database (cascading delete should handle chunks)
+        # Note: This assumes the database is configured with cascading deletes
+        # from Document to Chunk. If not, chunks must be deleted manually.
+        db.delete(doc_to_delete)
+        db.commit()
+        
+        logger.info(f"Successfully deleted document {doc_to_delete.filename} (ID: {document_id}) from database.")
+
     def get_supported_extensions(self) -> List[str]:
         """Get list of supported file extensions."""
-        return [".pdf", ".docx", ".txt", ".md", ".html", ".htm"]
-    
-    def ingest_file(self, tenant_id: str, file_path: str) -> Dict[str, Any]:
-        """Ingest a single file."""
-        return {
-            "success": True,
-            "document_id": "mock_doc_id",
-            "chunks_created": 10,
-            "processing_time": 2.5
-        } 
+        return [".pdf", ".docx", ".txt", ".md", ".html", ".htm"] 

@@ -1,7 +1,18 @@
 """
-Authentication middleware for the Enterprise RAG Platform API.
+Authentication and Authorization for the Enterprise RAG Platform API.
 
-Handles API key validation, rate limiting, and basic security measures.
+This module provides the core security middleware for the FastAPI application.
+It handles API key-based authentication, ensuring that incoming requests are
+valid and associated with a specific tenant.
+
+Key features include:
+- API key extraction from request headers (`X-API-Key` or `Authorization: Bearer`).
+- Secure validation of API keys against a stored (hashed) collection.
+- A simple, in-memory rate-limiting mechanism to prevent abuse.
+- Dependency injection functions (`require_authentication`, `require_permission`)
+  to easily protect API endpoints.
+- Management of a user context dictionary that is passed to downstream
+  route handlers.
 """
 
 from fastapi import Request, HTTPException, status, Depends

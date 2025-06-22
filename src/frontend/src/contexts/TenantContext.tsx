@@ -10,9 +10,35 @@ export interface TenantConfig {
   welcomeMessage?: string;
 }
 
+// Define our available tenants
+const availableTenants: TenantConfig[] = [
+  {
+    id: 'tenant1',
+    name: 'InnovateCorp (Large Corp)',
+    primaryColor: '#1E3A8A', // Dark Blue
+    secondaryColor: '#1D4ED8',
+    welcomeMessage: 'Welcome to InnovateCorp. Efficiency and excellence are our driving principles.'
+  },
+  {
+    id: 'tenant2',
+    name: 'QuantumLeap (Mid-Size)',
+    primaryColor: '#047857', // Emerald
+    secondaryColor: '#059669',
+    welcomeMessage: 'QuantumLeap is growing fast. Let\'s find what you need to succeed.'
+  },
+  {
+    id: 'tenant3',
+    name: 'AgileSphere (Startup)',
+    primaryColor: '#9D174D', // Fuchsia
+    secondaryColor: '#BE185D',
+    welcomeMessage: 'AgileSphere moves quickly. Search our knowledge base to keep up!'
+  }
+];
+
 interface TenantContextType {
   tenant: TenantConfig | null;
-  setTenant: (tenant: TenantConfig | null) => void;
+  setTenantById: (tenantId: string) => void;
+  availableTenants: TenantConfig[];
   isLoading: boolean;
 }
 
@@ -27,27 +53,23 @@ export const TenantProvider: React.FC<TenantProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Load tenant configuration from localStorage or API
-    const loadTenantConfig = async () => {
+    // Load tenant configuration from localStorage or set a default
+    const loadTenantConfig = () => {
       try {
-        // Try to get tenant from localStorage first
-        const storedTenant = localStorage.getItem('tenant-config');
-        if (storedTenant) {
-          setTenant(JSON.parse(storedTenant));
+        const storedTenantId = localStorage.getItem('tenant-id');
+        const currentTenant = availableTenants.find(t => t.id === storedTenantId);
+
+        if (currentTenant) {
+          setTenant(currentTenant);
         } else {
-          // Default tenant configuration for development
-          const defaultTenant: TenantConfig = {
-            id: 'default',
-            name: 'Enterprise RAG Platform',
-            primaryColor: '#3B82F6',
-            secondaryColor: '#1E40AF',
-            welcomeMessage: 'Welcome to the Enterprise RAG Platform'
-          };
-          setTenant(defaultTenant);
-          localStorage.setItem('tenant-config', JSON.stringify(defaultTenant));
+          // Set tenant1 as the default
+          setTenant(availableTenants[0]);
+          localStorage.setItem('tenant-id', availableTenants[0].id);
         }
       } catch (error) {
         console.error('Failed to load tenant configuration:', error);
+        // Fallback to default if error
+        setTenant(availableTenants[0]);
       } finally {
         setIsLoading(false);
       }
@@ -56,16 +78,20 @@ export const TenantProvider: React.FC<TenantProviderProps> = ({ children }) => {
     loadTenantConfig();
   }, []);
 
+  const setTenantById = (tenantId: string) => {
+    const newTenant = availableTenants.find(t => t.id === tenantId);
+    if (newTenant) {
+      setTenant(newTenant);
+      localStorage.setItem('tenant-id', newTenant.id);
+    } else {
+      console.warn(`Tenant with id "${tenantId}" not found.`);
+    }
+  };
+
   const value = {
     tenant,
-    setTenant: (newTenant: TenantConfig | null) => {
-      setTenant(newTenant);
-      if (newTenant) {
-        localStorage.setItem('tenant-config', JSON.stringify(newTenant));
-      } else {
-        localStorage.removeItem('tenant-config');
-      }
-    },
+    setTenantById,
+    availableTenants,
     isLoading
   };
 

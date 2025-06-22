@@ -1,6 +1,15 @@
 """
-Local LLM Inference Service for RAG Platform
-Hugging Face transformers integration optimized for RTX 5070
+LLM Inference Service for the Enterprise RAG Platform.
+
+This module provides a comprehensive `LLMService` for local inference of
+Large Language Models (LLMs) using the Hugging Face `transformers` library.
+It is designed for high-performance generative tasks and includes features
+such as:
+- Automatic device placement with optimizations for NVIDIA GPUs (e.g., RTX 5070).
+- Support for 8-bit quantization to reduce memory footprint.
+- A text generation pipeline for handling prompts and generating responses.
+- Methods for standard and Retrieval-Augmented Generation (RAG) prompts.
+- Performance tracking and singleton management for efficient resource use.
 """
 
 import logging
@@ -48,11 +57,11 @@ class LLMService:
     
     def __init__(
         self,
-        model_name: str = "microsoft/DialoGPT-medium",
+        model_name: str,
+        max_length: int,
+        temperature: float,
+        enable_quantization: bool,
         device: Optional[str] = None,
-        max_length: int = 512,
-        temperature: float = 0.7,
-        enable_quantization: bool = True,
         cache_dir: Optional[str] = None
     ):
         """
@@ -60,17 +69,17 @@ class LLMService:
         
         Args:
             model_name: Hugging Face model identifier
-            device: Computing device ('cuda', 'cpu', or None for auto-detect)
             max_length: Maximum response length
             temperature: Generation temperature (0.0 to 1.0)
             enable_quantization: Enable 8-bit quantization for memory efficiency
+            device: Computing device ('cuda', 'cpu', or None for auto-detect)
             cache_dir: Directory to cache downloaded models
         """
         self.model_name = model_name
         self.max_length = max_length
         self.temperature = temperature
         self.enable_quantization = enable_quantization
-        self.cache_dir = cache_dir or "./cache/transformers"
+        self.cache_dir = cache_dir
         
         # Set up device (prioritize RTX 5070 if available)
         self.device = self._setup_device(device)
@@ -214,8 +223,8 @@ class LLMService:
             gen_temperature = temperature if temperature is not None else self.temperature
             max_tokens = max_new_tokens or min(self.max_length, 256)
             
-            # Prepare full prompt with context
-            full_prompt = self._prepare_prompt(prompt, context)
+            # Prepare full prompt with context using a structured template
+            full_prompt = self._prepare_rag_prompt(prompt, context)
             
             # Count input tokens
             input_tokens = len(self.tokenizer.encode(full_prompt))
@@ -242,6 +251,10 @@ class LLMService:
             else:
                 generated_text = ""
             
+            # Clean up the response to remove the prompt
+            if full_prompt in generated_text:
+                generated_text = generated_text.replace(full_prompt, "").strip()
+
             # Count output tokens
             output_tokens = len(self.tokenizer.encode(generated_text))
             total_tokens = input_tokens + output_tokens
@@ -254,7 +267,7 @@ class LLMService:
             
             # Create response
             response = LLMResponse(
-                text=generated_text.strip(),
+                text=generated_text,
                 prompt_tokens=input_tokens,
                 completion_tokens=output_tokens,
                 total_tokens=total_tokens,
@@ -285,34 +298,34 @@ class LLMService:
                 error=str(e)
             )
     
-    def _prepare_prompt(self, prompt: str, context: Optional[List[str]] = None) -> str:
-        """
-        Prepare the full prompt with context
-        
-        Args:
-            prompt: Main prompt
-            context: Optional context information
-            
-        Returns:
-            Full prompt string
-        """
+    def _prepare_rag_prompt(self, query: str, context: Optional[List[str]] = None) -> str:
+        """Prepares a structured prompt for RAG."""
         if not context:
-            return prompt
-        
-        # Simple RAG prompt template
-        context_str = "\n".join(f"- {ctx}" for ctx in context)
-        
-        full_prompt = f"""Based on the following context information, please answer the question.
+            # For Falcon-Instruct, a simple user/assistant format works well without context.
+            return f"User: {query}\nAssistant:"
+
+        context_str = "\n\n".join(context)
+        prompt = f"""Answer the following question based on the provided context. If the context does not contain the answer, say "I cannot answer this question based on the provided context."
 
 Context:
+---
 {context_str}
+---
 
-Question: {prompt}
+Question: {query}
 
 Answer:"""
-        
-        return full_prompt
-    
+        return prompt
+
+    def _prepare_prompt(self, prompt: str, context: Optional[List[str]] = None) -> str:
+        """Prepares a full prompt by combining a query and optional context.
+        DEPRECATED: Use _prepare_rag_prompt for clearer RAG structure.
+        """
+        if context:
+            context_str = "\n\n".join(context)
+            return f"Context:\n{context_str}\n\nQuestion: {prompt}\nAnswer:"
+        return prompt
+
     def generate_rag_response(
         self,
         query: str,
@@ -332,17 +345,11 @@ Answer:"""
         Returns:
             LLMResponse with generated answer
         """
-        # Extract context from sources
-        context = []
-        for source in sources[:5]:  # Use top 5 sources
-            text = source.get("text", "")
-            if text:
-                # Truncate long texts
-                context.append(text[:300] + "..." if len(text) > 300 else text)
+        full_prompt = self._prepare_rag_prompt(query, [source['text'] for source in sources])
         
         return self.generate_response(
-            prompt=query,
-            context=context,
+            prompt=full_prompt,  # The prompt is now the full structured text
+            context=None, # Context is already in the prompt
             max_new_tokens=max_new_tokens,
             temperature=temperature
         )
@@ -433,7 +440,7 @@ Answer:"""
 
 
 # Global LLM service instance
-_llm_service: Optional[LLMService] = None
+_llm_service_instance: Optional[LLMService] = None
 
 
 def get_llm_service(
@@ -441,31 +448,25 @@ def get_llm_service(
     force_reload: bool = False,
     **kwargs
 ) -> LLMService:
-    """
-    Get or create global LLM service instance
+    """Get singleton instance of LLM service, loading if needed."""
+    global _llm_service_instance
     
-    Args:
-        model_name: Model to use (optional)
-        force_reload: Force creation of new service
-        **kwargs: Additional arguments for LLMService
+    if _llm_service_instance is None or force_reload:
+        if force_reload and _llm_service_instance:
+            _llm_service_instance.clear_cache()
+            
+        logger.info("Initializing LLM service singleton...")
         
-    Returns:
-        LLMService instance
-    """
-    global _llm_service
-    
-    # Default to a lightweight model suitable for RTX 5070
-    default_model = model_name or "microsoft/DialoGPT-medium"
-    
-    if (_llm_service is None or 
-        force_reload or 
-        (model_name and _llm_service.model_name != model_name)):
+        # Combine settings from config and kwargs
+        config = settings.get_llm_config()
+        if model_name: # Override model name if provided
+            config['model_name'] = model_name
+        config.update(kwargs)
         
-        logger.info(f"Creating new LLM service with model: {default_model}")
-        _llm_service = LLMService(model_name=default_model, **kwargs)
-        _llm_service.load_model()
+        _llm_service_instance = LLMService(**config)
+        _llm_service_instance.load_model()
     
-    return _llm_service
+    return _llm_service_instance
 
 
 # Model recommendations for different use cases

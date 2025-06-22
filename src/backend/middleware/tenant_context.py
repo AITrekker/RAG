@@ -1,268 +1,126 @@
 """
-Tenant Context Middleware for API Requests
+Tenant Context Middleware and Dependencies for FastAPI.
 
-Middleware for FastAPI that extracts tenant information from requests,
-validates authentication, and sets up tenant context for request processing.
+This module provides the `TenantContextMiddleware` for the FastAPI application,
+which is responsible for identifying the tenant associated with each incoming
+API request. It works by extracting an API key from the request headers,
+validating it, and then setting a tenant context that can be accessed
+throughout the request's lifecycle.
+
+Key functionalities include:
+- A middleware that intercepts requests to establish tenant context.
+- Extraction of API keys from `Authorization: Bearer` or `X-API-Key` headers.
+- Integration with the `TenantManager` to validate API keys and retrieve
+  tenant information.
+- A mechanism to exclude certain paths (like `/docs` or `/health`) from
+  requiring tenant authentication.
+- FastAPI dependency functions (`get_current_tenant_id`, etc.) that allow
+  API route handlers to easily access the current tenant's context.
 
 Author: Enterprise RAG Platform Team
 """
 
-from typing import Optional, Dict, Any, Callable, List, Tuple
 import logging
-from datetime import datetime, timezone
-from fastapi import Request, Response, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.security.utils import get_authorization_scheme_param
+from typing import Callable, Optional, List, Tuple
+from fastapi import Request, Response, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-import hashlib
-import uuid
 
-from ..core.tenant_scoped_db import TenantContext, extract_tenant_from_api_key
-from ..core.tenant_isolation import TenantSecurityError
-from ..models.tenant import TenantApiKey, Tenant
+from ..core.tenant_scoped_db import TenantContext
 from ..core.tenant_manager import get_tenant_manager
+from ..models.tenant import TenantApiKey
 
 logger = logging.getLogger(__name__)
-
-# Global tenant context storage (in production, use proper context management)
-_tenant_context: Dict[str, Any] = {}
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
-    Middleware to extract and validate tenant context from API requests
+    Middleware to extract and validate tenant context from API requests.
     """
     
     def __init__(
         self,
         app,
         db_session_factory: Callable,
-        require_tenant_context: bool = True,
         excluded_paths: Optional[List[str]] = None
     ):
         super().__init__(app)
         self.db_session_factory = db_session_factory
-        self.require_tenant_context = require_tenant_context
         self.excluded_paths = excluded_paths or [
             "/docs", "/redoc", "/openapi.json", "/health", "/ping",
             "/api/v1/health", "/api/v1/status"
         ]
-        self.security = HTTPBearer(auto_error=False)
-    
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """
-        Process request through tenant context middleware
-        
-        Args:
-            request: FastAPI request object
-            call_next: Next middleware/handler in chain
-            
-        Returns:
-            Response object
-        """
-        # Clear any existing tenant context
+        """Process the request and manage tenant context."""
         TenantContext.clear_context()
-        
+
+        if self._is_excluded_path(request.url.path):
+            return await call_next(request)
+
         try:
-            # Check if path is excluded from tenant requirements
-            if self._is_excluded_path(request.url.path):
-                return await call_next(request)
-            
-            # Extract tenant context from request
-            tenant_info = await self._extract_tenant_context(request)
-            
-            if tenant_info:
-                tenant_id, user_id, api_key_record = tenant_info
-                
-                # Set tenant context
+            api_key = self._extract_api_key(request)
+            if not api_key:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "API key required"}
+                )
+
+            with self.db_session_factory() as db:
+                tenant_manager = get_tenant_manager(db)
+                api_key_record = tenant_manager.validate_api_key(api_key)
+
+                if not api_key_record:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid or expired API key"
+                    )
+
+                # Set tenant context for the request
+                tenant_id = api_key_record.tenant_id
+                user_id = self._extract_user_id(request)
                 TenantContext.set_current_tenant(tenant_id, user_id)
                 
-                # Add tenant info to request state
                 request.state.tenant_id = tenant_id
                 request.state.user_id = user_id
                 request.state.api_key_record = api_key_record
-                
-                # Log tenant context
-                logger.debug(
-                    f"Set tenant context for request: {tenant_id} "
-                    f"(user: {user_id}, path: {request.url.path})"
-                )
-                
-            elif self.require_tenant_context:
-                # Tenant context required but not found
-                return JSONResponse(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={
-                        "error": "authentication_required",
-                        "message": "Valid tenant authentication required",
-                        "details": "Please provide a valid API key in the Authorization header"
-                    }
-                )
-            
-            # Process request
+
             response = await call_next(request)
-            
-            # Add tenant info to response headers (for debugging)
-            if tenant_info:
-                response.headers["X-Tenant-ID"] = tenant_info[0]
-            
+            response.headers["X-Tenant-ID"] = tenant_id
             return response
-            
-        except TenantSecurityError as e:
-            logger.warning(f"Tenant security error: {str(e)}")
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content={
-                    "error": "access_denied",
-                    "message": "Tenant access denied",
-                    "details": str(e)
-                }
-            )
+
         except HTTPException as e:
-            return JSONResponse(
-                status_code=e.status_code,
-                content={
-                    "error": "authentication_error",
-                    "message": e.detail,
-                    "details": "Authentication failed"
-                }
-            )
+            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
         except Exception as e:
-            logger.error(f"Unexpected error in tenant middleware: {str(e)}")
+            logger.error(f"Error in tenant context middleware: {e}", exc_info=True)
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={
-                    "error": "internal_error",
-                    "message": "Internal server error during authentication",
-                    "details": "Please contact support"
-                }
+                content={"detail": "Internal server error"}
             )
         finally:
-            # Always clear context after request
             TenantContext.clear_context()
-    
-    async def _extract_tenant_context(self, request: Request) -> Optional[Tuple[str, Optional[str], TenantApiKey]]:
-        """
-        Extract tenant context from request headers and validate
+
+    def _extract_api_key(self, request: Request) -> Optional[str]:
+        """Extract API key from 'Authorization: Bearer <key>' or 'X-API-Key' header."""
+        auth_header = request.headers.get("Authorization")
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                return parts[1]
         
-        Args:
-            request: FastAPI request object
-            
-        Returns:
-            Tuple of (tenant_id, user_id, api_key_record) or None
-        """
-        # Try to get API key from Authorization header
-        api_key = await self._extract_api_key(request)
-        if not api_key:
-            # Try alternative headers
-            api_key = self._extract_api_key_from_headers(request)
-        
-        if not api_key:
-            return None
-        
-        # Validate API key and get tenant info
-        with self.db_session_factory() as db:
-            tenant_manager = get_tenant_manager(db)
-            api_key_record = tenant_manager.validate_api_key(api_key)
-            
-            if not api_key_record:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired API key"
-                )
-            
-            # Check if tenant is active
-            tenant = tenant_manager.get_tenant(api_key_record.tenant_id)
-            if not tenant:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Tenant not found"
-                )
-            
-            if tenant.status != "active":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Tenant is {tenant.status}"
-                )
-            
-            # Extract user ID if available (could come from JWT or other auth)
-            user_id = self._extract_user_id(request)
-            
-            return api_key_record.tenant_id, user_id, api_key_record
-    
-    async def _extract_api_key(self, request: Request) -> Optional[str]:
-        """
-        Extract API key from Authorization header
-        
-        Args:
-            request: FastAPI request object
-            
-        Returns:
-            API key string or None
-        """
-        authorization = request.headers.get("Authorization")
-        if not authorization:
-            return None
-        
-        scheme, credentials = get_authorization_scheme_param(authorization)
-        
-        # Support Bearer token format
-        if scheme.lower() == "bearer":
-            return credentials
-        
-        # Support API key format
-        if scheme.lower() == "api-key":
-            return credentials
-        
-        return None
-    
-    def _extract_api_key_from_headers(self, request: Request) -> Optional[str]:
-        """
-        Extract API key from alternative headers
-        
-        Args:
-            request: FastAPI request object
-            
-        Returns:
-            API key string or None
-        """
-        # Check X-API-Key header
-        api_key = request.headers.get("X-API-Key")
-        if api_key:
-            return api_key
-        
-        # Check X-Auth-Token header
-        auth_token = request.headers.get("X-Auth-Token")
-        if auth_token:
-            return auth_token
-        
-        return None
-    
+        return request.headers.get("X-API-Key")
+
     def _extract_user_id(self, request: Request) -> Optional[str]:
-        """
-        Extract user ID from request (placeholder for future auth)
-        
-        Args:
-            request: FastAPI request object
-            
-        Returns:
-            User ID string or None
-        """
-        # Placeholder for JWT token parsing or other user identification
+        """Placeholder to extract user ID from request, e.g., from a JWT."""
+        # This can be expanded to decode a JWT and get a user ID
         return request.headers.get("X-User-ID")
-    
+
     def _is_excluded_path(self, path: str) -> bool:
-        """
-        Check if path is excluded from tenant requirements
-        
-        Args:
-            path: Request path
-            
-        Returns:
-            True if excluded
-        """
-        return any(path.startswith(excluded) for excluded in self.excluded_paths)
+        """Check if a path is excluded from tenant context validation."""
+        for excluded in self.excluded_paths:
+            if path.startswith(excluded):
+                return True
+        return False
 
 
 class TenantValidationMiddleware:
@@ -537,7 +395,6 @@ async def tenant_security_exception_handler(request: Request, exc: TenantSecurit
 def configure_tenant_middleware(
     app,
     db_session_factory: Callable,
-    require_tenant_context: bool = True,
     excluded_paths: Optional[List[str]] = None
 ) -> None:
     """
@@ -546,14 +403,12 @@ def configure_tenant_middleware(
     Args:
         app: FastAPI application instance
         db_session_factory: Database session factory
-        require_tenant_context: Whether to require tenant context
         excluded_paths: Paths to exclude from tenant requirements
     """
     # Add tenant context middleware
     app.add_middleware(
         TenantContextMiddleware,
         db_session_factory=db_session_factory,
-        require_tenant_context=require_tenant_context,
         excluded_paths=excluded_paths
     )
     

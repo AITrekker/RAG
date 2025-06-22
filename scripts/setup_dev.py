@@ -238,16 +238,61 @@ def setup_frontend_environment() -> bool:
     os.chdir("../..")
     return True
 
+def get_env_example_content() -> str:
+    """Returns the content for the .env.example file"""
+    return """# RAG Enterprise Platform - Environment Variables
+# -------------------------------------------------
+# Copy this file to .env and fill in the values for your local setup.
+
+# -- General Settings --
+ENVIRONMENT=development # development, staging, or production
+LOG_LEVEL=INFO # DEBUG, INFO, WARNING, ERROR
+
+# -- Backend Settings --
+# For local development, these are often managed by docker-compose or direct execution scripts.
+# For production, these should be set explicitly.
+DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_database
+CHROMA_PERSIST_DIRECTORY=./data/chroma
+UPLOAD_DIRECTORY=./data/uploads
+TRANSFORMERS_CACHE=./cache/transformers
+# Set to 0 to use the first available GPU, or "-1" to force CPU.
+CUDA_VISIBLE_DEVICES=0
+
+# -- Frontend Settings --
+# These are typically build-time variables for the frontend container/service.
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_APP_TITLE="Enterprise RAG Platform"
+
+# -- Security Settings (for later layers) --
+# SECRET_KEY=your_super_secret_key_here
+# API_KEY_SALT=your_api_key_salt_here
+
+# -- CORS Origins --
+# A JSON string of a list of allowed origins
+CORS_ORIGINS='["http://localhost:3000", "http://127.0.0.1:3000"]'
+"""
+
 def setup_environment_files() -> bool:
     """Set up environment configuration files"""
     print_section("ENVIRONMENT CONFIGURATION")
     
-    # Create .env from .env.example if it doesn't exist
     env_example = Path(".env.example")
     env_file = Path(".env")
     
+    # Create .env.example if it does not exist
+    if not env_example.exists():
+        try:
+            print_step("Creating .env.example file")
+            env_example.write_text(get_env_example_content())
+            print_step(".env.example created successfully", "SUCCESS")
+        except IOError as e:
+            print_step(f"Failed to create .env.example: {e}", "ERROR")
+            return False
+
+    # Create .env from .env.example if it doesn't exist
     if env_example.exists() and not env_file.exists():
         try:
+            print_step("Creating .env from .env.example")
             shutil.copy(env_example, env_file)
             print_step("Created .env from .env.example", "SUCCESS")
         except Exception as e:

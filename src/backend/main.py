@@ -16,9 +16,11 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any
 
 from .config.settings import get_settings
-from .api.routes import query, tenants, sync, health
-from .core.embeddings import EmbeddingService
-from .utils.vector_store import VectorStoreManager
+from .api.v1.routes import query, tenants, sync, health, audit
+from .core.embeddings import get_embedding_service
+from .core.rag_pipeline import get_rag_pipeline
+from .middleware.tenant_context import TenantContextMiddleware
+from .middleware.auth import api_key_auth
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,13 +48,12 @@ async def lifespan(app: FastAPI):
     global embedding_service, vector_store_manager
     
     try:
-        # Initialize embedding service
+        # Initialize services using singleton getters
         logger.info("Initializing embedding service...")
-        embedding_service = EmbeddingService()
+        embedding_service = get_embedding_service()
         
-        # Initialize vector store manager
         logger.info("Initializing vector store manager...")
-        vector_store_manager = VectorStoreManager()
+        vector_store_manager = get_vector_store_manager()
         
         # Store services in app state for dependency injection
         app.state.embedding_service = embedding_service
@@ -218,8 +219,16 @@ app.include_router(
 
 app.include_router(
     sync.router,
-    prefix="/api/v1",
-    tags=["sync"]
+    prefix="/api/v1/sync",
+    tags=["Sync"],
+    dependencies=[Depends(api_key_auth)]
+)
+
+app.include_router(
+    audit.router,
+    prefix="/api/v1/audit",
+    tags=["Audit"],
+    dependencies=[Depends(api_key_auth)]
 )
 
 
@@ -275,21 +284,19 @@ app.openapi = custom_openapi
 async def root():
     """Root endpoint with basic API information."""
     return {
-        "name": "Enterprise RAG Platform API",
-        "version": "1.0.0",
-        "status": "running",
-        "docs": "/docs" if settings.debug else "disabled",
-        "health": "/api/v1/health"
+        "message": "Welcome to the Enterprise RAG Platform API",
+        "version": settings.version,
+        "docs_url": "/docs",
+        "redoc_url": "/redoc"
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    
+    logger.info(f"Starting server on {settings.host}:{settings.port}")
     uvicorn.run(
-        "main:app",
+        app,
         host=settings.host,
         port=settings.port,
-        reload=settings.debug,
-        log_level="info"
+        reload=settings.reload_on_change
     ) 

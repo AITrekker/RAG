@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ReactNode } from 'react';
 import { useTenant } from '../../contexts/TenantContext';
+import { TenantSelector } from '../TenantSelector';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -48,33 +49,40 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
               </h1>
             </div>
 
-            {/* Navigation */}
-            <nav className="hidden md:flex space-x-8">
-              <a 
-                href="#" 
-                className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-              >
-                Search
-              </a>
-              <a 
-                href="#" 
-                className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-              >
-                Sync Status
-              </a>
-              <a 
-                href="#" 
-                className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
-              >
-                Help
-              </a>
-            </nav>
+            {/* Right side of header */}
+            <div className="hidden md:flex items-center space-x-8">
+              <nav className="flex space-x-8">
+                <a 
+                  href="#" 
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  Search
+                </a>
+                <a 
+                  href="#" 
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  Sync Status
+                </a>
+                <a 
+                  href="#" 
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  Help
+                </a>
+              </nav>
+
+              <div className="border-l border-gray-200 h-6"></div>
+
+              <TenantSelector />
+            </div>
 
             {/* Mobile menu button */}
-            <div className="md:hidden">
+            <div className="md:hidden flex items-center">
+              <TenantSelector />
               <button
                 type="button"
-                className="text-gray-700 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+                className="ml-4 text-gray-700 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
               >
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />

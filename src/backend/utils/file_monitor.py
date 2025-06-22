@@ -248,7 +248,8 @@ if WATCHDOG_AVAILABLE:
                         hash_sha256.update(chunk)
                 return hash_sha256.hexdigest()
             except Exception:
-                return None
+                # Return empty string if hash fails, e.g., file deleted during process
+                return ""
 
 else:
     class TenantFileEventHandler:
@@ -381,30 +382,31 @@ else:
                         hash_sha256.update(chunk)
                 return hash_sha256.hexdigest()
             except Exception:
-                return None
+                # Return empty string if hash fails, e.g., file deleted during process
+                return ""
 
 
 class FileMonitor:
     """
-    Main file monitoring service for tenant-specific document watching.
-    
-    Provides real-time file system monitoring with tenant isolation,
-    configurable filters, and event handling capabilities.
+    File system monitor using Watchdog to detect and report file changes.
     """
     
     def __init__(self, config: MonitoringConfig = None):
-        """Initialize file monitor with configuration."""
-        self.config = config or MonitoringConfig()
-        self.event_queue = Queue()
-        self.observers = {}  # tenant_id -> Observer
-        self.event_handlers = {}  # tenant_id -> handler
-        self.event_callbacks = {}  # tenant_id -> List[callback]
-        self.is_running = False
-        self._processing_thread = None
-        
+        """Initialize the file monitor."""
         if not WATCHDOG_AVAILABLE:
-            logger.warning("Watchdog not available, falling back to polling mode")
-    
+            raise ImportError("Watchdog library is not installed. Please install it with: pip install watchdog")
+        
+        self.config = config or MonitoringConfig()
+        self.observer = Observer()
+        self.monitored_tenants: Dict[str, Dict[str, Any]] = {}  # tenant_id -> {handler, watch}
+        self.event_queue = Queue()
+        self._callbacks: Dict[str, List[Callable[[FileChangeEvent], None]]] = {}
+        self._lock = threading.Lock()
+        
+        # Event processing thread
+        self._processing_thread = threading.Thread(target=self._process_events, daemon=True)
+        self._is_running = False
+
     def add_tenant_monitor(
         self, 
         tenant_id: str, 
@@ -412,263 +414,158 @@ class FileMonitor:
         callback: Callable[[FileChangeEvent], None] = None
     ) -> bool:
         """
-        Add monitoring for a tenant's directory.
+        Add a new tenant directory to monitor.
         
         Args:
-            tenant_id: Tenant identifier
-            watch_path: Directory path to monitor
-            callback: Optional callback function for events
+            tenant_id: Unique identifier for the tenant.
+            watch_path: The directory path to monitor.
+            callback: An optional callback to handle events for this tenant.
             
         Returns:
-            True if monitoring was successfully added
+            True if the monitor was added successfully, False otherwise.
         """
-        try:
-            if not os.path.exists(watch_path):
-                logger.error(f"Watch path does not exist: {watch_path}")
+        with self._lock:
+            if tenant_id in self.monitored_tenants:
+                logger.warning(f"Tenant '{tenant_id}' is already being monitored.")
                 return False
             
-            if tenant_id in self.observers:
-                logger.warning(f"Monitor already exists for tenant {tenant_id}")
+            if not os.path.isdir(watch_path):
+                logger.error(f"Cannot monitor non-existent directory: {watch_path}")
                 return False
             
-            # Create event handler
-            handler = TenantFileEventHandler(tenant_id, self.config, self.event_queue)
-            self.event_handlers[tenant_id] = handler
-            
-            # Set up callback
-            if callback:
-                self.event_callbacks[tenant_id] = [callback]
-            else:
-                self.event_callbacks[tenant_id] = []
-            
-            # Create and start observer if watchdog is available
-            if WATCHDOG_AVAILABLE:
-                observer = Observer()
-                observer.schedule(handler, watch_path, recursive=self.config.recursive)
-                self.observers[tenant_id] = observer
-                
-                if self.is_running:
-                    observer.start()
-                    
-                logger.info(f"Added file monitor for tenant {tenant_id} at {watch_path}")
-            else:
-                # Fallback to polling mode
-                self._start_polling_monitor(tenant_id, watch_path)
-                logger.info(f"Added polling monitor for tenant {tenant_id} at {watch_path}")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error adding tenant monitor: {e}")
-            return False
-    
-    def remove_tenant_monitor(self, tenant_id: str) -> bool:
-        """Remove monitoring for a tenant."""
-        try:
-            if tenant_id in self.observers:
-                observer = self.observers[tenant_id]
-                if observer.is_alive():
-                    observer.stop()
-                    observer.join()
-                del self.observers[tenant_id]
-            
-            if tenant_id in self.event_handlers:
-                del self.event_handlers[tenant_id]
-            
-            if tenant_id in self.event_callbacks:
-                del self.event_callbacks[tenant_id]
-            
-            logger.info(f"Removed file monitor for tenant {tenant_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error removing tenant monitor: {e}")
-            return False
-    
-    def add_event_callback(self, tenant_id: str, callback: Callable[[FileChangeEvent], None]):
-        """Add event callback for a tenant."""
-        if tenant_id not in self.event_callbacks:
-            self.event_callbacks[tenant_id] = []
-        self.event_callbacks[tenant_id].append(callback)
-    
-    def start(self):
-        """Start the file monitoring service."""
-        if self.is_running:
-            logger.warning("File monitor is already running")
-            return
-        
-        self.is_running = True
-        
-        # Start all observers
-        if WATCHDOG_AVAILABLE:
-            for observer in self.observers.values():
-                observer.start()
-        
-        # Start event processing thread
-        self._processing_thread = threading.Thread(target=self._process_events, daemon=True)
-        self._processing_thread.start()
-        
-        logger.info("File monitor service started")
-    
-    def stop(self):
-        """Stop the file monitoring service."""
-        if not self.is_running:
-            return
-        
-        self.is_running = False
-        
-        # Stop all observers
-        if WATCHDOG_AVAILABLE:
-            for observer in self.observers.values():
-                observer.stop()
-            
-            for observer in self.observers.values():
-                observer.join()
-        
-        logger.info("File monitor service stopped")
-    
-    def _process_events(self):
-        """Process file change events from the queue."""
-        while self.is_running:
             try:
-                # Get event from queue with timeout
-                try:
-                    event = self.event_queue.get(timeout=1)
-                except Empty:
-                    continue
+                event_handler = TenantFileEventHandler(tenant_id, self.config, self.event_queue)
+                watch = self.observer.schedule(event_handler, watch_path, recursive=self.config.recursive)
                 
-                # Process event
-                self._handle_event(event)
+                self.monitored_tenants[tenant_id] = {
+                    "handler": event_handler,
+                    "watch": watch,
+                    "path": watch_path
+                }
+                
+                if callback:
+                    self.add_event_callback(tenant_id, callback)
+                    
+                logger.info(f"Started monitoring directory '{watch_path}' for tenant '{tenant_id}'.")
+                return True
                 
             except Exception as e:
-                logger.error(f"Error processing event: {e}")
-    
+                logger.error(f"Failed to start monitoring for tenant '{tenant_id}': {e}")
+                return False
+
+    def remove_tenant_monitor(self, tenant_id: str) -> bool:
+        """
+        Stop monitoring a tenant directory.
+        
+        Args:
+            tenant_id: The identifier of the tenant to stop monitoring.
+            
+        Returns:
+            True if the monitor was removed successfully, False otherwise.
+        """
+        with self._lock:
+            if tenant_id not in self.monitored_tenants:
+                logger.warning(f"Tenant '{tenant_id}' is not being monitored.")
+                return False
+            
+            try:
+                watch = self.monitored_tenants[tenant_id]["watch"]
+                self.observer.unschedule(watch)
+                del self.monitored_tenants[tenant_id]
+                
+                # Remove associated callbacks
+                if tenant_id in self._callbacks:
+                    del self._callbacks[tenant_id]
+                    
+                logger.info(f"Stopped monitoring for tenant '{tenant_id}'.")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to stop monitoring for tenant '{tenant_id}': {e}")
+                return False
+
+    def add_event_callback(self, tenant_id: str, callback: Callable[[FileChangeEvent], None]):
+        """Add a callback for a specific tenant's file change events."""
+        with self._lock:
+            if tenant_id not in self._callbacks:
+                self._callbacks[tenant_id] = []
+            self._callbacks[tenant_id].append(callback)
+
+    def start(self):
+        """Start the file monitoring service."""
+        if self._is_running:
+            return
+            
+        logger.info("Starting file monitor service...")
+        self._is_running = True
+        self.observer.start()
+        self._processing_thread.start()
+        logger.info("File monitor service started.")
+
+    def stop(self):
+        """Stop the file monitoring service."""
+        if not self._is_running:
+            return
+            
+        logger.info("Stopping file monitor service...")
+        self._is_running = False
+        self.observer.stop()
+        self.observer.join()
+        
+        # Add a sentinel value to unblock the processing thread
+        self.event_queue.put(None)
+        self._processing_thread.join()
+        logger.info("File monitor service stopped.")
+
+    def _process_events(self):
+        """Continuously process events from the queue."""
+        while self._is_running:
+            try:
+                event = self.event_queue.get(timeout=1)
+                
+                if event is None:  # Sentinel value for stopping
+                    break
+                    
+                self._handle_event(event)
+                
+            except Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Error processing file change event: {e}")
+
     def _handle_event(self, event: FileChangeEvent):
-        """Handle a file change event."""
-        try:
-            tenant_id = event.tenant_id
-            
-            # Call registered callbacks
-            if tenant_id in self.event_callbacks:
-                for callback in self.event_callbacks[tenant_id]:
-                    try:
-                        callback(event)
-                    except Exception as e:
-                        logger.error(f"Error in event callback: {e}")
-            
-            logger.debug(f"Processed event: {event.to_dict()}")
-            
-        except Exception as e:
-            logger.error(f"Error handling event: {e}")
-    
-    def _start_polling_monitor(self, tenant_id: str, watch_path: str):
-        """Start polling-based monitoring as fallback."""
-        # This is a simplified polling implementation
-        # In a production system, you'd want a more sophisticated approach
-        def polling_thread():
-            last_scan = {}
-            
-            while self.is_running and tenant_id in self.event_handlers:
-                try:
-                    current_scan = self._scan_directory(watch_path)
-                    
-                    # Compare with last scan
-                    if last_scan:
-                        self._compare_scans(tenant_id, last_scan, current_scan)
-                    
-                    last_scan = current_scan
-                    time.sleep(self.config.check_interval)
-                    
-                except Exception as e:
-                    logger.error(f"Error in polling thread for {tenant_id}: {e}")
+        """Invoke callbacks for a given event."""
+        with self._lock:
+            callbacks = self._callbacks.get(event.tenant_id, [])
         
-        thread = threading.Thread(target=polling_thread, daemon=True)
-        thread.start()
-    
-    def _scan_directory(self, directory: str) -> Dict[str, Dict[str, Any]]:
-        """Scan directory and return file information."""
-        files = {}
-        
-        try:
-            for root, dirs, filenames in os.walk(directory):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    
-                    if self.config.should_monitor_file(file_path):
-                        try:
-                            stat = os.stat(file_path)
-                            files[file_path] = {
-                                'size': stat.st_size,
-                                'mtime': stat.st_mtime,
-                                'exists': True
-                            }
-                        except (OSError, IOError):
-                            continue
-        except Exception as e:
-            logger.error(f"Error scanning directory {directory}: {e}")
-        
-        return files
-    
-    def _compare_scans(self, tenant_id: str, old_scan: Dict, new_scan: Dict):
-        """Compare directory scans and generate events."""
-        all_files = set(old_scan.keys()) | set(new_scan.keys())
-        
-        for file_path in all_files:
-            old_info = old_scan.get(file_path)
-            new_info = new_scan.get(file_path)
+        if not callbacks:
+            logger.warning(f"No callback registered for tenant '{event.tenant_id}'. Event ignored.")
+            return
             
-            if old_info and not new_info:
-                # File deleted
-                event = FileChangeEvent(
-                    tenant_id=tenant_id,
-                    file_path=file_path,
-                    change_type=ChangeType.DELETED,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                self.event_queue.put(event)
-                
-            elif not old_info and new_info:
-                # File created
-                event = FileChangeEvent(
-                    tenant_id=tenant_id,
-                    file_path=file_path,
-                    change_type=ChangeType.CREATED,
-                    timestamp=datetime.now(timezone.utc),
-                    file_size=new_info['size']
-                )
-                self.event_queue.put(event)
-                
-            elif old_info and new_info and old_info['mtime'] != new_info['mtime']:
-                # File modified
-                event = FileChangeEvent(
-                    tenant_id=tenant_id,
-                    file_path=file_path,
-                    change_type=ChangeType.MODIFIED,
-                    timestamp=datetime.now(timezone.utc),
-                    file_size=new_info['size']
-                )
-                self.event_queue.put(event)
-    
+        for callback in callbacks:
+            try:
+                # Run callback in a separate thread to avoid blocking
+                threading.Thread(target=callback, args=(event,)).start()
+            except Exception as e:
+                logger.error(f"Error executing callback for tenant '{event.tenant_id}': {e}")
+
     def get_status(self) -> Dict[str, Any]:
-        """Get monitoring service status."""
-        return {
-            'is_running': self.is_running,
-            'monitored_tenants': list(self.observers.keys()),
-            'watchdog_available': WATCHDOG_AVAILABLE,
-            'queue_size': self.event_queue.qsize(),
-            'config': {
-                'include_extensions': list(self.config.include_extensions),
-                'exclude_patterns': list(self.config.exclude_patterns),
-                'recursive': self.config.recursive,
-                'check_interval': self.config.check_interval,
-                'debounce_time': self.config.debounce_time
+        """Get the current status of the file monitor."""
+        with self._lock:
+            return {
+                "is_running": self._is_running,
+                "observer_is_alive": self.observer.is_alive(),
+                "monitored_tenants_count": len(self.monitored_tenants),
+                "monitored_paths": {
+                    tenant_id: data["path"] 
+                    for tenant_id, data in self.monitored_tenants.items()
+                },
+                "pending_events": self.event_queue.qsize()
             }
-        }
 
 
-# Utility functions
 def create_default_monitor() -> FileMonitor:
-    """Create file monitor with default configuration."""
+    """Create a default file monitor with standard configuration."""
     return FileMonitor(MonitoringConfig())
 
 
@@ -676,29 +573,9 @@ def create_optimized_monitor(
     include_extensions: Set[str] = None,
     debounce_time: float = 1.0
 ) -> FileMonitor:
-    """Create optimized file monitor for document processing."""
+    """Create a file monitor with optimized settings."""
     config = MonitoringConfig(
         include_extensions=include_extensions,
-        debounce_time=debounce_time,
-        calculate_hash=True,
-        track_file_size=True
+        debounce_time=debounce_time
     )
-    return FileMonitor(config)
-
-
-class FileMonitor:
-    """Basic file monitor for demo purposes."""
-    
-    def __init__(self, tenant_id: str = "default"):
-        self.tenant_id = tenant_id
-    
-    def get_file_changes(self) -> List[Dict[str, Any]]:
-        """Get list of file changes."""
-        # Mock implementation
-        return [
-            {
-                "file_path": "/documents/sample.pdf",
-                "action": "created",
-                "timestamp": "2024-01-01T00:00:00Z"
-            }
-        ] 
+    return FileMonitor(config) 

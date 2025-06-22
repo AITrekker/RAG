@@ -1,42 +1,23 @@
-# Use Ubuntu 24.04 base image for Python 3.12 (required for numpy 2.3.0)
-FROM ubuntu:24.04
+# Use an official PyTorch image with CUDA 12.1, which is compatible with most modern NVIDIA GPUs.
+# This image includes Python 3.11, CUDA, and cuDNN.
+FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
 # Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV CUDA_VISIBLE_DEVICES=0
-ENV TORCH_CUDA_ARCH_LIST="12.0"
-ENV FORCE_CUDA=1
-
-# Install system dependencies and Python
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-dev \
-    python3-pip \
-    python3-full \
-    build-essential \
-    curl \
-    git \
-    wget \
-    gnupg2 \
-    software-properties-common \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create symlink for python
-RUN ln -s /usr/bin/python3 /usr/bin/python
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# The PyTorch image comes with torch, torchvision, and torchaudio pre-installed.
+# We only need to install the remaining dependencies.
+
+# Copy requirements file
 COPY requirements.txt .
 
-# Install PyTorch with CUDA support (will use CPU if GPU not available)
-# This will work with your RTX 5070 when GPU is available
-RUN pip install --no-cache-dir torch torchvision torchaudio --break-system-packages
-
-# Install other Python dependencies
+# Install Python dependencies using pip
+# We exclude torch, torchvision, and torchaudio as they are already in the base image.
 RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Create necessary directories
@@ -49,16 +30,16 @@ COPY scripts /app/scripts
 # Set Python path
 ENV PYTHONPATH=/app/src/backend:$PYTHONPATH
 
-# Create non-root user for security (use different UID to avoid conflict)
+# Create a non-root user for security and change ownership of the app directory
 RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose port
+# Expose the application port
 EXPOSE 8000
 
-# Health check
+# Health check to ensure the service is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command
-CMD ["python", "-m", "uvicorn", "src.backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
+# Default command to run the application
+CMD ["uvicorn", "src.backend.main:app", "--host", "0.0.0.0", "--port", "8000"] 
