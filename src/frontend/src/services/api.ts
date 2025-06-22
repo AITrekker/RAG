@@ -245,6 +245,114 @@ class ApiClient {
     return response.data;
   }
 
+  // Document API methods
+  async uploadDocument(file: File): Promise<{
+    document_id: string;
+    filename: string;
+    status: string;
+    chunks_created: number;
+    processing_time?: number;
+    file_size: number;
+    upload_timestamp: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await this.client.post('/documents/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  async getDocuments(page: number = 1, pageSize: number = 20, search?: string): Promise<{
+    documents: any[];
+    total_count: number;
+    page: number;
+    page_size: number;
+  }> {
+    const response = await this.client.get('/documents', {
+      params: { page, page_size: pageSize, search },
+    });
+    return response.data;
+  }
+
+  async getDocument(documentId: string): Promise<any> {
+    const response = await this.client.get(`/documents/${documentId}`);
+    return response.data;
+  }
+
+  async updateDocument(documentId: string, metadata: Record<string, any>): Promise<any> {
+    const response = await this.client.put(`/documents/${documentId}`, { metadata });
+    return response.data;
+  }
+
+  async deleteDocument(documentId: string): Promise<void> {
+    await this.client.delete(`/documents/${documentId}`);
+  }
+
+  async downloadDocument(documentId: string): Promise<Blob> {
+    const response = await this.client.get(`/documents/${documentId}/download`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
+  async getDocumentChunks(documentId: string, page: number = 1, pageSize: number = 20): Promise<{
+    chunks: any[];
+    total_count: number;
+    page: number;
+    page_size: number;
+  }> {
+    const response = await this.client.get(`/documents/${documentId}/chunks`, {
+      params: { page, page_size: pageSize },
+    });
+    return response.data;
+  }
+
+  // Tenant API methods
+  async getTenants(page: number = 1, pageSize: number = 20): Promise<{
+    tenants: any[];
+    total_count: number;
+    page: number;
+    page_size: number;
+  }> {
+    const response = await this.client.get('/tenants', {
+      params: { page, page_size: pageSize },
+    });
+    return response.data;
+  }
+
+  async createTenant(name: string, description?: string): Promise<any> {
+    const response = await this.client.post('/tenants', { name, description });
+    return response.data;
+  }
+
+  async getTenant(tenantId: string): Promise<any> {
+    const response = await this.client.get(`/tenants/${tenantId}`);
+    return response.data;
+  }
+
+  async updateTenant(tenantId: string, updates: { name?: string; description?: string }): Promise<any> {
+    const response = await this.client.put(`/tenants/${tenantId}`, updates);
+    return response.data;
+  }
+
+  async deleteTenant(tenantId: string): Promise<void> {
+    await this.client.delete(`/tenants/${tenantId}`);
+  }
+
+  async getTenantStats(tenantId: string): Promise<{
+    document_count: number;
+    storage_used_mb: number;
+    query_count: number;
+    last_sync: string;
+  }> {
+    const response = await this.client.get(`/tenants/${tenantId}/stats`);
+    return response.data;
+  }
+
   // Audit API methods
   async getAuditEvents(page: number = 1, pageSize: number = 100): Promise<{
     events: any[]; // Replace 'any' with a proper SyncEvent model if available

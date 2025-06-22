@@ -95,7 +95,8 @@ def setup_environment():
         'DATABASE_URL': 'sqlite:///./data/rag_dev.db',
         'CHROMA_PERSIST_DIRECTORY': str(project_root / 'data' / 'chroma'),
         'UPLOAD_DIRECTORY': str(project_root / 'data' / 'uploads'),
-        'TRANSFORMERS_CACHE': str(project_root / 'cache' / 'transformers'),
+        'HF_HOME': str(project_root / 'cache' / 'transformers'),
+        'HF_HUB_DISABLE_SYMLINKS_WARNING': '1',
         'LOG_LEVEL': 'DEBUG',
         'DEBUG': 'true',
         'CORS_ORIGINS': '["http://localhost:3000", "http://127.0.0.1:3000"]'

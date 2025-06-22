@@ -108,7 +108,7 @@ class Document(Base):
     # Relationships
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
     parent_document = relationship("Document", remote_side=[id])
-    child_versions = relationship("Document", remote_side=[parent_document_id])
+    child_versions = relationship("Document", remote_side=[parent_document_id], overlaps="parent_document")
     
     # Indexes for performance
     __table_args__ = (
@@ -220,7 +220,7 @@ class DocumentChunk(Base):
     # Relationships
     document = relationship("Document", back_populates="chunks")
     parent_chunk = relationship("DocumentChunk", remote_side=[id])
-    child_chunks = relationship("DocumentChunk", remote_side=[parent_chunk_id])
+    child_chunks = relationship("DocumentChunk", remote_side=[parent_chunk_id], overlaps="parent_chunk")
     
     # Indexes for performance
     __table_args__ = (

@@ -98,7 +98,7 @@ class TenantResponse(BaseModel):
     name: str
     description: Optional[str] = None
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class TenantListResponse(BaseModel):
     tenants: List[TenantResponse]
@@ -108,7 +108,6 @@ class TenantStatsResponse(BaseModel):
     storage_used_mb: float
 
 class SyncRequest(BaseModel):
-    tenant_id: str
     force_full_resync: Optional[bool] = False
 
 class SyncResponse(BaseModel):
@@ -151,11 +150,58 @@ class SyncEventResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SyncHistoryResponse(BaseModel):
     """Response model for sync history."""
     syncs: List[SyncResponse] = Field(default_factory=list, description="List of sync operations")
     total_count: int = Field(..., description="Total number of sync operations")
     page: int = Field(..., description="Current page number")
-    page_size: int = Field(..., description="Number of syncs per page") 
+    page_size: int = Field(..., description="Number of syncs per page")
+
+
+# Document Management Models
+class DocumentMetadata(BaseModel):
+    """Document metadata model."""
+    title: Optional[str] = Field(None, description="Document title")
+    author: Optional[str] = Field(None, description="Document author")
+    description: Optional[str] = Field(None, description="Document description")
+    tags: List[str] = Field(default_factory=list, description="Document tags")
+    custom_fields: Dict[str, Any] = Field(default_factory=dict, description="Custom metadata fields")
+
+
+class DocumentResponse(BaseModel):
+    """Response model for document information."""
+    document_id: str = Field(..., description="Unique document identifier")
+    filename: str = Field(..., description="Original filename")
+    upload_timestamp: datetime = Field(..., description="Upload timestamp")
+    file_size: int = Field(..., description="File size in bytes")
+    status: str = Field(..., description="Processing status (uploaded, processing, processed, failed)")
+    chunks_count: int = Field(default=0, description="Number of chunks created")
+    content_type: Optional[str] = Field(None, description="MIME content type")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Document metadata")
+
+
+class DocumentUploadResponse(BaseModel):
+    """Response model for document upload."""
+    document_id: str = Field(..., description="Unique document identifier")
+    filename: str = Field(..., description="Original filename")
+    status: str = Field(..., description="Processing status")
+    chunks_created: int = Field(default=0, description="Number of chunks created")
+    processing_time: Optional[float] = Field(None, description="Processing time in seconds")
+    file_size: int = Field(..., description="File size in bytes")
+    upload_timestamp: datetime = Field(..., description="Upload timestamp")
+
+
+class DocumentListResponse(BaseModel):
+    """Response model for document listing."""
+    documents: List[DocumentResponse] = Field(default_factory=list, description="List of documents")
+    total_count: int = Field(..., description="Total number of documents")
+    page: int = Field(..., description="Current page number")
+    page_size: int = Field(..., description="Number of documents per page")
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Request model for updating document metadata."""
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Updated metadata")
+    tags: Optional[List[str]] = Field(None, description="Updated tags") 

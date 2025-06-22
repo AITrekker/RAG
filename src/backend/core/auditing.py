@@ -9,7 +9,7 @@ user actions, and configuration changes.
 
 import logging
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from ..models.audit import SyncEvent
 
@@ -53,8 +53,51 @@ class AuditLogger:
             db.commit()
             logger.debug(f"Logged audit event: {event_type} for sync {sync_run_id}")
         except Exception as e:
-            logger.error(f"Failed to log audit event for sync {sync_run_id}: {e}", exc_info=True)
+            # Handle missing table gracefully in development
+            if "no such table" in str(e).lower():
+                logger.warning(f"Audit table not found, skipping audit event for sync {sync_run_id}. Run database migrations to enable auditing.")
+            else:
+                logger.error(f"Failed to log audit event for sync {sync_run_id}: {e}", exc_info=True)
             db.rollback()
+
+    def get_events_for_tenant(
+        self,
+        db: Session,
+        tenant_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[SyncEvent]:
+        """
+        Retrieve audit events for a specific tenant.
+
+        Args:
+            db: The SQLAlchemy database session.
+            tenant_id: The ID of the tenant to get events for.
+            limit: Maximum number of events to return.
+            offset: Number of events to skip (for pagination).
+
+        Returns:
+            List of SyncEvent objects for the tenant.
+        """
+        try:
+            events = db.query(SyncEvent)\
+                .filter(SyncEvent.tenant_id == tenant_id)\
+                .order_by(SyncEvent.timestamp.desc())\
+                .limit(limit)\
+                .offset(offset)\
+                .all()
+            
+            logger.debug(f"Retrieved {len(events)} audit events for tenant {tenant_id}")
+            return events
+            
+        except Exception as e:
+            # Handle missing table gracefully in development
+            if "no such table" in str(e).lower():
+                logger.warning(f"Audit table not found, returning empty events list for tenant {tenant_id}. Run database migrations to enable auditing.")
+                return []
+            else:
+                logger.error(f"Failed to retrieve audit events for tenant {tenant_id}: {e}", exc_info=True)
+                return []
 
 # Singleton instance
 audit_logger = AuditLogger()

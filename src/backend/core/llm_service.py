@@ -163,13 +163,18 @@ class LLMService:
             )
             
             # Create text generation pipeline
-            self.pipeline = pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=0 if self.device == "cuda" and not quantization_config else -1,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            )
+            pipeline_kwargs = {
+                "task": "text-generation",
+                "model": self.model,
+                "tokenizer": self.tokenizer,
+                "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+            }
+            
+            # Only add device argument if not using quantization (accelerate)
+            if not quantization_config:
+                pipeline_kwargs["device"] = 0 if self.device == "cuda" else -1
+            
+            self.pipeline = pipeline(**pipeline_kwargs)
             
             load_time = time.time() - start_time
             logger.info(f"✅ LLM model loaded successfully in {load_time:.2f} seconds")

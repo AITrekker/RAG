@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter, Depends, Security, Request
 from sqlalchemy.orm import Session
 from typing import List
 import logging
@@ -6,13 +6,15 @@ import logging
 from src.backend.db.session import get_db
 from src.backend.core.auditing import AuditLogger, get_audit_logger
 from src.backend.models.api_models import SyncEventResponse
-from src.backend.middleware.auth import get_current_tenant
+from src.backend.middleware.auth import get_current_tenant, require_authentication
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/events", response_model=List[SyncEventResponse])
 def get_audit_events(
+    request: Request,
+    auth_context: dict = Depends(require_authentication),
     tenant_id: str = Security(get_current_tenant),
     db: Session = Depends(get_db),
     audit_logger: AuditLogger = Depends(get_audit_logger),

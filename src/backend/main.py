@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any
 
 from .config.settings import get_settings
-from .api.v1.routes import query, tenants, sync, health, audit
+from .api.v1.routes import query, tenants, sync, health, audit, documents
 from .core.embeddings import get_embedding_service, EmbeddingService
 from .core.rag_pipeline import get_rag_pipeline
 from .utils.vector_store import VectorStoreManager
@@ -225,15 +225,19 @@ app.include_router(
 app.include_router(
     sync.router,
     prefix="/api/v1/sync",
-    tags=["Sync"],
-    dependencies=[Depends(require_authentication)]
+    tags=["Sync"]
 )
 
 app.include_router(
     audit.router,
     prefix="/api/v1/audit",
-    tags=["Audit"],
-    dependencies=[Depends(require_authentication)]
+    tags=["Audit"]
+)
+
+app.include_router(
+    documents.router,
+    prefix="/api/v1/documents",
+    tags=["Documents"]
 )
 
 

@@ -82,7 +82,7 @@ class EmbeddingManager:
             enable_async: Enable async processing
             auto_persist: Automatically persist embeddings to vector store
         """
-        self.max_batch_size = max_batch_size or settings.embedding.batch_size
+        self.max_batch_size = max_batch_size or settings.embedding_batch_size
         self.max_queue_size = max_queue_size
         self.worker_threads = worker_threads
         self.enable_async = enable_async

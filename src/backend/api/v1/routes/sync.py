@@ -4,7 +4,7 @@ Document synchronization API endpoints for the Enterprise RAG Platform.
 Handles document sync operations, status monitoring, and scheduling.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Security
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Security, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
@@ -14,8 +14,10 @@ from enum import Enum
 
 from src.backend.db.session import get_db
 from src.backend.core.delta_sync import DeltaSyncService
+from src.backend.core.document_ingestion import DocumentIngestionPipeline
 from src.backend.core.auditing import get_audit_logger
 from src.backend.middleware.auth import get_current_tenant, require_authentication
+from src.backend.utils.vector_store import get_vector_store_manager
 from src.backend.models.api_models import (
     SyncRequest, SyncResponse, SyncHistoryResponse,
     SyncScheduleResponse, SyncScheduleUpdateRequest, SyncStatus, SyncType
@@ -26,9 +28,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/", response_model=SyncResponse)
+@router.post("", response_model=SyncResponse)  # Handle both /api/v1/sync/ and /api/v1/sync
 async def trigger_sync(
     request: SyncRequest,
     background_tasks: BackgroundTasks,
+    auth_context: dict = Depends(require_authentication),
     tenant_id: str = Security(get_current_tenant),
     db: Session = Depends(get_db)
 ):
@@ -44,9 +48,17 @@ async def trigger_sync(
     # Must create a new session for the background task
     background_db_session = next(get_db())
 
+    # Get vector store manager and create ingestion pipeline for the sync process
+    vector_store_manager = get_vector_store_manager()
+    ingestion_pipeline = DocumentIngestionPipeline(
+        tenant_id=tenant_id,
+        vector_store_manager=vector_store_manager
+    )
+
     delta_sync = DeltaSyncService(
         tenant_id=tenant_id,
         db=background_db_session,
+        ingestion_pipeline=ingestion_pipeline,
         sync_run_id=sync_run_id,
         audit_logger=audit_logger
     )
@@ -64,14 +76,27 @@ async def trigger_sync(
 
 @router.get("/status", response_model=SyncResponse)
 async def get_current_sync_status(
+    request: Request,
+    auth_context: dict = Depends(require_authentication),
     tenant_id: str = Security(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """
     Get the status of the current or most recent sync operation.
     """
-    # TODO: Implement actual status retrieval
-    raise HTTPException(status_code=404, detail="Status endpoint not yet implemented.")
+    # Return a mock status for now
+    return SyncResponse(
+        sync_id="no-active-sync",
+        tenant_id=tenant_id,
+        status=SyncStatus.IDLE,
+        sync_type=SyncType.MANUAL,
+        started_at=datetime.utcnow(),
+        total_files=0,
+        processed_files=0,
+        successful_files=0,
+        failed_files=0,
+        total_chunks=0
+    )
 
 
 @router.get("/{sync_id}", response_model=SyncResponse)

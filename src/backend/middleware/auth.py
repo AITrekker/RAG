@@ -140,8 +140,9 @@ async def authenticate_request(
     
     This dependency can be used to protect endpoints that require authentication.
     """
-    # Skip authentication for health checks and documentation
-    if request.url.path in ["/", "/health", "/api/v1/health", "/docs", "/redoc", "/openapi.json"]:
+    # Skip authentication for health checks, documentation, and OPTIONS requests (CORS preflight)
+    if (request.url.path in ["/", "/health", "/api/v1/health", "/docs", "/redoc", "/openapi.json"] or 
+        request.method == "OPTIONS"):
         return {"authenticated": False, "tenant_id": None}
     
     # Get API key from headers
@@ -321,11 +322,16 @@ def list_api_keys(tenant_id: str) -> list:
 
 
 async def get_current_tenant(
+    request: Request,
     auth_context: Dict[str, Any] = Depends(authenticate_request)
 ) -> str:
     """
     Dependency to get the tenant_id from the authentication context.
     """
+    # For OPTIONS requests (CORS preflight), return a default tenant
+    if request.method == "OPTIONS":
+        return "default"
+    
     tenant_id = auth_context.get("tenant_id")
     if not tenant_id:
         raise HTTPException(
