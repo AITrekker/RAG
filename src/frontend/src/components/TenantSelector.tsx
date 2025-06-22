@@ -1,5 +1,5 @@
 import React from 'react';
-import { useTenant } from '../../contexts/TenantContext';
+import { useTenant } from '../contexts/TenantContext';
 
 export const TenantSelector: React.FC = () => {
   const { tenant, setTenantById, availableTenants, isLoading } = useTenant();

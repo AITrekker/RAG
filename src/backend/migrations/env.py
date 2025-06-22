@@ -8,11 +8,11 @@ from alembic import context
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-# Import all models and their bases
-from src.backend.models.database import Base as AppBase
-from src.backend.models.tenant import Base as TenantBase
-from src.backend.models.document import Base as DocumentBase
-from src.backend.models.audit import Base as AuditBase
+# Import the single, centralized Base from its new location
+from src.backend.db.base import Base
+
+# Import all the models to ensure they are registered with the Base's metadata
+from src.backend.models import tenant, document, audit 
 
 from src.backend.config.settings import settings
 
@@ -25,19 +25,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# --- Autogenerate configuration ---
-# Combine metadata from all bases into a single MetaData object
-# This allows Alembic to see tables from all models.
-target_metadata = MetaData()
-for table in AppBase.metadata.tables.values():
-    table.tometadata(target_metadata)
-for table in TenantBase.metadata.tables.values():
-    table.tometadata(target_metadata)
-for table in DocumentBase.metadata.tables.values():
-    table.tometadata(target_metadata)
-for table in AuditBase.metadata.tables.values():
-    table.tometadata(target_metadata)
-# --- End Autogenerate configuration ---
+# Set the metadata target for Alembic autogeneration
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

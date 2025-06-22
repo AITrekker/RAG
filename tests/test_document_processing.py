@@ -21,8 +21,9 @@ from pathlib import Path
 from typing import Dict, List, Any
 import uuid
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ''))
+# Update the path to ensure 'src' is in our import path
+# This allows us to import modules from the 'src' directory as if we were running from the root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import test components
 from src.backend.models.document import (

@@ -66,9 +66,22 @@ function Test-NpmVersion {
     }
 }
 
+function Get-ScriptDirectory {
+    try {
+        if ($PSScriptRoot) {
+            return $PSScriptRoot
+        }
+        # Fallback for older PowerShell or different execution contexts
+        return Split-Path -Parent $MyInvocation.MyCommand.Path
+    } catch {
+        Write-Error "Could not determine script directory."
+        exit 1
+    }
+}
+
 function Initialize-Environment {
     # Get script directory and project root
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $scriptDir = Get-ScriptDirectory
     $projectRoot = Split-Path -Parent $scriptDir
     $frontendDir = Join-Path $projectRoot "src\frontend"
     

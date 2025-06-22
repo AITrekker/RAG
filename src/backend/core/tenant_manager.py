@@ -25,13 +25,14 @@ import logging
 import hashlib
 import secrets
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from uuid import uuid4
+from fastapi import HTTPException
 
-from ..core.tenant_isolation import (
-    get_tenant_isolation_strategy, TenantTier, IsolationLevel, TenantSecurityError
-)
-from ..utils.tenant_filesystem import get_tenant_filesystem_manager
-from ..utils.vector_store import ChromaManager
+from src.backend.models.tenant import Tenant, TenantStatus
+from src.backend.core.tenant_isolation import get_tenant_isolation_strategy, TenantTier
+from src.backend.utils.vector_store import VectorStoreManager
+from src.backend.utils.tenant_filesystem import TenantFileSystemManager
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ class TenantManager:
     def __init__(self, db_session: Session):
         self.db = db_session
         self.isolation_strategy = get_tenant_isolation_strategy()
-        self.filesystem_manager = get_tenant_filesystem_manager()
-        self.vector_store = ChromaManager()
+        self.filesystem_manager = TenantFileSystemManager()
+        self.vector_store_manager = VectorStoreManager()
     
     def create_tenant(
         self,
@@ -72,7 +73,7 @@ class TenantManager:
         Returns:
             Created tenant instance
         """
-        from ..models.tenant import Tenant
+        from src.backend.models.tenant import Tenant
         try:
             # Validate tenant_id format
             if not self._validate_tenant_id(tenant_id):
@@ -115,7 +116,7 @@ class TenantManager:
             try:
                 vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
                 collection_name = f"{vector_config['collection_prefix']}documents"
-                self.vector_store.create_collection(collection_name)
+                self.vector_store_manager.create_collection(collection_name)
                 logger.info(f"Created vector store collection for tenant {tenant_id}")
             except Exception as e:
                 logger.error(f"Failed to create vector store for tenant {tenant_id}: {str(e)}")
@@ -151,7 +152,7 @@ class TenantManager:
         Returns:
             Tenant instance or None if not found
         """
-        from ..models.tenant import Tenant
+        from src.backend.models.tenant import Tenant
         tenant = self.db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
         
         if tenant and include_stats:
@@ -180,7 +181,7 @@ class TenantManager:
         Returns:
             List of tenant instances
         """
-        from ..models.tenant import Tenant
+        from src.backend.models.tenant import Tenant
         query = self.db.query(Tenant)
         
         if status:
@@ -343,12 +344,12 @@ class TenantManager:
         try:
             vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
             if vector_config['type'] == 'collection_isolation':
-                collections = self.vector_store.list_collections()
+                collections = self.vector_store_manager.list_collections()
                 prefix = vector_config['collection_prefix']
                 for collection in collections:
                     if collection.startswith(prefix):
                         try:
-                            self.vector_store.delete_collection(collection)
+                            self.vector_store_manager.delete_collection(collection)
                             deletion_results["deleted_resources"].append(f"vector_collection:{collection}")
                         except Exception as e:
                             deletion_results["errors"].append(f"Failed to delete collection {collection}: {str(e)}")
@@ -421,7 +422,7 @@ class TenantManager:
         Returns:
             A tuple of (raw_api_key, TenantApiKey_instance)
         """
-        from ..models.tenant import TenantApiKey
+        from src.backend.models.tenant import TenantApiKey
         tenant = self.get_tenant(tenant_id)
         if not tenant:
             raise ValueError(f"Tenant {tenant_id} not found")
@@ -465,7 +466,7 @@ class TenantManager:
         Returns:
             The TenantApiKey instance if valid, else None
         """
-        from ..models.tenant import TenantApiKey
+        from src.backend.models.tenant import TenantApiKey
         if not raw_key or ":" not in raw_key:
             return None
         
@@ -498,7 +499,7 @@ class TenantManager:
         Returns:
             A list of TenantUsageStats instances
         """
-        from ..models.tenant import TenantUsageStats
+        from src.backend.models.tenant import TenantUsageStats
         query = self.db.query(TenantUsageStats).filter_by(tenant_id=tenant_id)
         
         if period_type == "daily":
@@ -559,12 +560,12 @@ class TenantManager:
             # Try to clean up vector store
             vector_config = self.isolation_strategy.get_vector_store_strategy(tenant_id)
             if vector_config['type'] == 'collection_isolation':
-                collections = self.vector_store.list_collections()
+                collections = self.vector_store_manager.list_collections()
                 prefix = vector_config['collection_prefix']
                 for collection in collections:
                     if collection.startswith(prefix):
                         try:
-                            self.vector_store.delete_collection(collection)
+                            self.vector_store_manager.delete_collection(collection)
                         except Exception:
                             pass
         except Exception:

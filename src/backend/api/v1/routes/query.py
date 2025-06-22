@@ -4,141 +4,61 @@ Query processing API endpoints for the Enterprise RAG Platform.
 Handles natural language queries and returns responses with source citations.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Dict, Any
-import time
+from fastapi import APIRouter, Depends, Security, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
 import logging
-from datetime import datetime
 
-from ...core.rag_pipeline import rag_pipeline
-from ...middleware.mock_tenant import get_current_tenant_id
+from src.backend.db.session import get_db
+from src.backend.core.rag_pipeline import get_rag_pipeline
+from src.backend.models.api_models import QueryRequest, QueryResponse, QueryHistory, SourceCitation
+from src.backend.middleware.auth import get_current_tenant
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Request/Response Models
-class QueryRequest(BaseModel):
-    """Request model for query processing."""
-    query: str = Field(..., min_length=1, max_length=1000, description="Natural language query")
-    max_sources: Optional[int] = Field(default=5, ge=1, le=20, description="Maximum number of source citations")
-    include_metadata: Optional[bool] = Field(default=True, description="Include document metadata in response")
-    rerank: Optional[bool] = Field(default=True, description="Apply reranking to improve relevance")
-    
-    @validator('query')
-    def validate_query(cls, v):
-        if not v.strip():
-            raise ValueError('Query cannot be empty or whitespace only')
-        return v.strip()
-
-
-class SourceCitation(BaseModel):
-    """Source citation model."""
-    document_id: str = Field(..., description="Unique document identifier")
-    filename: str = Field(..., description="Source document filename")
-    chunk_text: str = Field(..., description="Relevant text excerpt")
-    page_number: Optional[int] = Field(None, description="Page number in source document")
-    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Relevance confidence score")
-    chunk_index: int = Field(..., ge=0, description="Chunk index within document")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
-
-
-class QueryResponse(BaseModel):
-    """Response model for query processing."""
-    query_id: str = Field(..., description="Unique query identifier")
-    query: str = Field(..., description="Original query text")
-    answer: str = Field(..., description="Generated answer")
-    sources: List[SourceCitation] = Field(default_factory=list, description="Source citations")
-    processing_time: float = Field(..., description="Processing time in seconds")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Query timestamp")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional response metadata")
-
-
-class QueryHistory(BaseModel):
-    """Query history model."""
-    queries: List[QueryResponse] = Field(default_factory=list, description="Recent queries")
-    total_count: int = Field(..., description="Total number of queries")
-    page: int = Field(..., description="Current page number")
-    page_size: int = Field(..., description="Number of queries per page")
-
-
-# Use the global RAG pipeline instance
-def get_rag_pipeline():
-    """Get the global RAG pipeline instance."""
-    return rag_pipeline
-
-
 @router.post("/query", response_model=QueryResponse)
 async def process_query(
     request: QueryRequest,
-    tenant_id: str = Depends(get_current_tenant_id)
+    db: Session = Depends(get_db),
+    tenant_id: str = Security(get_current_tenant),
+    rag_pipeline = Depends(get_rag_pipeline)
 ):
     """
-    Process a natural language query and return an answer with source citations.
-    
-    This endpoint processes natural language queries using the RAG pipeline,
-    returning generated answers along with relevant source citations.
+    Processes a natural language query through the RAG pipeline.
     """
-    start_time = time.time()
-    query_id = f"{tenant_id}-{int(time.time() * 1000)}"
-    
-    logger.info(f"Processing query {query_id} for tenant {tenant_id}: {request.query[:100]}...")
+    if not request.query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    logger.info(f"Received query from tenant '{tenant_id}': {request.query}")
     
     try:
-        # Process the query through RAG pipeline
-        result = await rag_pipeline.process_query(
-            query=request.query,
+        rag_response = await rag_pipeline.process_query(
+            query=request.query, 
             tenant_id=tenant_id
         )
-        
-        processing_time = time.time() - start_time
-        
-        # Convert result to response format
-        sources = [
-            SourceCitation(
-                document_id=str(i),
-                filename=source.get('filename', ''),
-                chunk_text=source.get('content', '')[:200] + "...",
-                page_number=None,
-                confidence_score=source.get('confidence', 0.0),
-                chunk_index=source.get('chunk_index', 0),
-                metadata=source.get('metadata', {})
-            )
-            for i, source in enumerate(result.get('sources', []))
-        ]
-        
-        response = QueryResponse(
-            query_id=query_id,
-            query=request.query,
-            answer=result.get('answer', ''),
-            sources=sources,
-            processing_time=processing_time,
-            metadata={
-                'tenant_id': tenant_id,
-                'context_used': result.get('context_used', 0)
-            }
+        # Here we would adapt the RAGResponse to the QueryResponse model
+        # For now, let's assume a simple mapping
+        return QueryResponse(
+            query_id="some-uuid", # Generate a real one
+            query=rag_response.query,
+            answer=rag_response.answer,
+            sources=[], # Map sources from rag_response
+            processing_time=rag_response.processing_time,
+            timestamp=datetime.utcnow()
         )
-        
-        logger.info(f"Query {query_id} completed in {processing_time:.3f}s with {len(sources)} sources")
-        
-        return response
-        
     except Exception as e:
-        processing_time = time.time() - start_time
-        logger.error(f"Query {query_id} failed after {processing_time:.3f}s: {e}")
-        
-        raise HTTPException(
-            status_code=500,
-            detail=f"Query processing failed: {str(e)}"
-        )
+        logger.error(f"Error processing query for tenant '{tenant_id}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to process query.")
 
 
-@router.get("/query/history", response_model=QueryHistory)
+@router.get("/history", response_model=QueryHistory)
 async def get_query_history(
     page: int = 1,
     page_size: int = 20,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Security(get_current_tenant),
+    db: Session = Depends(get_db),
 ):
     """
     Get query history for the current tenant.
@@ -147,31 +67,14 @@ async def get_query_history(
     """
     try:
         # TODO: Implement actual query history storage and retrieval
-        # For now, return mock data
-        
         logger.info(f"Retrieving query history for tenant {tenant_id}, page {page}")
         
-        # Mock query history
-        mock_queries = [
-            QueryResponse(
-                query_id=f"{tenant_id}-{i}",
-                query=f"Sample query {i}",
-                answer=f"Sample answer {i}",
-                sources=[],
-                processing_time=1.5,
-                metadata={'tenant_id': tenant_id}
-            )
-            for i in range(1, 6)
-        ]
-        
-        # Apply pagination
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        paginated_queries = mock_queries[start_idx:end_idx]
+        # Mock query history for now
+        mock_queries = []
         
         return QueryHistory(
-            queries=paginated_queries,
-            total_count=len(mock_queries),
+            queries=mock_queries,
+            total_count=0,
             page=page,
             page_size=page_size
         )
@@ -184,10 +87,11 @@ async def get_query_history(
         )
 
 
-@router.get("/query/{query_id}", response_model=QueryResponse)
+@router.get("/{query_id}", response_model=QueryResponse)
 async def get_query_result(
     query_id: str,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Security(get_current_tenant),
+    db: Session = Depends(get_db),
 ):
     """
     Get a specific query result by ID.
@@ -198,26 +102,7 @@ async def get_query_result(
         logger.info(f"Retrieving query result {query_id} for tenant {tenant_id}")
         
         # TODO: Implement actual query result storage and retrieval
-        # For now, return mock data
-        
-        # Validate query ID format
-        if not query_id.startswith(tenant_id):
-            raise HTTPException(
-                status_code=404,
-                detail="Query not found"
-            )
-        
-        # Mock query result
-        mock_result = QueryResponse(
-            query_id=query_id,
-            query="Sample query",
-            answer="Sample answer",
-            sources=[],
-            processing_time=1.5,
-            metadata={'tenant_id': tenant_id}
-        )
-        
-        return mock_result
+        raise HTTPException(status_code=404, detail="Query not found")
         
     except HTTPException:
         raise
@@ -229,10 +114,11 @@ async def get_query_result(
         )
 
 
-@router.delete("/query/{query_id}")
+@router.delete("/{query_id}")
 async def delete_query_result(
     query_id: str,
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_id: str = Security(get_current_tenant),
+    db: Session = Depends(get_db),
 ):
     """
     Delete a specific query result.
@@ -241,13 +127,6 @@ async def delete_query_result(
     """
     try:
         logger.info(f"Deleting query result {query_id} for tenant {tenant_id}")
-        
-        # Validate query ID format
-        if not query_id.startswith(tenant_id):
-            raise HTTPException(
-                status_code=404,
-                detail="Query not found"
-            )
         
         # TODO: Implement actual query result deletion
         

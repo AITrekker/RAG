@@ -245,15 +245,15 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({ onTriggerSync }) => {
         {/* Sync Statistics */}
         {syncStatus && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-gray-200 mt-6">
-            <div className="text-center">
+          <div className="text-center">
               <p className="text-sm text-gray-500">Status</p>
               <p className="text-md font-semibold text-gray-800">{syncStatus.status}</p>
-            </div>
-            <div className="text-center">
+          </div>
+          <div className="text-center">
               <p className="text-sm text-gray-500">Files Processed</p>
               <p className="text-md font-semibold text-gray-800">{syncStatus.successful_files} / {syncStatus.total_files}</p>
-            </div>
-            <div className="text-center">
+          </div>
+          <div className="text-center">
               <p className="text-sm text-gray-500">Last Run</p>
               <p className="text-md font-semibold text-gray-800">{formatLastSyncTime(syncStatus.completed_at || syncStatus.started_at)}</p>
             </div>

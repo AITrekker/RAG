@@ -33,6 +33,66 @@ The system follows a modular RAG architecture:
     - The final context is passed to a local generative LLM (via `transformers`) to synthesize an answer.
 5.  **API & UI:** A FastAPI backend exposes the RAG functionality. A simple UI provides a query interface and a reporting dashboard.
 
+## Architecture Deep Dive: Multi-Tenant Strategy
+
+While the system is designed for multi-tenancy, it supports different levels of data isolation based on a customer's service tier. This provides a flexible architecture that can be adapted for different security and performance requirements, from cost-effective shared infrastructure to fully isolated dedicated environments.
+
+This logic is orchestrated by the `TenantIsolationStrategy` in `src/backend/core/tenant_isolation.py`.
+
+### Tenant Tiers (The "What")
+
+The tiering system is a **business-level concept** that defines the service level for a tenant:
+
+-   **`BASIC` Tier:** For customers who need core functionality on a cost-effective, shared infrastructure.
+-   **`PREMIUM` Tier:** A middle ground, offering a hybrid approach with enhanced performance or security features.
+-   **`ENTERPRISE` Tier:** For customers requiring the highest level of security and performance on dedicated, physically separate infrastructure.
+
+### Isolation Levels (The "How")
+
+The business tier maps directly to a **technical implementation strategy**, which determines how a tenant's data is actually stored:
+
+-   **`LOGICAL` Isolation:** Used for `BASIC` tenants. Data is co-located on shared infrastructure but separated by a `tenant_id` column in database tables or a prefix in vector store collections.
+-   **`PHYSICAL` Isolation:** Used for `ENTERPRISE` tenants. Data is stored in physically separate resources, such as a dedicated database instance, a separate disk volume for files, or a different vector store.
+
+### Current Implementation vs. Production-Ready Design
+
+You are correct that in the current development environment, all resources are shared (one database file, one `/data` directory). The project is currently configured to use only the `LOGICAL` isolation strategy for all tenants.
+
+However, the architecture is designed so that enabling physical isolation for an `ENTERPRISE` tenant requires **no application code changes**. The logic is already in place. To make it fully operational in production, you would only need to:
+
+1.  Provision the dedicated infrastructure (e.g., a new database or a separate mounted disk).
+2.  Update the configuration in `tenant_isolation.py` to point to these new resources for `PHYSICAL`-level tenants.
+
+### Data Flow Diagram
+
+The following diagram illustrates how the `TenantManager` uses the `TenantIsolationStrategy` to provision resources for different tiers:
+
+```mermaid
+sequenceDiagram
+    participant API as "API Route<br/>(e.g., POST /tenants)"
+    participant TM as "TenantManager"
+    participant IS as "TenantIsolationStrategy"
+    participant FSM as "TenantFileSystemManager"
+
+    API->>TM: create_tenant("NewCorp", "ENTERPRISE")
+    
+    TM->>TM: Creates Tenant record in DB
+    
+    TM->>IS: register_tenant("newcorp_id", "ENTERPRISE")
+    Note over IS: Determines IsolationLevel is PHYSICAL
+
+    TM->>IS: get_filesystem_strategy("newcorp_id")
+    IS-->>TM: Returns config:<br/>{ tenant_path: "/data/tenants/newcorp_id", ... }
+
+    TM->>FSM: create_tenant_structure("newcorp_id", config)
+    
+    FSM->>FSM: Path("/data/tenants/newcorp_id").mkdir()
+    Note right of FSM: Creates folders on disk
+
+    FSM-->>TM: Success
+    TM-->>API: TenantResponse
+```
+
 ## 4. Technology Stack
 
 - **Backend:** Python, FastAPI

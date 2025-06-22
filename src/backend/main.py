@@ -17,10 +17,11 @@ from typing import Dict, Any
 
 from .config.settings import get_settings
 from .api.v1.routes import query, tenants, sync, health, audit
-from .core.embeddings import get_embedding_service
+from .core.embeddings import get_embedding_service, EmbeddingService
 from .core.rag_pipeline import get_rag_pipeline
+from .utils.vector_store import VectorStoreManager
 from .middleware.tenant_context import TenantContextMiddleware
-from .middleware.auth import api_key_auth
+from .middleware.auth import require_authentication
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
         embedding_service = get_embedding_service()
         
         logger.info("Initializing vector store manager...")
+        from .utils.vector_store import get_vector_store_manager
         vector_store_manager = get_vector_store_manager()
         
         # Store services in app state for dependency injection
@@ -184,18 +186,21 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 # Dependency injection for services
-def get_embedding_service() -> EmbeddingService:
+def get_embedding_service_dependency() -> EmbeddingService:
     """Dependency to get the embedding service."""
-    if not hasattr(app.state, 'embedding_service') or app.state.embedding_service is None:
-        app.state.embedding_service = EmbeddingService()
-    return app.state.embedding_service
+    if hasattr(app.state, 'embedding_service') and app.state.embedding_service is not None:
+        return app.state.embedding_service
+    # Fallback to singleton if not in app state
+    return get_embedding_service()
 
 
-def get_vector_store_manager() -> VectorStoreManager:
+def get_vector_store_manager_dependency() -> VectorStoreManager:
     """Dependency to get the vector store manager."""
-    if not hasattr(app.state, 'vector_store_manager') or app.state.vector_store_manager is None:
-        app.state.vector_store_manager = VectorStoreManager()
-    return app.state.vector_store_manager
+    if hasattr(app.state, 'vector_store_manager') and app.state.vector_store_manager is not None:
+        return app.state.vector_store_manager
+    # Fallback to singleton if not in app state
+    from .utils.vector_store import get_vector_store_manager
+    return get_vector_store_manager()
 
 
 # Include API routes
@@ -221,14 +226,14 @@ app.include_router(
     sync.router,
     prefix="/api/v1/sync",
     tags=["Sync"],
-    dependencies=[Depends(api_key_auth)]
+    dependencies=[Depends(require_authentication)]
 )
 
 app.include_router(
     audit.router,
     prefix="/api/v1/audit",
     tags=["Audit"],
-    dependencies=[Depends(api_key_auth)]
+    dependencies=[Depends(require_authentication)]
 )
 
 

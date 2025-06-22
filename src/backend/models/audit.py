@@ -4,7 +4,7 @@ Database model for auditing synchronization events.
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON
 from sqlalchemy.sql import func
-from .database import Base
+from src.backend.db.base import Base
 
 class SyncEvent(Base):
     __tablename__ = 'sync_events'

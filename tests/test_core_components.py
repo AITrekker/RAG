@@ -8,8 +8,9 @@ import sys
 import os
 import time
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Update the path to ensure 'src' is in our import path
+# This allows us to import modules from the 'src' directory as if we were running from the root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def print_section(title: str):
     """Print section header"""
@@ -39,23 +40,23 @@ def test_basic_imports():
     
     try:
         print_test("Configuration and settings")
-        from backend.config.settings import settings
+        from src.backend.config.settings import settings
         print_success("Settings loaded successfully")
         print_info(f"Embedding model: {settings.embedding.model}")
         print_info(f"Device: {settings.embedding.device}")
         
         print_test("Embedding service")
-        from backend.core.embeddings import get_embedding_service
+        from src.backend.core.embeddings import get_embedding_service
         embedding_service = get_embedding_service()
         print_success("Embedding service imported and initialized")
         
         print_test("Vector store utilities")
-        from backend.utils.vector_store import get_chroma_manager
+        from src.backend.utils.vector_store import get_chroma_manager
         chroma_manager = get_chroma_manager()
         print_success("Vector store utilities working")
         
         print_test("Monitoring system")
-        from backend.core.monitoring import get_performance_monitor
+        from src.backend.core.monitoring import get_performance_monitor
         monitor = get_performance_monitor()
         print_success("Performance monitoring system working")
         
@@ -70,7 +71,7 @@ def test_embedding_functionality():
     print_section("Embedding Functionality Test")
     
     try:
-        from backend.core.embeddings import get_embedding_service
+        from src.backend.core.embeddings import get_embedding_service
         
         print_test("Embedding service initialization")
         embedding_service = get_embedding_service()
@@ -116,8 +117,8 @@ def test_vector_store():
     print_section("Vector Store Test")
     
     try:
-        from backend.utils.vector_store import get_chroma_manager
-        from backend.core.embeddings import get_embedding_service
+        from src.backend.utils.vector_store import get_chroma_manager
+        from src.backend.core.embeddings import get_embedding_service
         
         print_test("Chroma manager initialization")
         chroma_manager = get_chroma_manager()
@@ -176,7 +177,7 @@ def test_monitoring():
     print_section("Monitoring System Test")
     
     try:
-        from backend.utils.monitoring import get_performance_monitor
+        from src.backend.utils.monitoring import get_performance_monitor
         import time
 
         monitor = get_performance_monitor(force_reload=True)
@@ -204,7 +205,7 @@ def test_monitoring():
         
         # Test convenience functions
         print_test("Convenience functions")
-        from backend.utils.monitoring import record_embedding_time
+        from src.backend.utils.monitoring import record_embedding_time
         record_embedding_time(0.5, "test_model")
         stats = monitor.get_overall_stats()
         assert stats["total_operations"] == 3
@@ -220,9 +221,9 @@ def test_end_to_end_simple():
     print_section("Simple End-to-End Test")
     
     try:
-        from backend.core.embeddings import get_embedding_service
-        from backend.utils.vector_store import get_chroma_manager
-        from backend.core.monitoring import get_performance_monitor
+        from src.backend.core.embeddings import get_embedding_service
+        from src.backend.utils.vector_store import get_chroma_manager
+        from src.backend.core.monitoring import get_performance_monitor
         
         print_test("Component initialization")
         embedding_service = get_embedding_service()

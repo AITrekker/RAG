@@ -3,17 +3,17 @@ from sqlalchemy.orm import Session
 from typing import List
 import logging
 
-from ....core.auditing import AuditLogger, get_audit_logger
-from ....models.database import get_db
-from ....models.api_models import SyncEventResponse
-from ....middleware.auth import get_current_tenant_id
+from src.backend.db.session import get_db
+from src.backend.core.auditing import AuditLogger, get_audit_logger
+from src.backend.models.api_models import SyncEventResponse
+from src.backend.middleware.auth import get_current_tenant
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/events", response_model=List[SyncEventResponse])
 def get_audit_events(
-    tenant_id: str = Security(get_current_tenant_id),
+    tenant_id: str = Security(get_current_tenant),
     db: Session = Depends(get_db),
     audit_logger: AuditLogger = Depends(get_audit_logger),
     limit: int = 100,

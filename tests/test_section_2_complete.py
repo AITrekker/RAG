@@ -10,27 +10,29 @@ import asyncio
 import time
 from typing import List, Dict, Any
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Update the path to ensure 'src' is in our import path
+# This allows us to import modules from the 'src' directory as if we were running from the root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Test imports
-from backend.config.settings import settings
-from backend.core.embeddings import get_embedding_service
-from backend.core.rag_pipeline import get_rag_pipeline, create_documents_from_texts
-from backend.utils.vector_store import get_chroma_manager
-from backend.core.embedding_pipeline import get_embedding_pipeline
-from backend.core.query_processor import get_query_processor
-from backend.core.llm_service import get_llm_service, get_model_recommendations
-from backend.core.response_generator import get_response_generator, CitationStyle
-from backend.utils.monitoring import get_performance_monitor, record_query_time
-from backend.core.tenant_manager import get_tenant_manager
-from backend.core.document_ingestion import DocumentIngestionPipeline
-from backend.utils.vector_store import get_vector_store_manager
-from backend.config.settings import get_settings
-from backend.models.database import get_db, Base
-from backend.models.tenant import Tenant
-from backend.models.document import Document, DocumentChunk
-from backend.core.document_processor import DocumentProcessor
+from src.backend.config.settings import settings
+from src.backend.core.embeddings import get_embedding_service
+from src.backend.core.rag_pipeline import get_rag_pipeline, create_documents_from_texts
+from src.backend.utils.vector_store import get_chroma_manager
+from src.backend.core.embedding_pipeline import get_embedding_pipeline
+from src.backend.core.query_processor import get_query_processor
+from src.backend.core.llm_service import get_llm_service, get_model_recommendations
+from src.backend.core.response_generator import get_response_generator, CitationStyle
+from src.backend.utils.monitoring import get_performance_monitor, record_query_time
+from src.backend.core.tenant_manager import get_tenant_manager
+from src.backend.core.document_ingestion import DocumentIngestionPipeline
+from src.backend.utils.vector_store import get_vector_store_manager
+from src.backend.config.settings import get_settings
+from src.backend.db.session import get_db
+from src.backend.db.base import Base
+from src.backend.models.tenant import Tenant
+from src.backend.models.document import Document, DocumentChunk
+from src.backend.core.document_processor import DocumentProcessor
 import pytest
 from unittest.mock import patch, MagicMock
 from sqlalchemy import create_engine

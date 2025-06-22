@@ -4,117 +4,35 @@ Tenant management API endpoints for the Enterprise RAG Platform.
 Handles tenant creation, configuration, and management operations.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Dict, Any
-import logging
-from datetime import datetime
-import uuid
+from fastapi import APIRouter, Depends, HTTPException, status, Security
+from sqlalchemy.orm import Session
+from typing import List, Optional
 
-from ...core.tenant_manager import TenantManager
-from ...models.tenant import Tenant, TenantStatus
-from ...middleware.mock_tenant import get_current_tenant_id
+from src.backend.db.session import get_db
+from src.backend.core.tenant_manager import TenantManager
+from src.backend.models.api_models import (
+    TenantCreateRequest, TenantUpdateRequest, TenantResponse, 
+    TenantListResponse, TenantStatsResponse
+)
+from src.backend.middleware.auth import get_current_tenant, require_authentication
+
+import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Request/Response Models
-class TenantCreateRequest(BaseModel):
-    """Request model for tenant creation."""
-    name: str = Field(..., min_length=1, max_length=255, description="Tenant name")
-    description: Optional[str] = Field(None, max_length=1000, description="Tenant description")
-    contact_email: str = Field(..., description="Primary contact email")
-    settings: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Tenant-specific settings")
-    
-    @validator('name')
-    def validate_name(cls, v):
-        if not v.strip():
-            raise ValueError('Tenant name cannot be empty')
-        return v.strip()
-    
-    @validator('contact_email')
-    def validate_email(cls, v):
-        # Basic email validation
-        if '@' not in v or '.' not in v.split('@')[-1]:
-            raise ValueError('Invalid email format')
-        return v.lower().strip()
-
-
-class TenantUpdateRequest(BaseModel):
-    """Request model for tenant updates."""
-    name: Optional[str] = Field(None, min_length=1, max_length=255, description="Tenant name")
-    description: Optional[str] = Field(None, max_length=1000, description="Tenant description")
-    contact_email: Optional[str] = Field(None, description="Primary contact email")
-    settings: Optional[Dict[str, Any]] = Field(None, description="Tenant-specific settings")
-    status: Optional[TenantStatus] = Field(None, description="Tenant status")
-    
-    @validator('name')
-    def validate_name(cls, v):
-        if v is not None and not v.strip():
-            raise ValueError('Tenant name cannot be empty')
-        return v.strip() if v else v
-    
-    @validator('contact_email')
-    def validate_email(cls, v):
-        if v is not None:
-            if '@' not in v or '.' not in v.split('@')[-1]:
-                raise ValueError('Invalid email format')
-            return v.lower().strip()
-        return v
-
-
-class TenantResponse(BaseModel):
-    """Response model for tenant information."""
-    id: str = Field(..., description="Unique tenant identifier")
-    name: str = Field(..., description="Tenant name")
-    description: Optional[str] = Field(None, description="Tenant description")
-    contact_email: str = Field(..., description="Primary contact email")
-    status: TenantStatus = Field(..., description="Tenant status")
-    created_at: datetime = Field(..., description="Creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
-    settings: Dict[str, Any] = Field(default_factory=dict, description="Tenant-specific settings")
-    document_count: Optional[int] = Field(None, description="Number of documents")
-    storage_used: Optional[int] = Field(None, description="Storage used in bytes")
-
-
-class TenantListResponse(BaseModel):
-    """Response model for tenant listing."""
-    tenants: List[TenantResponse] = Field(default_factory=list, description="List of tenants")
-    total_count: int = Field(..., description="Total number of tenants")
-    page: int = Field(..., description="Current page number")
-    page_size: int = Field(..., description="Number of tenants per page")
-
-
-class TenantStatsResponse(BaseModel):
-    """Response model for tenant statistics."""
-    tenant_id: str = Field(..., description="Tenant identifier")
-    document_count: int = Field(..., description="Total number of documents")
-    chunk_count: int = Field(..., description="Total number of chunks")
-    storage_used: int = Field(..., description="Storage used in bytes")
-    query_count_today: int = Field(..., description="Queries processed today")
-    query_count_total: int = Field(..., description="Total queries processed")
-    last_sync: Optional[datetime] = Field(None, description="Last synchronization timestamp")
-    avg_query_time: Optional[float] = Field(None, description="Average query processing time")
-
-
 # Dependency to get tenant manager
-async def get_tenant_manager() -> TenantManager:
-    """Get tenant manager instance."""
-    try:
-        return TenantManager()
-    except Exception as e:
-        logger.error(f"Failed to initialize tenant manager: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to initialize tenant management service"
-        )
+def get_tenant_manager(db: Session = Depends(get_db)) -> TenantManager:
+    """Dependency to get an instance of TenantManager with a db session."""
+    return TenantManager(db_session=db)
 
 
-@router.post("/tenants", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
 async def create_tenant(
     request: TenantCreateRequest,
-    tenant_manager: TenantManager = Depends(get_tenant_manager)
+    tenant_manager: TenantManager = Depends(get_tenant_manager),
+    auth_context: dict = Security(require_authentication)
 ):
     """
     Create a new tenant.
@@ -164,12 +82,13 @@ async def create_tenant(
         )
 
 
-@router.get("/tenants", response_model=TenantListResponse)
+@router.get("/", response_model=TenantListResponse)
 async def list_tenants(
     page: int = 1,
     page_size: int = 20,
-    status_filter: Optional[TenantStatus] = None,
-    tenant_manager: TenantManager = Depends(get_tenant_manager)
+    status_filter: Optional[str] = None, # Simplified from TenantStatus for now
+    tenant_manager: TenantManager = Depends(get_tenant_manager),
+    auth_context: dict = Security(require_authentication)
 ):
     """
     List all tenants with pagination and filtering.
@@ -220,10 +139,11 @@ async def list_tenants(
         )
 
 
-@router.get("/tenants/{tenant_id}", response_model=TenantResponse)
+@router.get("/{tenant_id}", response_model=TenantResponse)
 async def get_tenant(
     tenant_id: str,
-    tenant_manager: TenantManager = Depends(get_tenant_manager)
+    tenant_manager: TenantManager = Depends(get_tenant_manager),
+    auth_context: dict = Security(require_authentication)
 ):
     """
     Get detailed information about a specific tenant.
@@ -278,11 +198,12 @@ async def get_tenant(
         )
 
 
-@router.put("/tenants/{tenant_id}", response_model=TenantResponse)
+@router.put("/{tenant_id}", response_model=TenantResponse)
 async def update_tenant(
     tenant_id: str,
     request: TenantUpdateRequest,
-    tenant_manager: TenantManager = Depends(get_tenant_manager)
+    tenant_manager: TenantManager = Depends(get_tenant_manager),
+    auth_context: dict = Security(require_authentication)
 ):
     """
     Update tenant information and settings.
@@ -352,10 +273,11 @@ async def update_tenant(
         )
 
 
-@router.delete("/tenants/{tenant_id}")
+@router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tenant(
     tenant_id: str,
-    tenant_manager: TenantManager = Depends(get_tenant_manager)
+    tenant_manager: TenantManager = Depends(get_tenant_manager),
+    auth_context: dict = Security(require_authentication)
 ):
     """
     Delete a tenant and all associated data.
@@ -397,10 +319,11 @@ async def delete_tenant(
         )
 
 
-@router.get("/tenants/{tenant_id}/stats", response_model=TenantStatsResponse)
+@router.get("/{tenant_id}/stats", response_model=TenantStatsResponse)
 async def get_tenant_stats(
     tenant_id: str,
-    tenant_manager: TenantManager = Depends(get_tenant_manager)
+    tenant_manager: TenantManager = Depends(get_tenant_manager),
+    auth_context: dict = Security(require_authentication)
 ):
     """
     Get detailed statistics for a specific tenant.

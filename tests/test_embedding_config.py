@@ -9,17 +9,18 @@ import sys
 import logging
 from pathlib import Path
 
-# Add backend to path
-sys.path.append(str(Path(__file__).parent / "backend"))
+# Update the path to ensure 'src' is in our import path
+# This allows us to import modules from the 'src' directory as if we were running from the root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from backend.config.settings import (
+from src.backend.config.settings import (
     settings, 
     get_embedding_model_config, 
     get_model_recommendations,
     validate_rtx_5070_compatibility,
     EmbeddingModelType
 )
-from backend.core.embeddings import get_embedding_service
+from src.backend.core.embeddings import get_embedding_service
 
 # Configure logging
 logging.basicConfig(

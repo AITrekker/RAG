@@ -21,16 +21,26 @@ Author: Enterprise RAG Platform Team
 """
 
 import logging
-from typing import Callable, Optional, List, Tuple
-from fastapi import Request, Response, HTTPException, status
+from typing import Callable, Optional, List, Tuple, Dict, Any
+from datetime import datetime, timezone
+from fastapi import Request, Response, HTTPException, status, Depends
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from ..core.tenant_scoped_db import TenantContext
+# from ..core.tenant_scoped_db import TenantContext  # Module moved/removed
 from ..core.tenant_manager import get_tenant_manager
-from ..models.tenant import TenantApiKey
+from ..models.tenant import TenantApiKey, Tenant
 
 logger = logging.getLogger(__name__)
+
+# Global tenant context storage
+_tenant_context: Dict[str, 'TenantContext'] = {}
+
+
+# Tenant isolation utilities
+class TenantSecurityError(Exception):
+    """Exception raised when tenant security is violated."""
+    pass
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -456,9 +466,37 @@ def create_tenant_health_check(db_session_factory: Callable):
 class TenantContext:
     """Tenant context manager for storing tenant-specific data."""
     
+    _current_tenant_id: Optional[str] = None
+    _current_user_id: Optional[str] = None
+    _context_data: Dict[str, Any] = {}
+    
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
         self._data: Dict[str, Any] = {}
+    
+    @classmethod
+    def set_current_tenant(cls, tenant_id: str, user_id: Optional[str] = None) -> None:
+        """Set the current tenant and user for this request context."""
+        cls._current_tenant_id = tenant_id
+        cls._current_user_id = user_id
+        cls._context_data.clear()
+    
+    @classmethod
+    def clear_context(cls) -> None:
+        """Clear the current tenant context."""
+        cls._current_tenant_id = None
+        cls._current_user_id = None
+        cls._context_data.clear()
+    
+    @classmethod
+    def get_current_tenant_id(cls) -> Optional[str]:
+        """Get the current tenant ID."""
+        return cls._current_tenant_id
+    
+    @classmethod
+    def get_current_user_id(cls) -> Optional[str]:
+        """Get the current user ID."""
+        return cls._current_user_id
     
     def set(self, key: str, value: Any) -> None:
         """Set a value in the tenant context."""

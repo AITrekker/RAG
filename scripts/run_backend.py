@@ -91,7 +91,7 @@ def setup_environment():
     
     # Default environment variables
     env_vars = {
-        'PYTHONPATH': str(project_root / 'src' / 'backend'),
+        'PYTHONPATH': str(project_root),
         'DATABASE_URL': 'sqlite:///./data/rag_dev.db',
         'CHROMA_PERSIST_DIRECTORY': str(project_root / 'data' / 'chroma'),
         'UPLOAD_DIRECTORY': str(project_root / 'data' / 'uploads'),
@@ -147,11 +147,11 @@ def run_backend(project_root, debug=False, port=8000, host="127.0.0.1"):
         'src.backend.main:app',
         '--host', host,
         '--port', str(port),
-        '--reload' if debug else '--no-reload',
         '--log-level', 'debug' if debug else 'info'
     ]
     
     if debug:
+        cmd.append('--reload')
         cmd.extend(['--reload-dir', str(backend_path)])
     
     print(f"🚀 Starting backend server...")

@@ -27,7 +27,7 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from enum import Enum
 from pydantic import BaseModel, Field
-from .database import Base
+from src.backend.db.base import Base
 from ..core.tenant_isolation import TenantTier, IsolationLevel
 
 # This will be removed

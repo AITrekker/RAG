@@ -317,4 +317,19 @@ def list_api_keys(tenant_id: str) -> list:
                 "last_used": key_info["last_used"]
             })
     
-    return keys 
+    return keys
+
+
+async def get_current_tenant(
+    auth_context: Dict[str, Any] = Depends(authenticate_request)
+) -> str:
+    """
+    Dependency to get the tenant_id from the authentication context.
+    """
+    tenant_id = auth_context.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not determine tenant ID from request.",
+        )
+    return tenant_id 

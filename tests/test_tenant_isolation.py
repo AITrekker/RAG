@@ -17,8 +17,9 @@ from datetime import datetime, timezone
 import logging
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Update the path to ensure 'src' is in our import path
+# This allows us to import modules from the 'src' directory as if we were running from the root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.backend.core.tenant_isolation import (
     get_tenant_isolation_strategy, TenantTier, IsolationLevel, TenantSecurityError
