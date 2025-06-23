@@ -24,6 +24,7 @@ from src.backend.core.embeddings import get_embedding_service, EmbeddingService
 from src.backend.core.rag_pipeline import get_rag_pipeline
 from src.backend.utils.vector_store import VectorStoreManager
 from src.backend.middleware.tenant_context import TenantContextMiddleware
+from src.backend.db.session import SessionLocal
 from src.backend.middleware.auth import require_authentication
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
 from scripts.migrate_db import run_migrations
@@ -173,6 +174,8 @@ async def lifespan(app: FastAPI):
         app.state.embedding_service = embedding_service
         app.state.vector_store_manager = vector_store_manager
         
+        # In production, you would configure proper database session factory
+        
         logger.info("API startup completed successfully")
         
     except Exception as e:
@@ -214,6 +217,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add Tenant Context Middleware - THIS MUST BE EARLY
+app.add_middleware(TenantContextMiddleware, db_session_factory=SessionLocal)
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
@@ -230,11 +236,6 @@ if not settings.debug:
         TrustedHostMiddleware, 
         allowed_hosts=settings.allowed_hosts
     )
-
-# Note: TenantContextMiddleware temporarily disabled for demo purposes
-# In production, you would configure proper database session factory
-# app.add_middleware(TenantContextMiddleware, db_session_factory=get_db_session)
-
 
 # Add comprehensive monitoring middleware
 app.middleware("http")(monitoring_middleware)

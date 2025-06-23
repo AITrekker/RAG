@@ -57,6 +57,7 @@ pandas==2.2.3  # Useful for data handling, often a dependency of data loaders
 # Async support
 asyncpg>=0.28.0  # Async PostgreSQL adapter
 nest-asyncio==1.6.0
+aiofiles>=23.0.0  # For async file operations
 
 # Caching and Session Management
 redis>=4.5.0  # For rate limiting and caching

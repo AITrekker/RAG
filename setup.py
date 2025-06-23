@@ -1,41 +1,56 @@
-import os
-import subprocess
 import sys
+import subprocess
+from setuptools import setup, find_packages
 from pathlib import Path
 
-def in_virtualenv():
-    return (
-        hasattr(sys, 'real_prefix') or
-        (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
-    )
+# --- Helper Functions ---
 
-def create_venv(venv_path):
-    print(f"Creating virtual environment at {venv_path}...")
-    subprocess.check_call([sys.executable, '-m', 'venv', str(venv_path)])
+def is_in_virtual_env() -> bool:
+    """Check if running in a virtual environment."""
+    return sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')
 
-def activate_and_install(venv_path, requirements_file='requirements.txt'):
-    pip_executable = venv_path / ('Scripts' if os.name == 'nt' else 'bin') / 'pip'
-    print(f"Using pip at: {pip_executable}")
-    subprocess.check_call([str(pip_executable), 'install', '--upgrade', 'pip'])
-    subprocess.check_call([str(pip_executable), 'install', '-r', requirements_file])
+def install_requirements():
+    """Install requirements from requirements.txt using the correct pip."""
+    print("Installing requirements...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"]
+        )
+        print("Requirements installed successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing requirements: {e}")
+        sys.exit(1)
+    except FileNotFoundError:
+        print("Error: 'pip' command not found. Is pip installed and in your PATH?")
+        sys.exit(1)
 
-def main():
-    venv_path = Path('.venv')
-    if not in_virtualenv():
-        if not venv_path.exists():
-            create_venv(venv_path)
-        print(f"Activating virtual environment in {venv_path}...")
-        activate_and_install(venv_path)
-        print("""
-✅ Setup complete.
-To activate the environment manually:
+# --- Main Setup Logic ---
 
-  source .venv/bin/activate  (on macOS/Linux)
-  .venv\Scripts\activate   (on Windows)
-""")
-    else:
-        print("Already in a virtual environment. Installing requirements...")
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
+# When setup.py is run for installation, install dependencies first.
+install_requirements()
 
-if __name__ == '__main__':
-    main()
+setup(
+    name="enterprise-rag-platform",
+    version="1.0.0",
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+    author="Enterprise RAG Team",
+    description="A multi-tenant RAG platform for enterprise document search and retrieval",
+    long_description=Path("README.md").read_text(encoding="utf-8"),
+    long_description_content_type="text/markdown",
+    url="https://github.com/your-repo/enterprise-rag-platform",  # Replace with your repo URL
+    python_requires=">=3.11",
+    entry_points={
+        'console_scripts': [
+            'rag-backend=backend.main:app', # Example if you have a main entry point
+        ],
+    },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.11",
+        "Operating System :: OS Independent",
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Topic :: Software Development :: Libraries :: Application Frameworks",
+    ],
+)

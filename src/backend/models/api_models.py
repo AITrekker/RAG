@@ -218,6 +218,7 @@ class SyncStatusResponse(BaseModel):
     file_watcher_active: bool = Field(..., description="Whether file watcher is active")
     pending_changes: int = Field(default=0, description="Number of pending changes")
     current_status: str = Field(..., description="Current sync status")
+    active_sync_id: Optional[str] = Field(None, description="The ID of the currently active sync, if any")
 
 
 class SyncTriggerRequest(BaseModel):

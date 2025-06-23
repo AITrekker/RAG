@@ -6,9 +6,24 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
+import uuid
+import hashlib
 
 from src.backend.main import app
 from src.backend.config.settings import get_settings
+from src.backend.db.session import get_db
+from src.backend.models.tenant import Tenant, TenantApiKey
+
+
+@pytest.fixture(scope="session")
+def db_session():
+    """Provides a database session for the test suite."""
+    db = next(get_db())
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 @pytest.fixture(scope="module")
 def test_app():
@@ -30,8 +45,7 @@ def test_app():
 @pytest.fixture(scope="module")
 def client(test_app):
     """
-    Provides a TestClient instance for making API requests in tests.
-    This client is configured to work with the test_app fixture.
+    Provides a non-authenticated TestClient instance.
     """
     with TestClient(test_app) as test_client:
         yield test_client
@@ -39,20 +53,44 @@ def client(test_app):
 @pytest.fixture(scope="module")
 def authenticated_client(test_app):
     """
-    Provides a TestClient that is pre-authenticated for API requests.
-
-    This fixture patches the API key validation to bypass the database check
-    and returns a client that can be used for testing protected endpoints.
+    Provides an authenticated TestClient instance.
+    - Creates a real tenant and API key in the database.
+    - Adds the API key to the client's headers.
+    - Cleans up the tenant and key after tests.
     """
-    with patch('src.backend.middleware.auth.APIKeyValidator.validate_api_key') as mock_validate:
-        # Configure the mock to return a valid TenantApiKey object
-        mock_api_key = MagicMock()
-        mock_api_key.tenant_id = "test-tenant"
-        mock_api_key.scopes = ["*"] # Full access for testing
-        mock_api_key.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-        mock_validate.return_value = mock_api_key
-        
-        with TestClient(test_app) as test_client:
-            # Set default headers for authenticated requests
-            test_client.headers['Authorization'] = 'Bearer test-token'
-            yield test_client 
+    db = next(get_db())
+    
+    tenant_id_str = f"test-tenant-{uuid.uuid4()}"
+    api_key_str = f"test-token-{uuid.uuid4()}"
+    key_hash = hashlib.sha256(api_key_str.encode('utf-8')).hexdigest()
+
+    # Create tenant and API key in a single transaction
+    tenant = Tenant(tenant_id=tenant_id_str, name=tenant_id_str, status="active")
+    db.add(tenant)
+    db.flush()  # Ensure tenant gets an ID
+
+    api_key = TenantApiKey(
+        tenant_id=tenant.id,
+        key_name="Test Key",
+        key_hash=key_hash,
+        key_prefix="test",
+        is_active=True,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    db.add(api_key)
+    db.commit()
+
+    with TestClient(test_app) as test_client:
+        test_client.headers['Authorization'] = f'Bearer {api_key_str}'
+        yield test_client
+    
+    # Cleanup
+    db.delete(api_key)
+    db.delete(tenant)
+    db.commit()
+    db.close()
+
+@pytest.fixture
+def auth_headers(authenticated_client):
+    """Provides authentication headers for manual requests if needed."""
+    return authenticated_client.headers 

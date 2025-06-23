@@ -14,14 +14,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Security
 from sqlalchemy.orm import Session
 
 from ....core.document_ingestion import DocumentIngestionPipeline
 from ....db.session import get_db, SessionLocal
-from ....middleware.auth import require_api_key
-from ....middleware.tenant_context import get_tenant_from_header
+from ....middleware.auth import require_api_key, get_current_tenant
+from ....middleware.tenant_context import get_current_tenant_id
 from ....models.api_models import (
     SyncTriggerRequest, SyncResponse, SyncStatusResponse, SyncConfigRequest,
     SyncHistoryResponse, SyncMetricsResponse, DocumentSyncInfo,
@@ -41,6 +42,8 @@ router = APIRouter(tags=["synchronization"])
 # Global sync operations tracking
 _active_syncs: Dict[str, SyncResponse] = {}
 
+logger = logging.getLogger(__name__)
+
 
 @router.get("/test")
 async def test_sync_endpoint():
@@ -59,7 +62,7 @@ async def trigger_sync_simple():
 async def trigger_manual_sync(
     request: SyncTriggerRequest,
     background_tasks: BackgroundTasks,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -108,11 +111,11 @@ async def trigger_manual_sync(
 @router.get("/status", response_model=SyncStatusResponse)
 # @require_api_key(scopes=["sync:read"])  # Temporarily disabled for development
 async def get_sync_status(
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Security(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """
-    Get current synchronization status for a tenant.
+    Get the current status of the synchronization service for the tenant.
     """
     try:
         # Check for active syncs for this tenant
@@ -120,19 +123,26 @@ async def get_sync_status(
         last_sync_time = None
         last_sync_success = None
         
-        # Find the most recent sync for this tenant
+        # First check for any running syncs in memory
         tenant_syncs = [sync for sync in _active_syncs.values() if sync.tenant_id == tenant_id]
+        running_sync = next((sync for sync in tenant_syncs if sync.status == SyncStatus.RUNNING), None)
         
-        if tenant_syncs:
-            # Sort by start time, get most recent
-            latest_sync = sorted(tenant_syncs, key=lambda x: x.started_at, reverse=True)[0]
+        active_sync_id = None
+        if running_sync:
+            current_status = "running"
+            active_sync_id = running_sync.sync_id
+        else:
+            current_status = "idle"
             
-            if latest_sync.status == SyncStatus.RUNNING:
-                current_status = "running"
-            else:
-                current_status = "idle"
-                last_sync_time = latest_sync.completed_at or latest_sync.started_at
-                last_sync_success = latest_sync.status == SyncStatus.COMPLETED
+            # Get most recent sync from database (TenantDocument table)
+            most_recent_doc = db.query(TenantDocument).filter(
+                TenantDocument.tenant_id == tenant_id,
+                TenantDocument.processed_at.isnot(None)
+            ).order_by(TenantDocument.processed_at.desc()).first()
+            
+            if most_recent_doc:
+                last_sync_time = most_recent_doc.processed_at
+                last_sync_success = most_recent_doc.status == "completed"
         
         # Check for pending changes by counting unprocessed files
         documents_path = Path(f"./data/tenants/{tenant_id}/uploads")
@@ -159,7 +169,8 @@ async def get_sync_status(
             sync_interval_minutes=1440,
             file_watcher_active=False,  # Not implemented yet
             pending_changes=pending_changes,
-            current_status=current_status
+            current_status=current_status,
+            active_sync_id=active_sync_id
         )
         
     except Exception as e:
@@ -173,7 +184,7 @@ async def get_sync_status(
 # @require_api_key(scopes=["sync:read"])  # Temporarily disabled for development
 async def get_sync_operation_direct(
     sync_id: str,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -210,7 +221,7 @@ async def get_sync_operation_direct(
 # @require_api_key(scopes=["sync:read"])  # Temporarily disabled for development
 async def get_sync_operation(
     sync_id: str,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -224,7 +235,7 @@ async def get_sync_operation(
 # @require_api_key(scopes=["sync:read"])  # Temporarily disabled for development
 async def get_sync_history(
     limit: int = 50,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -308,7 +319,7 @@ async def update_sync_config(
 @router.get("/config", response_model=Dict[str, Any])
 # @require_api_key(scopes=["sync:read"])  # Temporarily disabled for development
 async def get_sync_config(
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -391,7 +402,7 @@ async def test_webhook(
 # @require_api_key(scopes=["sync:read"])  # Temporarily disabled for development
 async def get_sync_metrics(
     days: int = 7,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -421,7 +432,7 @@ async def get_sync_metrics(
 @router.post("/pause", response_model=Dict[str, str])
 # @require_api_key(scopes=["sync:write"])  # Temporarily disabled for development
 async def pause_sync(
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -451,7 +462,7 @@ async def pause_sync(
 @router.post("/resume", response_model=Dict[str, str])
 # @require_api_key(scopes=["sync:write"])  # Temporarily disabled for development
 async def resume_sync(
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     """
@@ -549,26 +560,12 @@ async def _perform_document_sync(sync_id: str, tenant_id: str, force_full: bool 
                     try:
                         # Use the document ingestion pipeline with a fresh session for each document
                         with SessionLocal() as doc_db:
-                            # Check if document needs processing (using the ingestion pipeline's own logic)
-                            needs_processing, previous_doc_version = ingestion_pipeline.check_document_version(doc_db, file_path)
-                            
-                            # Force processing if force_full_sync is True, regardless of file changes
-                            if not needs_processing and not force_full:
-                                print(f"Document {file_path.name} is unchanged, skipping ingestion.")
-                                # Still update the TenantDocument tracking record if needed
-                                processing_time = 0
-                                chunks = []  # No new chunks created
-                                document = previous_doc_version
-                            else:
-                                if force_full and not needs_processing:
-                                    print(f"Force processing document {file_path.name} due to force_full_sync=True")
-                                
-                                document, chunks = await ingestion_pipeline.ingest_document(
-                                    db=doc_db,
-                                    file_path=file_path,
-                                    previous_version=previous_doc_version
-                                )
-                                print(f"DEBUG: ingest_document returned {len(chunks)} chunks for {file_path.name}")
+                            document, chunks = await ingestion_pipeline.ingest_document(
+                                db=doc_db,
+                                file_path=file_path,
+                                force_reingest=force_full
+                            )
+                            print(f"DEBUG: ingest_document returned {len(chunks)} chunks for {file_path.name}")
                             
                             processing_time = (datetime.now(timezone.utc) - processing_start).total_seconds()
                             

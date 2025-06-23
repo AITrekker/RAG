@@ -17,11 +17,14 @@ import psutil
 import torch
 import asyncio
 from datetime import datetime, timezone
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from src.backend.config.settings import get_settings
 from src.backend.utils.monitoring import get_logger, PerformanceMonitor, SystemMonitor, ErrorTracker
-from src.backend.core.embeddings import get_embedding_service
+from src.backend.core.embeddings import get_embedding_service, EmbeddingService
 from src.backend.utils.vector_store import get_vector_store_manager
+from src.backend.db.session import get_db
 
 # Get global instances
 logger = get_logger(__name__)
@@ -129,32 +132,17 @@ def get_system_metrics() -> SystemMetrics:
     )
 
 
-async def check_database_health() -> ComponentStatus:
+async def check_database_health(db: Session = Depends(get_db)):
     """Check database connectivity and health."""
     start_time = time.time()
     
     try:
-        # TODO: Implement actual database health check
-        # For now, simulate a health check
-        await asyncio.sleep(0.01)  # Simulate database query
-        
-        response_time = (time.time() - start_time) * 1000
-        
-        return ComponentStatus(
-            name="database",
-            status="healthy",
-            response_time_ms=response_time,
-            details={
-                "connection_pool_size": 10,
-                "active_connections": 2
-            }
-        )
+        # A simple query to check if the database is responsive
+        db.execute(text("SELECT 1"))
+        return {"name": "database", "status": "healthy"}
     except Exception as e:
-        return ComponentStatus(
-            name="database",
-            status="unhealthy",
-            error_message=str(e)
-        )
+        logger.error(f"Database health check failed: {e}")
+        return {"name": "database", "status": "unhealthy", "error": str(e)}
 
 
 async def check_vector_store_health() -> ComponentStatus:
@@ -185,32 +173,15 @@ async def check_vector_store_health() -> ComponentStatus:
         )
 
 
-async def check_embedding_service_health() -> ComponentStatus:
-    """Check embedding service health."""
-    start_time = time.time()
-    
+async def check_embedding_service_health(embedding_service: EmbeddingService = Depends(get_embedding_service)):
+    """Check if the embedding service is responding."""
     try:
-        # TODO: Implement actual embedding service health check
-        # For now, simulate a health check
-        await asyncio.sleep(0.01)  # Simulate embedding generation
-        
-        response_time = (time.time() - start_time) * 1000
-        
-        return ComponentStatus(
-            name="embedding_service",
-            status="healthy",
-            response_time_ms=response_time,
-            details={
-                "model_loaded": True,
-                "gpu_available": torch.cuda.is_available()
-            }
-        )
+        # Check if the embedding model is loaded and can embed a simple text
+        await embedding_service.embed_query("health check")
+        return {"name": "embedding_service", "status": "healthy"}
     except Exception as e:
-        return ComponentStatus(
-            name="embedding_service",
-            status="unhealthy",
-            error_message=str(e)
-        )
+        logger.error(f"Embedding service health check failed: {e}")
+        return {"name": "embedding_service", "status": "unhealthy", "error": str(e)}
 
 
 @router.get("/")
@@ -479,55 +450,16 @@ async def service_status() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to get service status")
 
 
-@router.get("/health/readiness")
-async def readiness_check():
-    """
-    Kubernetes-style readiness check.
-    
-    Returns 200 if the service is ready to accept traffic, 503 otherwise.
-    """
-    try:
-        # Check critical components
-        health = await detailed_health_check()
-        
-        # Consider service ready if overall status is healthy or degraded
-        if health.status in ["healthy", "degraded"]:
-            return {"status": "ready", "timestamp": datetime.utcnow()}
-        else:
-            raise HTTPException(status_code=503, detail="Service not ready")
-            
-    except Exception as e:
-        logger.error(f"Readiness check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service not ready")
-
-
-@router.get("/health/liveness")
+@router.get("/liveness", response_model=Dict[str, str], tags=["health"])
 async def liveness_check():
-    """
-    Kubernetes-style liveness check.
-    
-    Returns 200 if the service is alive, 503 if it should be restarted.
-    """
-    try:
-        # Basic checks to ensure the service is alive
-        uptime = get_uptime()
-        
-        # If uptime is very low, service might be starting up
-        if uptime < 5:
-            return {"status": "starting", "uptime_seconds": uptime}
-        
-        # Check if basic functionality is working
-        metrics = get_system_metrics()
-        
-        # If CPU or memory usage is extremely high, service might be stuck
-        if metrics.cpu_usage_percent > 95 or metrics.memory_usage_percent > 95:
-            logger.warning(f"High resource usage: CPU {metrics.cpu_usage_percent}%, Memory {metrics.memory_usage_percent}%")
-        
-        return {"status": "alive", "uptime_seconds": uptime}
-        
-    except Exception as e:
-        logger.error(f"Liveness check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service not responding")
+    """Basic liveness check."""
+    return {"status": "alive"}
+
+
+@router.get("/readiness", response_model=Dict[str, str], tags=["health"])
+async def readiness_check():
+    """Basic readiness check."""
+    return {"status": "ready"}
 
 
 @router.get("/metrics")

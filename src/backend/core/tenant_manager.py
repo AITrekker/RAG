@@ -458,29 +458,41 @@ class TenantManager:
     
     def validate_api_key(self, raw_key: str) -> Optional["TenantApiKey"]:
         """
-        Validate an API key and return the associated tenant key object
-        
-        Args:
-            raw_key: Raw API key string
-            
-        Returns:
-            The TenantApiKey instance if valid, else None
+        Validate an API key and return the associated tenant key record.
         """
         from src.backend.models.tenant import TenantApiKey
-        if not raw_key or ":" not in raw_key:
+
+        if not raw_key:
             return None
         
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        api_key = self.db.query(TenantApiKey).filter(TenantApiKey.key_hash == key_hash).first()
-        
-        if api_key and api_key.is_valid():
+        try:
+            # Hash the provided key
+            key_hash = hashlib.sha256(raw_key.encode('utf-8')).hexdigest()
+            
+            # Look up in database
+            tenant_key = self.db.query(TenantApiKey).filter(
+                TenantApiKey.key_hash == key_hash,
+                TenantApiKey.is_active == True
+            ).first()
+            
+            if not tenant_key:
+                return None
+            
+            # Check expiration
+            if tenant_key.expires_at and tenant_key.expires_at < datetime.now(timezone.utc):
+                logger.warning(f"Expired API key used: {tenant_key.key_prefix}")
+                return None
+            
             # Update usage statistics
-            api_key.last_used_at = datetime.now(timezone.utc)
-            api_key.usage_count += 1
+            tenant_key.last_used_at = datetime.now(timezone.utc)
+            tenant_key.usage_count += 1
             self.db.commit()
-            return api_key
-        
-        return None
+            
+            return tenant_key
+            
+        except Exception as e:
+            logger.error(f"Error validating API key: {e}")
+            return None
     
     def get_tenant_usage_stats(
         self,

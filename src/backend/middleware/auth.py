@@ -476,67 +476,99 @@ def get_api_usage_stats(tenant_id: str, db: Session, days: int = 30) -> Dict:
 # FastAPI Security dependencies
 security = HTTPBearer()
 
-
-def get_current_tenant(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """
-    FastAPI dependency to get current tenant from API key.
+class APIKeyOrBearer:
+    """Custom security class that accepts either X-API-Key header or Bearer token."""
     
-    Args:
-        credentials: HTTP Bearer credentials from FastAPI security
+    def __call__(self, request: Request) -> str:
+        """Extract API key from either X-API-Key header or Authorization Bearer."""
+        # First try X-API-Key header
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            return api_key
         
-    Returns:
-        Tenant ID string
+        # Then try Authorization header
+        auth_header = request.headers.get("Authorization")
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                return parts[1]
         
-    Raises:
-        HTTPException: If authentication fails
-    """
-    if not credentials or not credentials.credentials:
+        # No valid API key found
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing API key",
+            detail="Missing API key. Use X-API-Key header or Authorization: Bearer token",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+# Create instance of custom security
+api_key_security = APIKeyOrBearer()
+
+def get_current_tenant(
+    api_key: str = Depends(api_key_security),
+    db: Session = Depends(get_db)
+) -> str:
+    """
+    FastAPI dependency to get current tenant from API key credentials.
     
-    # Get database session
-    db = next(get_db())
+    Args:
+        api_key: API key from X-API-Key header or Bearer token
+        db: Database session
+        
+    Returns:
+        The tenant ID associated with the API key
+        
+    Raises:
+        HTTPException: If the API key is invalid
+    """
+    api_key_record = APIKeyValidator().validate_api_key(api_key, db)
     
-    try:
-        # Validate API key
-        validator = APIKeyValidator()
-        tenant_key = validator.validate_api_key(credentials.credentials, db)
-        
-        if not tenant_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API key",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-        
-        # Update last used timestamp
-        tenant_key.last_used_at = datetime.now(timezone.utc)
-        tenant_key.usage_count += 1
-        db.commit()
-        
-        return tenant_key.tenant.tenant_id
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error validating API key: {e}")
+    if not api_key_record:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication service error"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired API key"
         )
-    finally:
-        db.close()
+        
+    return api_key_record.tenant_id
 
 
-def require_authentication(credentials: HTTPAuthorizationCredentials = Depends(security)) -> TenantApiKey:
+def get_current_tenant_info(
+    api_key: str = Depends(api_key_security),
+    db: Session = Depends(get_db)
+) -> Tenant:
+    """
+    FastAPI dependency to get the full Tenant object.
+    
+    Args:
+        api_key: API key from X-API-Key header or Bearer token
+        db: Database session
+        
+    Returns:
+        The full Tenant object
+        
+    Raises:
+        HTTPException: If the API key is invalid
+    """
+    api_key_record = APIKeyValidator().validate_api_key(api_key, db)
+    
+    if not api_key_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired API key"
+        )
+        
+    return api_key_record.tenant
+
+
+def require_authentication(
+    api_key: str = Depends(api_key_security),
+    db: Session = Depends(get_db)
+) -> TenantApiKey:
     """
     FastAPI dependency to require authentication and return tenant key.
     
     Args:
-        credentials: HTTP Bearer credentials from FastAPI security
+        api_key: API key from X-API-Key header or Bearer token
+        db: Database session
         
     Returns:
         TenantApiKey object
@@ -544,20 +576,10 @@ def require_authentication(credentials: HTTPAuthorizationCredentials = Depends(s
     Raises:
         HTTPException: If authentication fails
     """
-    if not credentials or not credentials.credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing API key",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
-    # Get database session
-    db = next(get_db())
-    
     try:
         # Validate API key
         validator = APIKeyValidator()
-        tenant_key = validator.validate_api_key(credentials.credentials, db)
+        tenant_key = validator.validate_api_key(api_key, db)
         
         if not tenant_key:
             raise HTTPException(
@@ -588,6 +610,4 @@ def require_authentication(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service error"
-        )
-    finally:
-        db.close() 
+        ) 

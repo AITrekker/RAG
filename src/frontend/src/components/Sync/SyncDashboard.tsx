@@ -1,73 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../../services/api';
+import { api, SyncStatus } from '../../services/api';
+import type { 
+  DocumentInfo, 
+  SyncConfig, 
+  SyncMetrics, 
+  SyncResponse, 
+  SyncStatusResponse
+} from '../../services/api';
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Badge } from "../ui/badge";
+import {
+  Zap,
+  Pause,
+  Play,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
+  Clock,
+  FileText,
+  Calendar,
+  AlertCircle,
+  Settings,
+  TrendingUp
+} from "lucide-react";
 
-interface SyncEvent {
-  sync_run_id: string;
-  timestamp: string;
-  status: 'SUCCESS' | 'FAILURE' | 'IN_PROGRESS';
-  event_type: string;
-  message: string;
-  files_processed: number;
-  files_added: number;
-  files_modified: number;
-  files_deleted: number;
-  error_count: number;
-}
-
-interface SyncStatus {
-  tenant_id: string;
-  sync_enabled: boolean;
-  last_sync_time: string | null;
-  last_sync_success: boolean | null;
-  sync_interval_minutes: number;
-  file_watcher_active: boolean;
-  pending_changes: number;
-  current_status: string;
-}
-
-interface SyncMetrics {
-  period_days: number;
-  total_syncs: number;
-  successful_syncs: number;
-  failed_syncs: number;
-  success_rate: number;
-  total_files_processed: number;
-  total_files_added: number;
-  total_files_modified: number;
-  total_files_deleted: number;
-  average_sync_time_seconds: number | null;
-  last_sync_time: string | null;
-}
-
-interface SyncConfig {
-  auto_sync_enabled: boolean;
-  sync_interval_minutes: number;
-  ignore_patterns: string[];
-  webhooks: Array<{
-    url: string;
-    events: string[];
-    timeout: number;
-    retry_count: number;
-  }>;
-}
-
-interface DocumentInfo {
-  document_id: string;
-  filename: string;
-  upload_timestamp: string;
-  file_size: number;
-  status: string;
-  chunks_count: number;
-  content_type?: string;
-  metadata: {
-    document_type?: string;
-    file_hash?: string;
-    file_path?: string;
-    embedding_model?: string;
-    processed_at?: string;
-    error_message?: string;
-  };
-}
+interface SyncOperation extends SyncResponse {} // Alias for clarity in this component
+interface SyncStatusInfo extends SyncStatusResponse {} // Alias for clarity
 
 interface DocumentsListProps {
   documents: DocumentInfo[];
@@ -227,8 +187,8 @@ const DocumentsList: React.FC<DocumentsListProps> = ({ documents, loading, onRef
 };
 
 const SyncDashboard: React.FC = () => {
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [syncHistory, setSyncHistory] = useState<SyncEvent[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
+  const [syncHistory, setSyncHistory] = useState<SyncResponse[]>([]);
   const [syncMetrics, setSyncMetrics] = useState<SyncMetrics | null>(null);
   const [syncConfig, setSyncConfig] = useState<SyncConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -236,39 +196,46 @@ const SyncDashboard: React.FC = () => {
   const [selectedPeriod, setSelectedPeriod] = useState(7);
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
 
+  const fetchStaticData = async () => {
+    try {
+      const [history, metrics, config] = await Promise.all([
+        api.getSyncHistory(1, 50),
+        api.getSyncMetrics(selectedPeriod),
+        api.getSyncConfig(),
+      ]);
+      setSyncHistory(history.syncs);
+      setSyncMetrics(metrics);
+      setSyncConfig(config);
+    } catch (error) {
+      console.error('Failed to fetch static sync data:', error);
+    }
+  };
+
+  const fetchDynamicData = async () => {
+    try {
+      setLoading(true);
+      const [status, documentsRes] = await Promise.all([
+        api.getSyncStatus(),
+        api.getDocuments(1, 100), // Get first 100 documents
+      ]);
+      setSyncStatus(status);
+      setDocuments(documentsRes.documents);
+    } catch (error) {
+      console.error('Failed to fetch dynamic sync data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchSyncData();
-    const interval = setInterval(fetchSyncData, 30000); // Refresh every 30 seconds
+    fetchStaticData();
+    fetchDynamicData(); // Initial fetch
+    const interval = setInterval(fetchDynamicData, 30000); // Refresh dynamic data every 30 seconds
     return () => clearInterval(interval);
   }, [selectedPeriod]);
 
-  const fetchSyncData = async () => {
-    try {
-      const [statusRes, historyRes, metricsRes, configRes, documentsRes] = await Promise.all([
-        fetch('/api/v1/sync/status'),
-        fetch('/api/v1/sync/history?limit=50'),
-        fetch(`/api/v1/sync/metrics?days=${selectedPeriod}`),
-        fetch('/api/v1/sync/config'),
-        api.getDocuments(1, 100) // Get first 100 documents
-      ]);
-
-      const [status, history, metrics, config] = await Promise.all([
-        statusRes.json(),
-        historyRes.json(),
-        metricsRes.json(),
-        configRes.json()
-      ]);
-
-      setSyncStatus(status);
-      setSyncHistory(history);
-      setSyncMetrics(metrics);
-      setSyncConfig(config);
-      setDocuments(documentsRes.documents);
-      setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch sync data:', error);
-      setLoading(false);
-    }
+  const refreshAllData = async () => {
+    await Promise.all([fetchStaticData(), fetchDynamicData()]);
   };
 
   const triggerManualSync = async () => {
@@ -283,7 +250,7 @@ const SyncDashboard: React.FC = () => {
       });
       
       if (response.ok) {
-        await fetchSyncData();
+        await refreshAllData();
       } else {
         console.error('Failed to trigger sync');
       }
@@ -302,21 +269,21 @@ const SyncDashboard: React.FC = () => {
       const response = await fetch(endpoint, { method: 'POST' });
       
       if (response.ok) {
-        await fetchSyncData();
+        await refreshAllData();
       }
     } catch (error) {
       console.error('Error toggling auto sync:', error);
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: SyncStatus) => {
     switch (status) {
-      case 'SUCCESS':
-        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Success</Badge>;
-      case 'FAILURE':
-        return <Badge className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>;
-      case 'IN_PROGRESS':
+      case SyncStatus.RUNNING:
         return <Badge className="bg-blue-100 text-blue-800"><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Running</Badge>;
+      case SyncStatus.COMPLETED:
+        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Success</Badge>;
+      case SyncStatus.FAILED:
+        return <Badge className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>;
       default:
         return <Badge className="bg-gray-100 text-gray-800">{status}</Badge>;
     }
@@ -332,7 +299,7 @@ const SyncDashboard: React.FC = () => {
   const handleDeleteDocument = async (documentId: string) => {
     try {
       await api.deleteDocument(documentId);
-      await fetchSyncData(); // Refresh the data
+      await refreshAllData(); // Refresh the data
     } catch (error) {
       console.error('Failed to delete document:', error);
       alert('Failed to delete document. Please try again.');
@@ -342,7 +309,7 @@ const SyncDashboard: React.FC = () => {
   const handleClearAllDocuments = async () => {
     try {
       await api.clearAllDocuments();
-      await fetchSyncData(); // Refresh the data
+      await refreshAllData(); // Refresh the data
     } catch (error) {
       console.error('Failed to clear all documents:', error);
       alert('Failed to clear all documents. Please try again.');
@@ -398,13 +365,15 @@ const SyncDashboard: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Sync Status</p>
                 <p className="text-lg font-bold">
-                  {syncStatus?.sync_enabled ? 'Enabled' : 'Disabled'}
+                  {syncStatus?.current_status ?? 'Unknown'}
                 </p>
               </div>
-              {syncStatus?.sync_enabled ? (
-                <CheckCircle className="w-8 h-8 text-green-500" />
+              {syncStatus?.current_status === 'running' ? (
+                <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+              ) : syncStatus?.last_sync_success === false ? (
+                <XCircle className="w-8 h-8 text-red-500" />
               ) : (
-                <Pause className="w-8 h-8 text-gray-400" />
+                <CheckCircle className="w-8 h-8 text-green-500" />
               )}
             </div>
           </CardContent>
@@ -480,43 +449,43 @@ const SyncDashboard: React.FC = () => {
                   <p className="text-gray-500 text-center py-8">No sync history available</p>
                 ) : (
                   syncHistory.map((event) => (
-                    <div key={event.sync_run_id} className="border rounded-lg p-4">
+                    <div key={event.sync_id} className="border rounded-lg p-4">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center space-x-2">
-                          {getStatusBadge(event.status)}
+                          {getStatusBadge(event.status as any)}
                           <span className="text-sm text-gray-500">
-                            {new Date(event.timestamp).toLocaleString()}
+                            {new Date(event.started_at).toLocaleString()}
                           </span>
                         </div>
-                        <span className="text-xs text-gray-400">{event.sync_run_id}</span>
+                        <span className="text-xs text-gray-400">{event.sync_id}</span>
                       </div>
                       
-                      <p className="text-sm text-gray-700 mb-3">{event.message}</p>
+                      <p className="text-sm text-gray-700 mb-3">{`Processed ${event.successful_files}/${event.total_files} files.`}</p>
                       
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div className="text-center">
                           <p className="text-gray-500">Processed</p>
-                          <p className="font-semibold">{event.files_processed}</p>
+                          <p className="font-semibold">{event.processed_files}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-gray-500">Added</p>
-                          <p className="font-semibold text-green-600">{event.files_added}</p>
+                          <p className="text-gray-500">Successful</p>
+                          <p className="font-semibold text-green-600">{event.successful_files}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-gray-500">Modified</p>
-                          <p className="font-semibold text-blue-600">{event.files_modified}</p>
+                          <p className="text-gray-500">Failed</p>
+                          <p className="font-semibold text-blue-600">{event.failed_files}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-gray-500">Deleted</p>
-                          <p className="font-semibold text-red-600">{event.files_deleted}</p>
+                          <p className="text-gray-500">Chunks</p>
+                          <p className="font-semibold text-red-600">{event.total_chunks}</p>
                         </div>
                       </div>
                       
-                      {event.error_count > 0 && (
+                      {event.error_message && (
                         <div className="mt-3 p-2 bg-red-50 rounded-md">
                           <p className="text-sm text-red-700 flex items-center">
                             <AlertCircle className="w-4 h-4 mr-1" />
-                            {event.error_count} error(s) occurred during sync
+                            {event.error_message}
                           </p>
                         </div>
                       )}
@@ -700,7 +669,7 @@ const SyncDashboard: React.FC = () => {
           <DocumentsList 
             documents={documents} 
             loading={loading} 
-            onRefresh={fetchSyncData}
+            onRefresh={refreshAllData}
             onDeleteDocument={handleDeleteDocument}
             onClearAllDocuments={handleClearAllDocuments}
           />

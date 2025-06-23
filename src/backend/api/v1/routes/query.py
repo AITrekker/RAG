@@ -14,6 +14,7 @@ from src.backend.db.session import get_db
 from src.backend.core.rag_pipeline import get_rag_pipeline
 from src.backend.models.api_models import QueryRequest, QueryResponse, QueryHistory, SourceCitation
 from src.backend.middleware.auth import get_current_tenant, require_api_key
+from src.backend.middleware.tenant_context import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ router = APIRouter()
 async def process_query(
     request: QueryRequest,
     db: Session = Depends(get_db),
-    tenant_id: str = Depends(lambda: "default"),  # Default tenant for development
+    tenant_id: str = Depends(get_current_tenant_id),
     rag_pipeline = Depends(get_rag_pipeline)
 ):
     """
@@ -72,7 +73,7 @@ async def process_query(
 async def get_query_history(
     page: int = 1,
     page_size: int = 20,
-    tenant_id: str = Depends(lambda: "default"),  # Default tenant for development
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db),
 ):
     """
@@ -106,7 +107,7 @@ async def get_query_history(
 # @require_api_key(scopes=["query:read"])  # Temporarily disabled for development
 async def get_query_result(
     query_id: str,
-    tenant_id: str = Depends(lambda: "default"),  # Default tenant for development
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db),
 ):
     """
@@ -134,7 +135,7 @@ async def get_query_result(
 # @require_api_key(scopes=["query:write"])  # Temporarily disabled for development
 async def delete_query_result(
     query_id: str,
-    tenant_id: str = Depends(lambda: "default"),  # Default tenant for development
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db),
 ):
     """

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from ....db.session import get_db
 from ....middleware.auth import get_current_tenant, require_authentication
-from ....middleware.tenant_context import get_tenant_from_header
+from ....middleware.tenant_context import get_current_tenant_id
 from ....core.document_ingestion import DocumentIngestionPipeline
 from ....utils.tenant_filesystem import TenantFileSystemManager
 from ....utils.vector_store import get_vector_store_manager
@@ -24,6 +24,8 @@ from ....models.api_models import (
     DocumentResponse, DocumentListResponse, DocumentUploadResponse,
     DocumentMetadata, DocumentUpdateRequest
 )
+from ..providers import get_document_service
+from ....services.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +124,7 @@ async def list_documents(
     page: int = 1,
     page_size: int = 20,
     search: Optional[str] = None,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant_id: str = Security(get_current_tenant),
     db: Session = Depends(get_db)
 ):
     """
@@ -274,91 +276,48 @@ async def update_document(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
-    tenant_id: str = Depends(get_tenant_from_header),
-    db: Session = Depends(get_db)
+    doc_service: DocumentService = Depends(get_document_service),
+    tenant_id: str = Security(get_current_tenant)
 ):
     """
-    Delete a specific document and all associated data.
+    Delete a document and its associated data.
     
-    Removes the document from the database, vector store, and file system.
+    This endpoint is now a thin wrapper around the DocumentService.
     """
     try:
-        logger.info(f"Deleting document {document_id} for tenant {tenant_id}")
-        
-        # Import the model here to avoid circular imports
-        from ....models.tenant import TenantDocument
-        
-        # Find and delete the document
-        document = db.query(TenantDocument).filter(
-            TenantDocument.tenant_id == tenant_id,
-            TenantDocument.document_id == document_id
-        ).first()
-        
-        if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found"
-            )
-        
-        # Delete from database
-        db.delete(document)
-        db.commit()
-        
-        logger.info(f"Document {document_id} deleted successfully for tenant {tenant_id}")
-        
-    except HTTPException:
-        raise
+        doc_service.delete_document(document_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
     except Exception as e:
-        logger.error(f"Failed to delete document {document_id} for tenant {tenant_id}: {e}")
-        db.rollback()
+        logger.error(f"API: Failed to delete document {document_id}: {e}")
+        # Re-raising as a generic 500 error to avoid leaking implementation details
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete document"
+            detail="An unexpected error occurred while deleting the document."
         )
 
 
-@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/clear", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_all_documents(
-    tenant_id: str = Depends(get_tenant_from_header),
-    db: Session = Depends(get_db)
+    doc_service: DocumentService = Depends(get_document_service),
+    tenant_id: str = Security(get_current_tenant)
 ):
     """
-    Delete ALL documents for the current tenant.
+    Delete all documents for the current tenant.
     
-    WARNING: This will permanently remove all documents and associated data for the tenant.
+    This endpoint is now a thin wrapper around the DocumentService.
     """
     try:
-        logger.info(f"Clearing all documents for tenant {tenant_id}")
-        
-        # Import the model here to avoid circular imports
-        from ....models.tenant import TenantDocument
-        
-        # Count documents before deletion
-        document_count = db.query(TenantDocument).filter(
-            TenantDocument.tenant_id == tenant_id
-        ).count()
-        
-        if document_count == 0:
-            logger.info(f"No documents found for tenant {tenant_id}")
-            return
-        
-        # Delete all documents for this tenant
-        deleted_count = db.query(TenantDocument).filter(
-            TenantDocument.tenant_id == tenant_id
-        ).delete()
-        
-        db.commit()
-        
-        logger.info(f"Cleared {deleted_count} documents for tenant {tenant_id}")
-        
-    except HTTPException:
-        raise
+        deleted_count = doc_service.clear_all_documents()
+        logger.info(f"API: Cleared {deleted_count} documents successfully.")
     except Exception as e:
-        logger.error(f"Failed to clear all documents for tenant {tenant_id}: {e}")
-        db.rollback()
+        logger.error(f"API: Failed to clear all documents: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to clear all documents"
+            detail="An unexpected error occurred while clearing documents."
         )
 
 

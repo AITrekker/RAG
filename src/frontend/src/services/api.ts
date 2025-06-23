@@ -63,6 +63,26 @@ export interface SyncResponse {
   error_message?: string;
 }
 
+export interface SyncStatusResponse {
+  tenant_id: string;
+  sync_enabled: boolean;
+  last_sync_time: string | null;
+  last_sync_success: boolean | null;
+  sync_interval_minutes: number;
+  file_watcher_active: boolean;
+  pending_changes: number;
+  current_status: SyncStatus;
+  active_sync_id?: string;
+}
+
+export enum SyncStatus {
+  IDLE = "idle",
+  RUNNING = "running",
+  COMPLETED = "completed",
+  FAILED = "failed",
+  CANCELLED = "cancelled",
+}
+
 export interface HealthStatus {
   status: string;
   timestamp: string;
@@ -76,6 +96,50 @@ export interface ApiError {
   request_id?: string;
 }
 
+export interface SyncMetrics {
+  period_days: number;
+  total_syncs: number;
+  successful_syncs: number;
+  failed_syncs: number;
+  success_rate: number;
+  total_files_processed: number;
+  total_files_added: number;
+  total_files_modified: number;
+  total_files_deleted: number;
+  average_sync_time_seconds: number | null;
+  last_sync_time: string | null;
+}
+
+export interface SyncConfig {
+  auto_sync_enabled: boolean;
+  sync_interval_minutes: number;
+  ignore_patterns: string[];
+  webhooks: Array<{
+    url: string;
+    events: string[];
+    timeout: number;
+    retry_count: number;
+  }>;
+}
+
+export interface DocumentInfo {
+  document_id: string;
+  filename: string;
+  upload_timestamp: string;
+  file_size: number;
+  status: string;
+  chunks_count: number;
+  content_type?: string;
+  metadata: {
+    document_type?: string;
+    file_hash?: string;
+    file_path?: string;
+    embedding_model?: string;
+    processed_at?: string;
+    error_message?: string;
+  };
+}
+
 // API Client Class
 class ApiClient {
   private client: AxiosInstance;
@@ -86,7 +150,7 @@ class ApiClient {
       timeout: 30000, // 30 seconds
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': API_KEY,
+        'Authorization': `Bearer ${API_KEY}`,
       },
     });
 
@@ -189,13 +253,23 @@ class ApiClient {
     return response.data;
   }
 
-  async getSyncStatus(): Promise<SyncResponse> {
-    const response = await this.client.get<SyncResponse>('/sync/status');
+  async getSyncStatus(): Promise<SyncStatusResponse> {
+    const response = await this.client.get<SyncStatusResponse>('/sync/status');
     return response.data;
   }
 
   async getSyncOperation(syncId: string): Promise<SyncResponse> {
     const response = await this.client.get<SyncResponse>(`/sync/${syncId}`);
+    return response.data;
+  }
+
+  async getSyncMetrics(days: number = 7): Promise<SyncMetrics> {
+    const response = await this.client.get<SyncMetrics>('/sync/metrics', { params: { days } });
+    return response.data;
+  }
+
+  async getSyncConfig(): Promise<SyncConfig> {
+    const response = await this.client.get<SyncConfig>('/sync/config');
     return response.data;
   }
 
@@ -395,11 +469,12 @@ class ApiClient {
 
   // Utility methods
   setApiKey(apiKey: string): void {
-    this.client.defaults.headers['X-API-Key'] = apiKey;
+    this.client.defaults.headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
   setTenantId(tenantId: string): void {
-    this.client.defaults.headers['X-Tenant-Id'] = tenantId;
+    // This is a placeholder if you need to set tenant ID in a header
+    // For example: this.client.defaults.headers['X-Tenant-ID'] = tenantId;
   }
 
   // Test connection

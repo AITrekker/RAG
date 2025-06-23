@@ -50,51 +50,48 @@ class DocumentIngestionPipeline:
         self.embedding_manager = embedding_manager or get_embedding_manager(auto_persist=False)
         logger.info(f"Initialized DocumentIngestionPipeline for tenant '{self.tenant_id_string}' (UUID: {self.tenant_id})")
 
-    def check_document_version(self, db: Session, file_path: Path) -> Tuple[bool, Optional[Document]]:
-        """
-        Checks if a document needs to be processed based on its hash.
-
-        Args:
-            db: The database session.
-            file_path: The path to the document file.
-
-        Returns:
-            A tuple containing a boolean indicating if processing is needed,
-            and the previous version of the document if it exists.
-        """
-        file_hash = self.document_processor._calculate_file_hash(str(file_path))
-
-        # Find the current version of the document by filename
-        existing_doc = db.query(Document).filter(
-            Document.tenant_id == self.tenant_id,
-            Document.filename == file_path.name,
-            Document.is_current_version == True
-        ).first()
-
-        if not existing_doc:
-            logger.info(f"Document '{file_path.name}' is new.")
-            return True, None
-
-        if existing_doc.file_hash == file_hash:
-            logger.info(f"Document '{file_path.name}' is unchanged (hash: {file_hash[:8]}).")
-            return False, existing_doc
-
-        logger.info(f"Document '{file_path.name}' has been modified. New version will be created.")
-        return True, existing_doc
-
-    async def ingest_document(self, db: Session, file_path: Path, previous_version: Optional[Document] = None) -> Tuple[Document, List[Dict[str, Any]]]:
+    async def ingest_document(
+        self, 
+        db: Session, 
+        file_path: Path, 
+        force_reingest: bool = False
+    ) -> Tuple[Optional[Document], List[Dict[str, Any]]]:
         """
         Processes, chunks, and embeds a single document, handling versioning.
 
+        If the document is unchanged and force_reingest is False, it will be skipped.
+
         Args:
             db: The database session.
             file_path: The path to the document file.
-            previous_version: The previous version of the document, if any.
+            force_reingest: If True, process the document even if its hash is unchanged.
 
         Returns:
-            A tuple of the new Document object and a list of created chunk dictionaries.
+            A tuple of the new Document object (or the existing one if skipped)
+            and a list of created chunk dictionaries.
         """
         try:
+            file_hash = self.document_processor._calculate_file_hash(str(file_path))
+
+            # Find the current version of the document by filename
+            previous_version = db.query(Document).filter(
+                Document.tenant_id == self.tenant_id,
+                Document.filename == file_path.name,
+                Document.is_current_version == True
+            ).first()
+
+            # --- Versioning and Skip Logic ---
+            if not force_reingest and previous_version and previous_version.file_hash == file_hash:
+                logger.info(f"Document '{file_path.name}' is unchanged and not forced. Skipping ingestion.")
+                # Return the existing document and no new chunks
+                return previous_version, []
+            
+            if previous_version:
+                 logger.info(f"Document '{file_path.name}' has been modified or re-ingestion is forced.")
+            else:
+                logger.info(f"Document '{file_path.name}' is new.")
+
+            # --- Processing ---
             processing_result = self.document_processor.process_file(
                 file_path=str(file_path),
                 tenant_id=self.tenant_id_string,
@@ -107,9 +104,9 @@ class DocumentIngestionPipeline:
             new_document = processing_result.document
             chunks = processing_result.chunks
 
-            # --- Versioning Logic ---
+            # --- Versioning Update ---
             if previous_version:
-                logger.info(f"Updating version for document '{new_document.filename}'.")
+                logger.info(f"Creating new version for document '{new_document.filename}'. Old version becomes inactive.")
                 previous_version.is_current_version = False
                 db.add(previous_version)
                 new_document.version = previous_version.version + 1

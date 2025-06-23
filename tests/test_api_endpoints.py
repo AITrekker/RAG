@@ -212,6 +212,7 @@ class TestAPIEndpoints:
         data = response.json()
         assert "status" in data
         assert "components" in data
+        assert data["status"] == "healthy"
     
     def test_system_status(self, client):
         """Test system status endpoint."""
@@ -219,20 +220,24 @@ class TestAPIEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert "health" in data
-        assert "metrics" in data
+        assert "service" in data
+        assert "status" in data
+        assert "timestamp" in data
+        assert "system" in data
     
     def test_readiness_check(self, client):
         """Test readiness check endpoint."""
         response = client.get("/api/v1/health/readiness")
         
         assert response.status_code == 200
+        assert response.json()["status"] == "ready"
     
     def test_liveness_check(self, client):
         """Test liveness check endpoint."""
         response = client.get("/api/v1/health/liveness")
         
         assert response.status_code == 200
+        assert response.json()["status"] == "alive"
 
     # ======================
     # TENANT ENDPOINTS
@@ -295,25 +300,21 @@ class TestAPIEndpoints:
     # SYNC ENDPOINTS
     # ======================
     
-    @patch('src.backend.api.v1.routes.sync.DeltaSync')
-    def test_trigger_sync(self, mock_delta_sync, authenticated_client, auth_headers):
+    @patch('src.backend.api.v1.routes.sync.DeltaSyncManager')
+    def test_trigger_sync(self, mock_sync_manager, authenticated_client, auth_headers):
         """Test trigger sync endpoint."""
-        mock_service_instance = Mock()
-        mock_delta_sync.return_value = mock_service_instance
+        # Setup mock sync response
+        mock_manager_instance = Mock()
+        mock_sync_manager.return_value = mock_manager_instance
         
-        async def run_sync_mock(*args, **kwargs):
-            mock_result = Mock()
-            mock_result.sync_run_id = "sync-123"
-            return mock_result
-        mock_service_instance.run_sync = run_sync_mock
+        async def trigger_sync_mock(*args, **kwargs):
+            return {"sync_id": "test-sync-id", "status": "started"}
+        mock_manager_instance.trigger_sync = trigger_sync_mock
 
-        response = authenticated_client.post(
-            "/api/v1/sync/trigger", 
-            json={"force_full_sync": False}, 
-            headers=auth_headers
-        )
-        assert response.status_code == 200
-        assert "message" in response.json()
+        response = authenticated_client.post("/api/v1/sync/trigger", json={}, headers=auth_headers)
+        
+        assert response.status_code == 202
+        assert response.json()["sync_id"] == "test-sync-id"
 
     def test_get_sync_status(self, authenticated_client, auth_headers):
         """Test get sync status endpoint."""
