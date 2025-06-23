@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     
     # LLM settings
     llm_model: str = Field(
-        default="tiiuae/falcon-7b-instruct", 
+        default="google/flan-t5-base", 
         env="LLM_MODEL"
     )
     llm_max_length: int = Field(default=1024, env="LLM_MAX_LENGTH")

@@ -1,6 +1,6 @@
 # 🛠️ Scripts Directory
 
-Essential development and setup tools for the RAG platform. This directory contains **9 essential tools** for development, database management, and data exploration.
+Essential development and setup tools for the RAG platform. This directory contains **12 essential tools** for development, database management, data exploration, and quality assurance.
 
 ## 📋 Available Scripts
 
@@ -16,10 +16,52 @@ Essential development and setup tools for the RAG platform. This directory conta
 - **`init_db.sql`** - Initial database schema and data
 
 ### 🔍 Data & System Exploration
-- **`explore_data.py`** - **NEW**: Explore documents, embeddings, and vector data
+- **`explore_data.py`** - Explore documents, embeddings, and vector data
+
+### 🧪 Quality Assurance & Development Workflow
+- **`health_check.py`** - **NEW**: Comprehensive system health validation
+- **`dev_workflow.py`** - **NEW**: Enforces safe development practices
 
 ### 📖 Documentation
 - **`README.md`** - This documentation file
+
+---
+
+## 🛡️ **Making Development Less Brittle**
+
+### **🔥 Before Making ANY Changes:**
+```bash
+# Validate system is healthy
+python scripts/health_check.py
+
+# OR use safe development mode
+python scripts/dev_workflow.py safe
+```
+
+### **🧪 Testing Workflow:**
+```bash
+# 1. Pre-change validation
+python scripts/dev_workflow.py pre
+
+# 2. Make your changes
+
+# 3. Post-change validation  
+python scripts/dev_workflow.py post
+```
+
+### **🔍 When Debugging Issues:**
+```bash
+# Check what data exists
+python scripts/explore_data.py
+
+# Test specific functionality
+python scripts/explore_data.py "your test query"
+
+# Validate all systems
+python scripts/health_check.py
+```
+
+---
 
 ## 🚀 **Quick Start Guide**
 

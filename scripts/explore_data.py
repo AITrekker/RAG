@@ -23,7 +23,7 @@ import numpy as np
 
 def show_overview():
     """Show a quick overview of the system data."""
-    print("🔍 RAG Platform Data Explorer")
+    print("RAG Platform Data Explorer")
     print("=" * 60)
     
     try:
@@ -34,7 +34,7 @@ def show_overview():
         chunk_count = db.execute(text("SELECT COUNT(*) FROM document_chunks")).scalar()
         tenant_count = db.execute(text("SELECT COUNT(*) FROM tenants")).scalar()
         
-        print(f"📊 Quick Stats:")
+        print(f"Quick Stats:")
         print(f"   Documents: {doc_count}")
         print(f"   Chunks: {chunk_count}")
         print(f"   Tenants: {tenant_count}")
@@ -50,11 +50,11 @@ def show_overview():
         db.close()
         
     except Exception as e:
-        print(f"❌ Error getting overview: {e}")
+        print(f"Error getting overview: {e}")
 
 def show_documents_detailed():
     """Show detailed document information."""
-    print("\n📄 Documents in Database")
+    print("\nDocuments in Database")
     print("=" * 50)
     
     try:
@@ -79,7 +79,7 @@ def show_documents_detailed():
             print(f"Recent documents:")
             for filename, file_size, status, tenant_name, created_at, chunk_count in documents:
                 size_kb = file_size / 1024 if file_size else 0
-                print(f"  📄 {filename}")
+                print(f"  {filename}")
                 print(f"     Tenant: {tenant_name}")
                 print(f"     Size: {size_kb:.1f} KB")
                 print(f"     Status: {status}")
@@ -92,11 +92,11 @@ def show_documents_detailed():
         db.close()
         
     except Exception as e:
-        print(f"❌ Error querying documents: {e}")
+        print(f"Error querying documents: {e}")
 
 def show_embeddings_sample():
     """Show sample embeddings from the vector store."""
-    print("\n🔢 Sample Embeddings")
+    print("\nSample Embeddings")
     print("=" * 50)
     
     try:
@@ -112,7 +112,7 @@ def show_embeddings_sample():
             # Get sample with embedding
             sample = best_collection.get(limit=1, include=['documents', 'embeddings', 'metadatas'])
             
-            if sample['embeddings'] and sample['embeddings'][0]:
+            if sample.get('embeddings') and len(sample['embeddings']) > 0:
                 embedding = sample['embeddings'][0]
                 print(f"  Document ID: {sample['ids'][0]}")
                 print(f"  Embedding dimensions: {len(embedding)}")
@@ -128,11 +128,11 @@ def show_embeddings_sample():
             print("No embeddings found.")
             
     except Exception as e:
-        print(f"❌ Error showing embeddings: {e}")
+        print(f"Error showing embeddings: {e}")
 
 def test_search(query="What is the company mission?"):
     """Test semantic search functionality."""
-    print(f"\n🔍 Testing Search: '{query}'")
+    print(f"\nTesting Search: '{query}'")
     print("=" * 50)
     
     try:
@@ -173,22 +173,22 @@ def test_search(query="What is the company mission?"):
             print("No results found.")
             
     except Exception as e:
-        print(f"❌ Error in search: {e}")
+        print(f"Error in search: {e}")
 
 def show_direct_access_info():
     """Show how to access the databases directly."""
-    print("\n🔧 Direct Database Access")
+    print("\nDirect Database Access")
     print("=" * 50)
     
-    print("📋 PostgreSQL (Document metadata):")
+    print("PostgreSQL (Document metadata):")
     print("   Connection: postgresql://rag_user:rag_password@localhost:5432/rag_database")
     print("   Docker exec: docker exec -it rag_postgres psql -U rag_user -d rag_database")
     print()
-    print("🔢 Chroma Vector Store (Embeddings):")
+    print("Chroma Vector Store (Embeddings):")
     print("   HTTP API: http://localhost:8000")
     print("   Admin UI: Access via Chroma client")
     print()
-    print("📝 Useful SQL queries:")
+    print("Useful SQL queries:")
     print("   SELECT filename, status FROM documents ORDER BY created_at DESC;")
     print("   SELECT t.name, COUNT(d.id) FROM tenants t LEFT JOIN documents d ON t.id = d.tenant_id GROUP BY t.name;")
     print("   SELECT content FROM document_chunks WHERE document_id = 'your-doc-id';")
@@ -207,8 +207,8 @@ def main():
     show_direct_access_info()
     
     print("\n" + "=" * 60)
-    print("🎯 Exploration Complete!")
-    print("\n💡 Usage:")
+    print("Exploration Complete!")
+    print("\nUsage:")
     print("   python scripts/explore_data.py                    # Full exploration")
     print("   python scripts/explore_data.py 'your query here'  # Test specific search")
 

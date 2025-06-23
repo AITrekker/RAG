@@ -75,18 +75,19 @@ def run_migrations(target_revision: str = "head") -> bool:
     logger.info(f"Running migrations to {target_revision}")
     
     try:
-        # Change to backend directory for alembic
-        backend_dir = Path(__file__).parent.parent / "src" / "backend"
+        # Change to project root for alembic
+        project_root = Path(__file__).parent.parent
+        alembic_ini_path = project_root / "src/backend/migrations/alembic.ini"
         
         cmd = [
             "alembic", 
-            "-c", "migrations/alembic.ini",
+            "-c", str(alembic_ini_path),
             "upgrade", target_revision
         ]
         
         result = subprocess.run(
             cmd, 
-            cwd=backend_dir,
+            cwd=project_root,
             capture_output=True, 
             text=True
         )
@@ -96,7 +97,8 @@ def run_migrations(target_revision: str = "head") -> bool:
             logger.info(result.stdout)
             return True
         else:
-            logger.error(f"Migration failed: {result.stderr}")
+            logger.error(f"Migration failed with stderr: {result.stderr}")
+            logger.error(f"Migration failed with stdout: {result.stdout}")
             return False
             
     except Exception as e:
@@ -191,14 +193,17 @@ def show_migration_status():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Database Migration Management")
-    parser.add_argument("action", choices=[
+    """Main function to handle command-line arguments."""
+    parser = argparse.ArgumentParser(description="Database migration and management tool.")
+    
+    parser.add_argument("action", nargs='?', default="migrate", choices=[
         "migrate", "backup", "check", "status", "create-test-tenant", "cleanup-backups"
-    ], help="Action to perform")
+    ], help="Action to perform (default: migrate)")
     
     parser.add_argument("--target", default="head", help="Migration target (default: head)")
     parser.add_argument("--backup-dir", default="backups", help="Backup directory")
     parser.add_argument("--keep-backups", type=int, default=10, help="Number of backups to keep")
+    parser.add_argument("--no-backup", action="store_true", help="Skip backup before migration")
     
     args = parser.parse_args()
     
@@ -208,15 +213,16 @@ def main():
         
     elif args.action == "migrate":
         # Create backup before migration
-        logger.info("Creating backup before migration...")
-        backup_file = create_backup(args.backup_dir)
-        
-        if backup_file:
-            success = run_migrations(args.target)
-            sys.exit(0 if success else 1)
-        else:
-            logger.error("Backup failed, aborting migration")
-            sys.exit(1)
+        if not args.no_backup:
+            logger.info("Creating backup before migration...")
+            backup_file = create_backup(args.backup_dir)
+            
+            if not backup_file:
+                logger.error("Backup failed, aborting migration")
+                sys.exit(1)
+
+        success = run_migrations(args.target)
+        sys.exit(0 if success else 1)
             
     elif args.action == "backup":
         backup_file = create_backup(args.backup_dir)

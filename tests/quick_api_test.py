@@ -39,11 +39,11 @@ def test_endpoint(method: str, endpoint: str, data: Dict[Any, Any] = None,
         elif method == "DELETE":
             response = requests.delete(url, headers=AUTH_HEADERS, timeout=10)
         else:
-            print(f"❌ Unsupported method: {method}")
+            print(f"Unsupported method: {method}")
             return False
         
         success = response.status_code == expect_status
-        status_icon = "✅" if success else "❌"
+        status_icon = "[OK]" if success else "[FAIL]"
         
         print(f"{status_icon} {method} {endpoint} -> {response.status_code}")
         
@@ -55,40 +55,40 @@ def test_endpoint(method: str, endpoint: str, data: Dict[Any, Any] = None,
         return success
     
     except requests.exceptions.ConnectionError:
-        print(f"❌ {method} {endpoint} -> Connection Error (Is server running?)")
+        print(f"[FAIL] {method} {endpoint} -> Connection Error (Is server running?)")
         return False
     except Exception as e:
-        print(f"❌ {method} {endpoint} -> Error: {e}")
+        print(f"[FAIL] {method} {endpoint} -> Error: {e}")
         return False
 
 def main():
     """Run all API endpoint tests."""
-    print("🧪 Enterprise RAG Platform - API Endpoint Test Suite")
+    print("Enterprise RAG Platform - API Endpoint Test Suite")
     print("=" * 60)
     
     # Check if server is running
     try:
         response = requests.get(f"{BASE_URL}/", timeout=5)
-        print(f"✅ Server is running at {BASE_URL}")
+        print(f"Server is running at {BASE_URL}")
     except:
-        print(f"❌ Server is not running at {BASE_URL}")
+        print(f"Server is not running at {BASE_URL}")
         print("Please start the backend with: python -m src.backend.main")
         return
     
-    print("\n📋 Testing API Endpoints:")
+    print("\nTesting API Endpoints:")
     print("-" * 40)
     
     results = []
     
     # Health Check Endpoints (No auth required)
-    print("\n🏥 Health Endpoints:")
+    print("\nHealth Endpoints:")
     results.append(test_endpoint("GET", "/api/v1/health/"))
     results.append(test_endpoint("GET", "/api/v1/health/detailed"))
     results.append(test_endpoint("GET", "/api/v1/health/readiness"))
     results.append(test_endpoint("GET", "/api/v1/health/liveness"))
     
     # Document Endpoints
-    print("\n📄 Document Endpoints:")
+    print("\nDocument Endpoints:")
     results.append(test_endpoint("GET", "/api/v1/documents"))
     results.append(test_endpoint("GET", "/api/v1/documents?page=1&page_size=5"))
     
@@ -102,23 +102,23 @@ def main():
     results.append(test_endpoint("GET", "/api/v1/documents/doc-123"))
     
     # Query Endpoints
-    print("\n🔍 Query Endpoints:")
+    print("\nQuery Endpoints:")
     query_data = {"query": "What is the Enterprise RAG Platform?"}
     results.append(test_endpoint("POST", "/api/v1/query/", data=query_data))
     results.append(test_endpoint("GET", "/api/v1/query/history"))
     
     # Sync Endpoints
-    print("\n🔄 Sync Endpoints:")
+    print("\nSync Endpoints:")
     results.append(test_endpoint("GET", "/api/v1/sync/status"))
     sync_data = {"force_full_sync": False}
     results.append(test_endpoint("POST", "/api/v1/sync/trigger", data=sync_data))
     
     # Audit Endpoints
-    print("\n📊 Audit Endpoints:")
+    print("\nAudit Endpoints:")
     results.append(test_endpoint("GET", "/api/v1/audit/events"))
     
     # Tenant Endpoints
-    print("\n🏢 Tenant Endpoints:")
+    print("\nTenant Endpoints:")
     results.append(test_endpoint("GET", "/api/v1/tenants/"))
     
     # Summary
@@ -127,16 +127,16 @@ def main():
     total = len(results)
     success_rate = (passed / total) * 100 if total > 0 else 0
     
-    print(f"📊 Test Summary: {passed}/{total} endpoints passed ({success_rate:.1f}%)")
+    print(f"Test Summary: {passed}/{total} endpoints passed ({success_rate:.1f}%)")
     
     if success_rate >= 80:
-        print("🎉 Great! Most endpoints are working properly.")
+        print("Great! Most endpoints are working properly.")
     elif success_rate >= 50:
-        print("⚠️  Some endpoints need attention.")
+        print("Some endpoints need attention.")
     else:
-        print("🚨 Many endpoints are failing. Check server logs.")
+        print("Many endpoints are failing. Check server logs.")
     
-    print("\n💡 Tip: You can also run the full test suite with:")
+    print("\nTip: You can also run the full test suite with:")
     print("   python -m pytest tests/test_api_endpoints.py -v")
 
 if __name__ == "__main__":

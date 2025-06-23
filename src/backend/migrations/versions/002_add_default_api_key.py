@@ -29,7 +29,7 @@ def upgrade():
     conn = op.get_bind()
     
     # First, create default tenant if it doesn't exist
-    result = conn.execute(sa.text("SELECT id FROM tenants WHERE tenant_id = 'default'")).fetchone()
+    result = conn.execute(sa.text("SELECT tenant_id FROM tenants WHERE tenant_id = 'default'")).fetchone()
     if not result:
         # Create default tenant
         conn.execute(sa.text("""
@@ -42,35 +42,28 @@ def upgrade():
                 'basic', 'logical', 'active', :now, :now, 1000, 5000, 10000, 10, 'dev@example.com'
             )
         """), {"now": now})
-        
-        # Get the newly created tenant
-        result = conn.execute(sa.text("SELECT id FROM tenants WHERE tenant_id = 'default'")).fetchone()
     
-    if result:
-        tenant_id = result[0]
-        
-        # Check if API key already exists
-        existing_key = conn.execute(sa.text("""
-            SELECT id FROM tenant_api_keys 
-            WHERE tenant_id = :tenant_id AND key_name = 'Default Dev Key'
-        """), {"tenant_id": tenant_id}).fetchone()
-        
-        if not existing_key:
-            # Insert the new API key
-            conn.execute(sa.text("""
-                INSERT INTO tenant_api_keys (
-                    id, tenant_id, key_name, key_hash, key_prefix, scopes, 
-                    created_at, updated_at, expires_at, is_active, usage_count
-                ) VALUES (
-                    gen_random_uuid(), :tenant_id, 'Default Dev Key', :key_hash, 'dev-api', 
-                    '{}', :now, :now, :expires_at, true, 0
-                )
-            """), {
-                "tenant_id": tenant_id,
-                "key_hash": key_hash,
-                "now": now,
-                "expires_at": expires_at
-            })
+    # Check if API key already exists
+    existing_key = conn.execute(sa.text("""
+        SELECT id FROM tenant_api_keys 
+        WHERE tenant_id = 'default'
+    """)).fetchone()
+    
+    if not existing_key:
+        # Insert the new API key
+        conn.execute(sa.text("""
+            INSERT INTO tenant_api_keys (
+                id, tenant_id, key_name, key_hash, key_prefix, scopes, 
+                created_at, updated_at, expires_at, is_active, usage_count
+            ) VALUES (
+                gen_random_uuid(), 'default', 'Default Dev Key', :key_hash, 'dev-api', 
+                '{}', :now, :now, :expires_at, true, 0
+            )
+        """), {
+            "key_hash": key_hash,
+            "now": now,
+            "expires_at": expires_at
+        })
 
 def downgrade():
     # Get connection

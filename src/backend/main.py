@@ -143,9 +143,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Enterprise RAG Platform API...")
     
-    # Skip database migrations for now - run manually if needed
-    logger.info("Skipping database migrations (run manually if needed)")
-    logger.info("Use: python scripts/simple_api_key_setup.py")
+    # Run database migrations on startup
+    logger.info("Running database migrations...")
+    try:
+        run_migrations()
+        logger.info("Database migrations completed successfully.")
+    except Exception as e:
+        logger.error(f"Database migrations failed: {e}", exc_info=True)
+        # Depending on the desired behavior, you might want to exit here
+        # For now, we'll log the error and continue, but this is risky
     
     global embedding_service, vector_store_manager
     

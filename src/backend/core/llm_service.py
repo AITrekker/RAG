@@ -26,7 +26,9 @@ from transformers import (
     AutoModelForCausalLM, 
     pipeline,
     BitsAndBytesConfig,
-    TextGenerationPipeline
+    TextGenerationPipeline,
+    AutoModelForSeq2SeqLM,
+    T5ForConditionalGeneration
 )
 
 # Internal imports
@@ -133,6 +135,13 @@ class LLMService:
                 )
                 logger.info("Enabling 8-bit quantization for memory efficiency")
             
+            # Determine the correct AutoModel class
+            if "t5" in self.model_name or "flan" in self.model_name:
+                model_class = AutoModelForSeq2SeqLM
+            else:
+                # This can be expanded for other model types
+                raise ValueError(f"Unsupported model architecture for model: {self.model_name}")
+
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
@@ -157,7 +166,7 @@ class LLMService:
             else:
                 model_kwargs["device_map"] = "auto" if self.device == "cuda" else None
             
-            self.model = AutoModelForCausalLM.from_pretrained(
+            self.model = model_class.from_pretrained(
                 self.model_name,
                 **model_kwargs
             )

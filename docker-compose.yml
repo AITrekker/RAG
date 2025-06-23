@@ -34,14 +34,6 @@ services:
       -c log_statement=all
       -c log_duration=on
       -c log_min_duration_statement=1000
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2'
-        reservations:
-          memory: 1G
-          cpus: '1'
     restart: unless-stopped
 
   # Backend API Service
@@ -57,24 +49,26 @@ services:
       - TRANSFORMERS_CACHE=/app/cache/transformers
     ports:
       - "8000:8000"
+      - "5678:5678"  # For debugpy
     volumes:
       - ./src/backend:/app/src/backend
+      - ./scripts:/app/scripts
       - ./data:/app/data
       - ./cache:/app/cache
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/liveness"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - rag_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
+    command: sh -c "python /app/scripts/migrate_db.py --no-backup && uvicorn main:app --host 0.0.0.0 --port 8000"
 
   # Frontend Development Server
   frontend:

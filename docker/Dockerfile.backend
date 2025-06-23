@@ -1,45 +1,45 @@
-# Use an official PyTorch image with CUDA 12.1, which is compatible with most modern NVIDIA GPUs.
-# This image includes Python 3.11, CUDA, and cuDNN.
-FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
 
 # Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV CUDA_VISIBLE_DEVICES=0
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV POETRY_NO_INTERACTION 1
 
-# Set working directory
+# Set work directory
 WORKDIR /app
 
-# The PyTorch image comes with torch, torchvision, and torchaudio pre-installed.
-# We only need to install the remaining dependencies.
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
+# Copy and install base requirements first to leverage Docker cache
+COPY requirements-base.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements-base.txt
+
+# Copy and install the rest of the requirements
 COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
 
-# Install Python dependencies using pip
-# We exclude torch, torchvision, and torchaudio as they are already in the base image.
-RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
+# Copy the rest of the application code
+COPY ./src/backend/ /app
 
-# Create necessary directories (using chroma_db and tenant uploads instead)
-RUN mkdir -p /app/cache/transformers /app/logs
+# Create a non-root user and set permissions
+RUN addgroup --system app && adduser --system --group app
+RUN chown -R app:app /app
 
-# Copy application code
-COPY src/backend /app/src/backend
-COPY scripts /app/scripts
-
-# Set Python path
-ENV PYTHONPATH=/app/src/backend:$PYTHONPATH
-
-# Create a non-root user for security and change ownership of the app directory
-RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
-USER appuser
-
-# Expose the application port
+# Expose the port the app runs on
 EXPOSE 8000
+EXPOSE 5678
 
-# Health check to ensure the service is running
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Switch to the non-root user
+USER app
 
-# Default command to run the application
-CMD ["uvicorn", "src.backend.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+# Command to run the application
+# The command is overridden in docker-compose.yml for development
+CMD ["tail", "-f", "/dev/null"]
