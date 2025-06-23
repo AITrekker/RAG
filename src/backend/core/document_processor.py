@@ -9,6 +9,7 @@ Implements fixed-size chunking strategy with configurable overlap.
 import os
 import hashlib
 import mimetypes
+import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
@@ -30,8 +31,11 @@ from ..models.document import (
     Document, DocumentChunk, DocumentStatus, DocumentType, ChunkType,
     create_document_from_file, create_document_chunk
 )
+from ..utils.vector_store import VectorStoreManager
 from ..utils.html_processor import HTMLProcessor
 from ..config.settings import settings
+from ..core.tenant_manager import get_tenant_manager
+from ..db.session import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +137,17 @@ class DocumentProcessor:
             ProcessingResult containing document and chunks or error information
         """
         try:
+            # Resolve tenant_id to UUID first
+            db = next(get_db())
+            tenant_manager = get_tenant_manager(db)
+            tenant_uuid = tenant_manager.get_tenant_uuid(tenant_id)
+            
+            if not tenant_uuid:
+                return ProcessingResult(
+                    success=False,
+                    error_message=f"Tenant not found: {tenant_id}"
+                )
+            
             # Validate file path
             if not os.path.exists(file_path):
                 return ProcessingResult(
@@ -152,7 +167,7 @@ class DocumentProcessor:
             
             logger.info(f"Processing file: {file_info['filename']} ({file_info['file_size']} bytes)")
             
-            # Create document instance
+            # Create document instance using resolved UUID
             document = create_document_from_file(
                 tenant_id=tenant_id,
                 file_path=file_path,
@@ -160,7 +175,8 @@ class DocumentProcessor:
                 file_size=file_info['file_size'],
                 file_hash=file_info['file_hash'],
                 mime_type=file_info['mime_type'],
-                file_modified_at=file_info['modified_at']
+                file_modified_at=file_info['modified_at'],
+                tenant_uuid=tenant_uuid  # Pass the resolved UUID
             )
             
             # Update document status
@@ -188,9 +204,10 @@ class DocumentProcessor:
             # Create chunks
             chunks_result = self._create_chunks(
                 content_result['content'],
-                str(document.id),
+                document.id,  # Pass UUID object directly
                 tenant_id,
-                content_result.get('metadata', {})
+                content_result.get('metadata', {}),
+                tenant_uuid=tenant_uuid  # Pass the resolved UUID
             )
             
             if not chunks_result['success']:
@@ -397,9 +414,10 @@ class DocumentProcessor:
     def _create_chunks(
         self, 
         content: str, 
-        document_id: str, 
+        document_id: Union[str, uuid.UUID], 
         tenant_id: str,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        tenant_uuid: str = None
     ) -> Dict[str, Any]:
         """Create chunks from document content using fixed-size strategy."""
         try:
@@ -408,6 +426,19 @@ class DocumentProcessor:
                     'success': False,
                     'error': "No content to chunk"
                 }
+            
+            # Ensure we have a valid tenant_uuid
+            if not tenant_uuid:
+                # This shouldn't happen with our fix, but let's be safe
+                db = next(get_db())
+                tenant_manager = get_tenant_manager(db)
+                tenant_uuid = tenant_manager.get_tenant_uuid(tenant_id)
+                
+                if not tenant_uuid:
+                    return {
+                        'success': False,
+                        'error': f"Cannot resolve tenant_id '{tenant_id}' to UUID"
+                    }
             
             # Split content into chunks using LlamaIndex text splitter
             text_chunks = self.text_splitter.split_text(content)
@@ -420,23 +451,29 @@ class DocumentProcessor:
             
             chunks = []
             for i, chunk_content in enumerate(text_chunks):
-                # Skip chunks that are too small
-                if len(chunk_content.strip()) < self.chunking_config.min_chunk_size:
+                # Skip chunks that are too small, but allow chunks from small documents
+                # If the original content is small, be more lenient with chunk size
+                min_size = self.chunking_config.min_chunk_size
+                if len(content) < 500:  # For small documents, use smaller minimum
+                    min_size = 20  # Much smaller minimum for small documents
+                
+                if len(chunk_content.strip()) < min_size:
                     continue
                 
                 # Determine chunk type (basic heuristics)
                 chunk_type = self._determine_chunk_type(chunk_content)
                 
-                # Create chunk instance
+                # Create chunk instance - always use tenant_uuid
                 chunk = create_document_chunk(
                     document_id=document_id,
-                    tenant_id=tenant_id,
+                    tenant_id=tenant_id,  # Keep original for any logging
                     content=chunk_content.strip(),
                     chunk_index=i,
                     chunk_method="fixed_size",
                     chunk_size=self.chunking_config.chunk_size,
                     overlap_size=self.chunking_config.chunk_overlap,
-                    chunk_type=chunk_type.value
+                    chunk_type=chunk_type.value,
+                    tenant_uuid=tenant_uuid  # Always pass the resolved UUID
                 )
                 
                 chunks.append(chunk)

@@ -255,6 +255,64 @@ async def get_optional_tenant_id(request: Request) -> Optional[str]:
     return getattr(request.state, "tenant_id", None)
 
 
+async def get_tenant_from_header(request: Request) -> str:
+    """
+    Development dependency to get tenant ID from X-Tenant-Id header
+    
+    Args:
+        request: FastAPI request object
+        
+    Returns:
+        Tenant ID from header
+        
+    Raises:
+        HTTPException: If no tenant header or invalid tenant
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    tenant_id = request.headers.get("X-Tenant-Id")
+    logger.info(f"get_tenant_from_header called, found tenant_id: {tenant_id}")
+    
+    if not tenant_id:
+        logger.error("X-Tenant-Id header is missing")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Tenant-Id header is required"
+        )
+    
+    # Validate tenant exists in database
+    try:
+        from src.backend.db.session import get_db
+        from src.backend.models.tenant import Tenant
+        
+        db = next(get_db())
+        tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+        
+        if not tenant:
+            logger.error(f"Tenant '{tenant_id}' not found in database")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tenant '{tenant_id}' not found"
+            )
+        
+        logger.info(f"Successfully validated tenant: {tenant_id}")
+        return tenant_id
+        
+    except StopIteration:
+        logger.error("Database connection error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database connection error"
+        )
+    except Exception as e:
+        logger.error(f"Error validating tenant: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error validating tenant: {str(e)}"
+        )
+
+
 def get_current_user_id(request: Request) -> Optional[str]:
     """
     FastAPI dependency to get current user ID

@@ -571,6 +571,25 @@ class TenantManager:
         except Exception:
             pass
 
+    def get_tenant_uuid(self, tenant_id: str) -> Optional[str]:
+        """
+        Get the UUID for a tenant given its tenant_id string.
+        
+        Args:
+            tenant_id: The tenant_id string (e.g., "default")
+            
+        Returns:
+            The UUID string of the tenant, or None if not found
+        """
+        try:
+            tenant = self.db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+            if tenant:
+                return str(tenant.id)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting tenant UUID for {tenant_id}: {e}")
+            return None
+
 
 def get_tenant_manager(db_session: Session) -> TenantManager:
     """Get tenant manager instance with database session"""

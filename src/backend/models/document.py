@@ -10,7 +10,7 @@ This module defines SQLAlchemy models for document management including:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean, Float, 
     ForeignKey, JSON, Index, UniqueConstraint, CheckConstraint
@@ -20,6 +20,8 @@ from sqlalchemy.orm import relationship, validates
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from src.backend.db.base import Base
+from src.backend.core.tenant_manager import get_tenant_manager
+from src.backend.db.session import get_db
 
 
 class DocumentStatus(Enum):
@@ -244,7 +246,7 @@ class DocumentChunk(Base):
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert chunk to dictionary representation."""
-        return {
+        data = {
             'id': str(self.id),
             'document_id': str(self.document_id),
             'tenant_id': str(self.tenant_id),
@@ -267,9 +269,12 @@ class DocumentChunk(Base):
             'embedding_created_at': self.embedding_created_at.isoformat() if self.embedding_created_at else None,
             'coherence_score': self.coherence_score,
             'completeness_score': self.completeness_score,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+        
+        # Filter out None values for ChromaDB compatibility
+        return {k: v for k, v in data.items() if v is not None}
 
 
 class DocumentProcessingJob(Base):
@@ -368,9 +373,35 @@ def create_document_from_file(
     file_size: int,
     file_hash: str,
     mime_type: str = None,
-    file_modified_at: datetime = None
+    file_modified_at: datetime = None,
+    tenant_uuid: str = None  # Optional: direct UUID if already resolved
 ) -> Document:
     """Create a new document instance from file information."""
+    # If tenant_uuid is provided, use it directly
+    if tenant_uuid:
+        final_tenant_id = uuid.UUID(tenant_uuid)
+    else:
+        # Try to parse tenant_id as UUID first
+        try:
+            final_tenant_id = uuid.UUID(tenant_id)
+        except ValueError:
+            # If it's not a UUID, resolve it using tenant manager
+            try:
+                from ..core.tenant_manager import get_tenant_manager
+                from ..db.session import get_db
+                
+                db = next(get_db())
+                tenant_manager = get_tenant_manager(db)
+                resolved_uuid = tenant_manager.get_tenant_uuid(tenant_id)
+                
+                if not resolved_uuid:
+                    raise ValueError(f"Tenant not found: {tenant_id}")
+                
+                final_tenant_id = uuid.UUID(resolved_uuid)
+            except ImportError:
+                # Fallback if imports fail
+                raise ValueError(f"Invalid tenant_id format. Expected UUID but got: {tenant_id}")
+    
     # Determine document type from file extension
     extension = filename.lower().split('.')[-1] if '.' in filename else ''
     doc_type_mapping = {
@@ -385,7 +416,8 @@ def create_document_from_file(
     document_type = doc_type_mapping.get(extension, DocumentType.UNKNOWN)
     
     return Document(
-        tenant_id=uuid.UUID(tenant_id),
+        id=uuid.uuid4(),  # Generate UUID immediately
+        tenant_id=final_tenant_id,
         filename=filename,
         original_path=file_path,
         file_size=file_size,
@@ -398,17 +430,57 @@ def create_document_from_file(
 
 
 def create_document_chunk(
-    document_id: str,
+    document_id: Union[str, uuid.UUID],
     tenant_id: str,
     content: str,
     chunk_index: int,
     chunk_method: str = "fixed_size",
     chunk_size: int = None,
     overlap_size: int = None,
+    tenant_uuid: str = None,  # Optional: direct UUID if already resolved
     **kwargs
 ) -> DocumentChunk:
     """Create a new document chunk instance."""
     import hashlib
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"create_document_chunk called with tenant_id='{tenant_id}', tenant_uuid='{tenant_uuid}'")
+    
+    # If tenant_uuid is provided, use it directly
+    if tenant_uuid:
+        logger.info(f"Using provided tenant_uuid: {tenant_uuid}")
+        final_tenant_id = uuid.UUID(tenant_uuid)
+    else:
+        logger.info(f"No tenant_uuid provided, resolving from tenant_id: {tenant_id}")
+        # Try to parse tenant_id as UUID first
+        try:
+            final_tenant_id = uuid.UUID(tenant_id)
+            logger.info(f"tenant_id is already a valid UUID: {tenant_id}")
+        except ValueError:
+            logger.info(f"tenant_id is not a UUID, resolving via tenant manager: {tenant_id}")
+            # If it's not a UUID, resolve it using tenant manager
+            try:
+                from ..core.tenant_manager import get_tenant_manager
+                from ..db.session import get_db
+                
+                db = next(get_db())
+                tenant_manager = get_tenant_manager(db)
+                resolved_uuid = tenant_manager.get_tenant_uuid(tenant_id)
+                
+                if not resolved_uuid:
+                    logger.error(f"Tenant not found in database: {tenant_id}")
+                    raise ValueError(f"Tenant not found: {tenant_id}")
+                
+                logger.info(f"Resolved tenant_id '{tenant_id}' to UUID: {resolved_uuid}")
+                final_tenant_id = uuid.UUID(resolved_uuid)
+            except ImportError as e:
+                logger.error(f"Import error while resolving tenant: {e}")
+                # Fallback if imports fail
+                raise ValueError(f"Invalid tenant_id format. Expected UUID but got: {tenant_id}")
+            except Exception as e:
+                logger.error(f"Unexpected error while resolving tenant: {e}")
+                raise ValueError(f"Error resolving tenant_id '{tenant_id}': {str(e)}")
     
     # Calculate content metrics
     content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
@@ -418,9 +490,30 @@ def create_document_chunk(
     # Estimate token count (rough approximation: 1 token ≈ 4 characters)
     token_count = max(1, character_count // 4)
     
+    # Handle document_id conversion - it might be a UUID object or string
+    logger.info(f"Processing document_id: {document_id}, type: {type(document_id)}")
+    try:
+        if document_id is None:
+            logger.error("document_id is None!")
+            raise ValueError("document_id cannot be None")
+        elif isinstance(document_id, uuid.UUID):
+            final_document_id = document_id
+            logger.info(f"document_id is already a UUID: {final_document_id}")
+        else:
+            logger.info(f"Converting document_id '{document_id}' from {type(document_id)} to UUID")
+            final_document_id = uuid.UUID(document_id)
+        logger.info(f"Successfully converted document_id to UUID: {final_document_id}")
+    except ValueError as e:
+        logger.error(f"Failed to convert document_id '{document_id}' to UUID: {e}")
+        raise ValueError(f"Invalid document_id format: {document_id}")
+    except Exception as e:
+        logger.error(f"Unexpected error converting document_id '{document_id}': {e}")
+        raise ValueError(f"Error converting document_id: {document_id}")
+    
     return DocumentChunk(
-        document_id=uuid.UUID(document_id),
-        tenant_id=uuid.UUID(tenant_id),
+        id=uuid.uuid4(),  # Generate UUID immediately for chunks too
+        document_id=final_document_id,
+        tenant_id=final_tenant_id,
         content=content,
         content_hash=content_hash,
         chunk_index=chunk_index,

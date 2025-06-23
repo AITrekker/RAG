@@ -20,12 +20,32 @@ interface SyncStatusProps {
   onTriggerSync?: () => Promise<void>;
 }
 
+interface DocumentInfo {
+  document_id: string;
+  filename: string;
+  upload_timestamp: string;
+  file_size: number;
+  status: string;
+  chunks_count: number;
+  content_type?: string;
+  metadata: {
+    document_type?: string;
+    file_hash?: string;
+    file_path?: string;
+    embedding_model?: string;
+    processed_at?: string;
+    error_message?: string;
+  };
+}
+
 export const SyncStatus: React.FC<SyncStatusProps> = ({ onTriggerSync }) => {
   const { tenant } = useTenant();
   const [syncStatus, setSyncStatus] = useState<SyncResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [activeTab, setActiveTab] = useState<'status' | 'documents'>('status');
 
   const primaryColor = tenant?.primaryColor || '#3B82F6';
 
@@ -136,10 +156,16 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({ onTriggerSync }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const status = await api.getSyncStatus();
-      setSyncStatus(status);
-      if (status.status === 'running') {
-        pollSyncStatus(status.sync_id);
+      const [syncData, documentsData] = await Promise.all([
+        api.getSyncStatus(),
+        api.getDocuments(1, 50) // Get first 50 documents
+      ]);
+      
+      setSyncStatus(syncData);
+      setDocuments(documentsData.documents);
+      
+      if (syncData.status === 'running') {
+        pollSyncStatus(syncData.sync_id);
       }
     } catch (err: any) {
       setError(err.error || 'Could not fetch sync status.');
@@ -172,6 +198,41 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({ onTriggerSync }) => {
     }
   };
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  const getDocumentStatusBadge = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'completed':
+        return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✓ Processed</span>;
+      case 'failed':
+        return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">✗ Failed</span>;
+      case 'processing':
+        return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">⟳ Processing</span>;
+      case 'pending':
+        return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⏳ Pending</span>;
+      default:
+        return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{status}</span>;
+    }
+  };
+
+  const getFileIcon = (contentType?: string) => {
+    if (!contentType) return '📄';
+    if (contentType.includes('pdf')) return '📕';
+    if (contentType.includes('word') || contentType.includes('document')) return '📘';
+    if (contentType.includes('text')) return '📝';
+    return '📄';
+  };
+
   if (isLoading) {
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center">
@@ -182,84 +243,180 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({ onTriggerSync }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">Document Sync Status</h2>
-        <button
-          onClick={handleTriggerSync}
-          disabled={syncStatus?.status === 'running' || isTriggering}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
-          style={{ backgroundColor: primaryColor }}
-        >
-          {syncStatus?.status === 'running' ? (
-            <div className="flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-              <span>Syncing...</span>
-            </div>
-          ) : (
-            <div className="flex items-center space-x-2">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span>Sync Now</span>
-            </div>
-          )}
-        </button>
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+      {/* Tab Navigation */}
+      <div className="border-b border-gray-200">
+        <nav className="flex">
+          <button
+            onClick={() => setActiveTab('status')}
+            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'status'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Sync Status
+          </button>
+          <button
+            onClick={() => setActiveTab('documents')}
+            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'documents'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Documents ({documents.length})
+          </button>
+        </nav>
       </div>
 
-      {/* Current Status */}
-      <div className="space-y-4">
-        <div className="flex items-center space-x-3">
-          {getStatusIcon(syncStatus?.status || 'idle')}
-          <span className={`font-medium ${getStatusColor(syncStatus?.status || 'idle')}`}>
-            {getStatusText(syncStatus?.status || 'idle')}
-          </span>
-        </div>
+      <div className="p-6">
+        {activeTab === 'status' ? (
+          // Existing sync status content
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Document Sync Status</h2>
+              <button
+                onClick={handleTriggerSync}
+                disabled={syncStatus?.status === 'running' || isTriggering}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                style={{ backgroundColor: primaryColor }}
+              >
+                {syncStatus?.status === 'running' ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Syncing...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2">
+                    <span>⚡</span>
+                    <span>Sync Now</span>
+                  </div>
+                )}
+              </button>
+            </div>
+            
+            {/* Status cards and existing sync status UI */}
+            {syncStatus && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center">
+                    {getStatusIcon(syncStatus.status)}
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-900">Status</p>
+                      <p className={`text-lg font-semibold ${getStatusColor(syncStatus.status)}`}>
+                        {getStatusText(syncStatus.status)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-900">Last Sync</p>
+                      <p className="text-lg font-semibold text-gray-600">
+                        {formatLastSyncTime(syncStatus.completed_at || syncStatus.started_at)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-900">Files Processed</p>
+                      <p className="text-lg font-semibold text-gray-600">
+                        {syncStatus.processed_files || 0} / {syncStatus.total_files || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          // Documents list
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Indexed Documents</h2>
+              <button 
+                onClick={fetchSyncStatus}
+                className="px-3 py-1 border border-gray-300 rounded text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                🔄 Refresh
+              </button>
+            </div>
 
-        {/* Progress Bar */}
-        {syncStatus?.status === 'running' && (
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>Processing documents...</span>
-              <span>{syncStatus.processed_files} / {syncStatus.total_files}</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ 
-                  width: `${(syncStatus.processed_files / syncStatus.total_files) * 100}%`,
-                  backgroundColor: primaryColor
-                }}
-              ></div>
-            </div>
+            {documents.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-6xl mb-4">🗃️</div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No Documents Found</h3>
+                <p className="text-gray-500 mb-4">No documents have been indexed yet. Upload some documents and run a sync to get started.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {documents.map((doc) => (
+                  <div key={doc.document_id} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start space-x-3 flex-1">
+                        <span className="text-2xl">{getFileIcon(doc.content_type)}</span>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 truncate">{doc.filename}</h4>
+                          <div className="mt-1 flex items-center space-x-4 text-sm text-gray-500">
+                            <span>{formatFileSize(doc.file_size)}</span>
+                            <span>{formatDate(doc.upload_timestamp)}</span>
+                            {doc.metadata.embedding_model && (
+                              <span className="flex items-center">
+                                🧠 {doc.metadata.embedding_model}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 flex items-center space-x-4">
+                            {getDocumentStatusBadge(doc.status)}
+                            {doc.chunks_count > 0 && (
+                              <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 border">
+                                {doc.chunks_count} chunks
+                              </span>
+                            )}
+                            {doc.metadata.processed_at && (
+                              <span className="text-xs text-gray-400">
+                                Processed: {formatDate(doc.metadata.processed_at)}
+                              </span>
+                            )}
+                          </div>
+                          {doc.metadata.error_message && (
+                            <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                              ⚠️ {doc.metadata.error_message}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Error Message */}
+        {/* Error Display */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
-        {/* Sync Statistics */}
-        {syncStatus && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-gray-200 mt-6">
-          <div className="text-center">
-              <p className="text-sm text-gray-500">Status</p>
-              <p className="text-md font-semibold text-gray-800">{syncStatus.status}</p>
-          </div>
-          <div className="text-center">
-              <p className="text-sm text-gray-500">Files Processed</p>
-              <p className="text-md font-semibold text-gray-800">{syncStatus.successful_files} / {syncStatus.total_files}</p>
-          </div>
-          <div className="text-center">
-              <p className="text-sm text-gray-500">Last Run</p>
-              <p className="text-md font-semibold text-gray-800">{formatLastSyncTime(syncStatus.completed_at || syncStatus.started_at)}</p>
-            </div>
-             <div className="text-center">
-              <p className="text-sm text-gray-500">Duration</p>
-              <p className="text-md font-semibold text-gray-800">{syncStatus.processing_time ? `${syncStatus.processing_time.toFixed(2)}s` : 'N/A'}</p>
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Sync Error</h3>
+                <p className="mt-1 text-sm text-red-700">{error}</p>
+              </div>
             </div>
           </div>
         )}

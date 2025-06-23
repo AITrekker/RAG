@@ -14,12 +14,13 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from src.backend.db.session import get_db
-from src.backend.middleware.auth import get_current_tenant, require_authentication
-from src.backend.core.document_ingestion import DocumentIngestionPipeline
-from src.backend.utils.tenant_filesystem import TenantFileSystemManager
-from src.backend.utils.vector_store import get_vector_store_manager
-from src.backend.models.api_models import (
+from ....db.session import get_db
+from ....middleware.auth import get_current_tenant, require_authentication
+from ....middleware.tenant_context import get_tenant_from_header
+from ....core.document_ingestion import DocumentIngestionPipeline
+from ....utils.tenant_filesystem import TenantFileSystemManager
+from ....utils.vector_store import get_vector_store_manager
+from ....models.api_models import (
     DocumentResponse, DocumentListResponse, DocumentUploadResponse,
     DocumentMetadata, DocumentUpdateRequest
 )
@@ -121,7 +122,7 @@ async def list_documents(
     page: int = 1,
     page_size: int = 20,
     search: Optional[str] = None,
-    tenant_id: str = Security(get_current_tenant),
+    tenant_id: str = Depends(get_tenant_from_header),
     db: Session = Depends(get_db)
 ):
     """
@@ -132,38 +133,50 @@ async def list_documents(
     try:
         logger.info(f"Listing documents for tenant {tenant_id}, page {page}")
         
-        # TODO: Implement actual document retrieval from database
-        # For now, return mock data
+        # Import the model here to avoid circular imports
+        from ....models.tenant import TenantDocument
         
-        mock_documents = [
-            DocumentResponse(
-                document_id=f"doc-{i}",
-                filename=f"document_{i}.pdf",
-                upload_timestamp=datetime.utcnow(),
-                file_size=1024 * (i + 1),
-                status="processed",
-                chunks_count=10 + i,
-                content_type="application/pdf",
-                metadata={"page_count": 5 + i}
-            )
-            for i in range(1, 11)
-        ]
+        # Build query
+        query = db.query(TenantDocument).filter(TenantDocument.tenant_id == tenant_id)
         
         # Apply search filter if provided
         if search:
-            mock_documents = [
-                doc for doc in mock_documents 
-                if search.lower() in doc.filename.lower()
-            ]
+            search_term = f"%{search.lower()}%"
+            query = query.filter(TenantDocument.filename.ilike(search_term))
         
-        # Apply pagination
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        paginated_docs = mock_documents[start_idx:end_idx]
+        # Get total count for pagination
+        total_count = query.count()
+        
+        # Apply pagination and get results
+        documents = query.order_by(TenantDocument.created_at.desc())\
+                        .offset((page - 1) * page_size)\
+                        .limit(page_size)\
+                        .all()
+        
+        # Convert to response model
+        document_responses = []
+        for doc in documents:
+            document_responses.append(DocumentResponse(
+                document_id=doc.document_id,
+                filename=doc.filename,
+                upload_timestamp=doc.created_at,
+                file_size=doc.file_size_bytes,
+                status=doc.status,
+                chunks_count=doc.chunk_count,
+                content_type=doc.mime_type,
+                metadata={
+                    "document_type": doc.document_type,
+                    "file_hash": doc.file_hash,
+                    "file_path": doc.file_path,
+                    "embedding_model": doc.embedding_model,
+                    "processed_at": doc.processed_at.isoformat() if doc.processed_at else None,
+                    "error_message": doc.error_message
+                }
+            ))
         
         return DocumentListResponse(
-            documents=paginated_docs,
-            total_count=len(mock_documents),
+            documents=document_responses,
+            total_count=total_count,
             page=page,
             page_size=page_size
         )
@@ -261,22 +274,35 @@ async def update_document(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
-    tenant_id: str = Security(get_current_tenant),
-    db: Session = Depends(get_db),
-    fs_manager: TenantFileSystemManager = Depends(get_filesystem_manager)
+    tenant_id: str = Depends(get_tenant_from_header),
+    db: Session = Depends(get_db)
 ):
     """
-    Delete a document and all associated data.
+    Delete a specific document and all associated data.
     
     Removes the document from the database, vector store, and file system.
     """
     try:
         logger.info(f"Deleting document {document_id} for tenant {tenant_id}")
         
-        # TODO: Implement actual document deletion
-        # 1. Remove from database
-        # 2. Remove from vector store
-        # 3. Remove from file system
+        # Import the model here to avoid circular imports
+        from ....models.tenant import TenantDocument
+        
+        # Find and delete the document
+        document = db.query(TenantDocument).filter(
+            TenantDocument.tenant_id == tenant_id,
+            TenantDocument.document_id == document_id
+        ).first()
+        
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        
+        # Delete from database
+        db.delete(document)
+        db.commit()
         
         logger.info(f"Document {document_id} deleted successfully for tenant {tenant_id}")
         
@@ -284,9 +310,55 @@ async def delete_document(
         raise
     except Exception as e:
         logger.error(f"Failed to delete document {document_id} for tenant {tenant_id}: {e}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete document"
+        )
+
+
+@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_all_documents(
+    tenant_id: str = Depends(get_tenant_from_header),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete ALL documents for the current tenant.
+    
+    WARNING: This will permanently remove all documents and associated data for the tenant.
+    """
+    try:
+        logger.info(f"Clearing all documents for tenant {tenant_id}")
+        
+        # Import the model here to avoid circular imports
+        from ....models.tenant import TenantDocument
+        
+        # Count documents before deletion
+        document_count = db.query(TenantDocument).filter(
+            TenantDocument.tenant_id == tenant_id
+        ).count()
+        
+        if document_count == 0:
+            logger.info(f"No documents found for tenant {tenant_id}")
+            return
+        
+        # Delete all documents for this tenant
+        deleted_count = db.query(TenantDocument).filter(
+            TenantDocument.tenant_id == tenant_id
+        ).delete()
+        
+        db.commit()
+        
+        logger.info(f"Cleared {deleted_count} documents for tenant {tenant_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear all documents for tenant {tenant_id}: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear all documents"
         )
 
 

@@ -309,6 +309,10 @@ class ApiClient {
     await this.client.delete(`/documents/${documentId}`);
   }
 
+  async clearAllDocuments(): Promise<void> {
+    await this.client.delete('/documents');
+  }
+
   async downloadDocument(documentId: string): Promise<Blob> {
     const response = await this.client.get(`/documents/${documentId}/download`, {
       responseType: 'blob',

@@ -29,11 +29,26 @@ class DocumentIngestionPipeline:
         document_processor: DocumentProcessor = None,
         embedding_manager: EmbeddingManager = None,
     ):
-        self.tenant_id = tenant_id
+        # Import here to avoid circular imports
+        from ..core.tenant_manager import get_tenant_manager
+        from ..db.session import get_db
+        
+        self.tenant_id_string = tenant_id  # Keep original string for logging
+        
+        # Resolve tenant_id to UUID
+        db = next(get_db())
+        tenant_manager = get_tenant_manager(db)
+        tenant_uuid = tenant_manager.get_tenant_uuid(tenant_id)
+        
+        if not tenant_uuid:
+            raise ValueError(f"Tenant not found: {tenant_id}")
+        
+        self.tenant_id = tenant_uuid  # Use UUID for database operations
         self.vector_store_manager = vector_store_manager
         self.document_processor = document_processor or create_default_processor()
-        self.embedding_manager = embedding_manager or get_embedding_manager()
-        logger.info(f"Initialized DocumentIngestionPipeline for tenant '{self.tenant_id}'")
+        # Create embedding manager with auto_persist disabled since we handle vector store operations manually
+        self.embedding_manager = embedding_manager or get_embedding_manager(auto_persist=False)
+        logger.info(f"Initialized DocumentIngestionPipeline for tenant '{self.tenant_id_string}' (UUID: {self.tenant_id})")
 
     def check_document_version(self, db: Session, file_path: Path) -> Tuple[bool, Optional[Document]]:
         """
@@ -79,76 +94,102 @@ class DocumentIngestionPipeline:
         Returns:
             A tuple of the new Document object and a list of created chunk dictionaries.
         """
-        processing_result = self.document_processor.process_file(
-            file_path=str(file_path),
-            tenant_id=self.tenant_id,
-            filename=file_path.name
-        )
-
-        if not processing_result.success:
-            raise RuntimeError(f"Failed to process file: {processing_result.error_message}")
-
-        new_document = processing_result.document
-        chunks = processing_result.chunks
-
-        # --- Versioning Logic ---
-        if previous_version:
-            logger.info(f"Updating version for document '{new_document.filename}'.")
-            previous_version.is_current_version = False
-            db.add(previous_version)
-            new_document.version = previous_version.version + 1
-            new_document.parent_document_id = previous_version.id
-        else:
-            new_document.version = 1
-        
-        db.add(new_document)
-
-        # Generate embeddings for the chunks
-        chunk_contents = [chunk.content for chunk in chunks]
-        
-        embedding_result = await self.embedding_manager.process_async(
-            texts=chunk_contents,
-            tenant_id=self.tenant_id,
-        )
-
-        if not embedding_result.success or embedding_result.embeddings is None:
-            raise RuntimeError(f"Failed to generate embeddings: {embedding_result.error}")
-
-        embeddings = embedding_result.embeddings
-
-        if len(embeddings) != len(chunks):
-            raise RuntimeError("Mismatch between number of chunks and generated embeddings.")
-
-        # Update chunks with embeddings and add to DB
-        for i, chunk in enumerate(chunks):
-            chunk.embedding_vector = embeddings[i]
-            chunk.document_id = new_document.id
-            db.add(chunk)
-
-        # Add chunks to the vector store
         try:
-            vector_store = self.vector_store_manager.get_vector_store(self.tenant_id)
-            vector_store.add(
-                ids=[str(chunk.id) for chunk in chunks],
-                embeddings=[chunk.embedding_vector for chunk in chunks],
-                documents=[chunk.content for chunk in chunks],
-                metadatas=[chunk.to_dict() for chunk in chunks]
+            processing_result = self.document_processor.process_file(
+                file_path=str(file_path),
+                tenant_id=self.tenant_id_string,
+                filename=file_path.name
             )
-            logger.info(f"Added {len(chunks)} chunks to vector store for tenant '{self.tenant_id}'.")
-        except Exception as e:
-            logger.error(f"Failed to add chunks to vector store for tenant '{self.tenant_id}': {e}", exc_info=True)
-            # Rollback DB changes if vector store fails? For now, we'll log the error.
-            raise RuntimeError("Failed to update vector store.") from e
 
-        # Commit all database changes for this document at once
-        db.commit()
-        db.refresh(new_document)
-        for chunk in chunks:
-            db.refresh(chunk)
+            if not processing_result.success:
+                raise RuntimeError(f"Failed to process file: {processing_result.error_message}")
+
+            new_document = processing_result.document
+            chunks = processing_result.chunks
+
+            # --- Versioning Logic ---
+            if previous_version:
+                logger.info(f"Updating version for document '{new_document.filename}'.")
+                previous_version.is_current_version = False
+                db.add(previous_version)
+                new_document.version = previous_version.version + 1
+                new_document.parent_document_id = previous_version.id
+            else:
+                new_document.version = 1
             
-        logger.info(f"Successfully ingested and embedded document '{new_document.filename}' (v{new_document.version}).")
-        
-        return new_document, [chunk.to_dict() for chunk in chunks]
+            db.add(new_document)
+            
+            # Flush to get the document ID assigned
+            db.flush()
+
+            # Generate embeddings for the chunks
+            chunk_contents = [chunk.content for chunk in chunks]
+            
+            embedding_result = await self.embedding_manager.process_async(
+                texts=chunk_contents,
+                tenant_id=self.tenant_id_string,
+            )
+
+            if not embedding_result.success or embedding_result.embeddings is None:
+                raise RuntimeError(f"Failed to generate embeddings: {embedding_result.error}")
+
+            embeddings = embedding_result.embeddings
+
+            if len(embeddings) != len(chunks):
+                raise RuntimeError("Mismatch between number of chunks and generated embeddings.")
+
+            # Update chunks with embeddings and add to DB
+            for i, chunk in enumerate(chunks):
+                # Convert numpy array to list for JSON serialization
+                chunk.embedding_vector = embeddings[i].tolist() if hasattr(embeddings[i], 'tolist') else embeddings[i]
+                chunk.document_id = new_document.id
+                db.add(chunk)
+
+            # Flush to get chunk IDs assigned
+            db.flush()
+
+            # Add chunks to the vector store
+            try:
+                collection = self.vector_store_manager.get_collection_for_tenant(self.tenant_id_string)
+                
+                # Convert embeddings back to list format for ChromaDB
+                embeddings_for_chroma = []
+                for chunk in chunks:
+                    if isinstance(chunk.embedding_vector, list):
+                        embeddings_for_chroma.append(chunk.embedding_vector)
+                    else:
+                        # Handle case where it might still be a numpy array
+                        embeddings_for_chroma.append(chunk.embedding_vector.tolist() if hasattr(chunk.embedding_vector, 'tolist') else chunk.embedding_vector)
+                
+                collection.add(
+                    ids=[str(chunk.id) for chunk in chunks],
+                    embeddings=embeddings_for_chroma,
+                    documents=[chunk.content for chunk in chunks],
+                    metadatas=[chunk.to_dict() for chunk in chunks]
+                )
+                logger.info(f"Added {len(chunks)} chunks to vector store for tenant '{self.tenant_id_string}'.")
+            except Exception as e:
+                logger.error(f"Failed to add chunks to vector store for tenant '{self.tenant_id_string}': {e}", exc_info=True)
+                # Don't rollback here, let the caller decide
+                raise RuntimeError("Failed to update vector store.") from e
+
+            # Commit all database changes for this document at once
+            db.commit()
+            
+            # Refresh objects to get updated state
+            db.refresh(new_document)
+            for chunk in chunks:
+                db.refresh(chunk)
+                
+            logger.info(f"Successfully ingested and embedded document '{new_document.filename}' (v{new_document.version}).")
+            
+            return new_document, [chunk.to_dict() for chunk in chunks]
+            
+        except Exception as e:
+            # Rollback the transaction for this document only
+            db.rollback()
+            logger.error(f"Failed to ingest document {file_path}: {e}", exc_info=True)
+            raise
 
     def delete_document(self, db: Session, document_id: int):
         """
@@ -172,8 +213,8 @@ class DocumentIngestionPipeline:
         # 2. Delete from Vector Store
         if chunk_ids_to_delete:
             try:
-                vector_store = self.vector_store_manager.get_vector_store(self.tenant_id)
-                vector_store.delete(ids=chunk_ids_to_delete)
+                collection = self.vector_store_manager.get_collection_for_tenant(self.tenant_id_string)
+                collection.delete(ids=chunk_ids_to_delete)
                 logger.info(f"Deleted {len(chunk_ids_to_delete)} chunks from vector store for document {document_id}.")
             except Exception as e:
                 logger.error(f"Failed to delete chunks from vector store for document {document_id}: {e}", exc_info=True)
