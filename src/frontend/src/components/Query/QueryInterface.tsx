@@ -37,6 +37,14 @@ export const QueryInterface: React.FC<QueryInterfaceProps> = ({
   const primaryColor = tenant?.primaryColor || '#3B82F6';
   const secondaryColor = tenant?.secondaryColor || '#1E40AF';
 
+  // Set tenant ID in API client when tenant changes
+  React.useEffect(() => {
+    if (tenant?.id) {
+      apiClient.setTenantId(tenant.id);
+      console.log(`QueryInterface: Set tenant to ${tenant.id} (${tenant.name})`);
+    }
+  }, [tenant]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     

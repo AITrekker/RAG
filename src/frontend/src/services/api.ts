@@ -473,8 +473,9 @@ class ApiClient {
   }
 
   setTenantId(tenantId: string): void {
-    // This is a placeholder if you need to set tenant ID in a header
-    // For example: this.client.defaults.headers['X-Tenant-ID'] = tenantId;
+    // Set tenant ID in the request headers for backend processing (backend expects X-Tenant-Id)
+    this.client.defaults.headers['X-Tenant-Id'] = tenantId;
+    console.log(`API: Set tenant ID to ${tenantId}`);
   }
 
   // Test connection

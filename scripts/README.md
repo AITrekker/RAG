@@ -1,6 +1,25 @@
-# Scripts Directory
+# 🛠️ Scripts Directory
 
-This directory contains **essential scripts** for setting up and running the Enterprise RAG Platform.
+Essential development and setup tools for the RAG platform. This directory contains **9 essential tools** for development, database management, and data exploration.
+
+## 📋 Available Scripts
+
+### 🚀 Development & Deployment
+- **`setup_dev.py`** - Complete development environment setup
+- **`run_backend.py`** - Start the FastAPI backend server  
+- **`run_frontend.ps1`** - Start the React frontend development server
+
+### 🗄️ Database Management
+- **`migrate_db.py`** - Run database migrations and updates
+- **`direct_setup.py`** - Direct database setup for production
+- **`simple_api_key_setup.py`** - Quick API key generation
+- **`init_db.sql`** - Initial database schema and data
+
+### 🔍 Data & System Exploration
+- **`explore_data.py`** - **NEW**: Explore documents, embeddings, and vector data
+
+### 📖 Documentation
+- **`README.md`** - This documentation file
 
 ## 🚀 **Quick Start Guide**
 

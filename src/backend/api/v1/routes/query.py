@@ -14,7 +14,7 @@ from src.backend.db.session import get_db
 from src.backend.core.rag_pipeline import get_rag_pipeline
 from src.backend.models.api_models import QueryRequest, QueryResponse, QueryHistory, SourceCitation
 from src.backend.middleware.auth import get_current_tenant, require_api_key
-from src.backend.middleware.tenant_context import get_current_tenant_id
+from src.backend.middleware.tenant_context import get_current_tenant_id, get_tenant_from_header
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ router = APIRouter()
 async def process_query(
     request: QueryRequest,
     db: Session = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: str = Depends(get_tenant_from_header),
     rag_pipeline = Depends(get_rag_pipeline)
 ):
     """

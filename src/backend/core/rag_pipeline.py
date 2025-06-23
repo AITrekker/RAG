@@ -77,7 +77,7 @@ class RAGPipeline:
 
         # 2. Generate a response using the LLM
         try:
-            llm_response = await self.llm_service.generate_rag_response(query, retrieved_chunks)
+            llm_response = self.llm_service.generate_rag_response(query, retrieved_chunks)
         except Exception as e:
             logger.error(f"Error during LLM generation for tenant '{tenant_id}': {e}", exc_info=True)
             raise RuntimeError("Failed to generate a response from the language model.") from e
