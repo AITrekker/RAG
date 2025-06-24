@@ -3,7 +3,7 @@ import uuid
 import hashlib
 import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 from qdrant_client import QdrantClient, models
 
@@ -59,8 +59,59 @@ class TenantService:
             points=[models.PointStruct(id=tenant_id, payload=tenant_payload, vector=[0.0])],
             wait=True,
         )
-        logger.info(f"Successfully created tenant '{name}' with ID {tenant_id}")
+        logger.info(f"Successfully created tenant '{name}' with ID: {tenant_id}")
         return {"tenant_id": tenant_id, "api_key": api_key}
+
+    def get_all_tenants(self) -> List[Dict]:
+        """Retrieves a list of all tenants."""
+        points, _ = self.client.scroll(
+            collection_name=TENANTS_COLLECTION_NAME,
+            limit=100,  # Adjust limit as needed
+            with_payload=True,
+            with_vectors=False,
+        )
+        
+        tenants = []
+        for point in points:
+            # We don't need to return all the details for the list view
+            tenants.append({
+                "tenant_id": point.id,
+                # In a real app, you might add a 'name' or other fields
+                "object_count": self.vector_manager.get_collection_info(point.id).get("points_count", 0)
+            })
+        return tenants
+
+    def create_api_key(self, tenant_id: str, name: str = "New Key") -> str:
+        """Generates and adds a new API key for a specified tenant."""
+        tenant_point = self.client.retrieve(collection_name=TENANTS_COLLECTION_NAME, ids=[tenant_id])
+        if not tenant_point:
+            raise ValueError("Tenant not found")
+
+        tenant_payload = tenant_point[0].payload
+        api_key, api_key_hash, api_key_prefix = self._generate_api_key()
+
+        new_key_info = {
+            "key_hash": api_key_hash,
+            "key_prefix": api_key_prefix,
+            "name": name,
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": None,
+        }
+        
+        if "api_keys" not in tenant_payload or not tenant_payload["api_keys"]:
+            tenant_payload["api_keys"] = []
+        
+        tenant_payload["api_keys"].append(new_key_info)
+        
+        self.client.set_payload(
+            collection_name=TENANTS_COLLECTION_NAME,
+            payload=tenant_payload,
+            points=[tenant_id],
+            wait=True,
+        )
+        logger.info(f"Successfully created new API key for tenant {tenant_id}")
+        return api_key
 
     def validate_api_key(self, api_key: str) -> Optional[Dict]:
         """Validates an API key and returns the associated tenant data."""
@@ -106,6 +157,68 @@ class TenantService:
                 
                 # Return the full tenant payload if valid
                 return {"id": tenant_point.id, **tenant_data}
+
+        return None
+
+    def list_tenants(self) -> List[Dict[str, Any]]:
+        """
+        Lists all tenants, formatting them for the API response model.
+        This method explicitly omits sensitive data like API key hashes.
+        """
+        try:
+            scroll_response, _ = self.client.scroll(
+                collection_name=TENANTS_COLLECTION_NAME,
+                limit=100,
+                with_payload=True,
+                with_vectors=False,
+            )
+            
+            tenants_for_api = []
+            for point in scroll_response:
+                payload = point.payload
+                
+                # Explicitly construct the API keys list, omitting the hash
+                api_keys_for_api = []
+                if "api_keys" in payload and payload["api_keys"]:
+                    for key_info in payload["api_keys"]:
+                        api_keys_for_api.append({
+                            "key_prefix": key_info.get("key_prefix"),
+                            "name": key_info.get("name"),
+                            "is_active": key_info.get("is_active"),
+                            "created_at": key_info.get("created_at"),
+                            "expires_at": key_info.get("expires_at"),
+                        })
+
+                tenants_for_api.append({
+                    "tenant_id": point.id,
+                    "name": payload.get("name"),
+                    "description": payload.get("description"),
+                    "status": payload.get("status"),
+                    "created_at": payload.get("created_at"),
+                    "api_keys": api_keys_for_api,
+                })
+            return tenants_for_api
+            
+        except Exception as e:
+            logger.error(f"Could not list tenants due to an unexpected error: {e}", exc_info=True)
+            return []
+
+    def get_api_key_hash(self, tenant_id: str) -> Optional[str]:
+        """
+        Retrieves the hashed API key for a given tenant.
+        """
+        tenant_point = self.client.retrieve(collection_name=TENANTS_COLLECTION_NAME, ids=[tenant_id])
+        if not tenant_point:
+            return None
+
+        tenant_payload = tenant_point[0].payload
+        api_keys = tenant_payload.get("api_keys", [])
+        if not api_keys:
+            return None
+
+        for key_info in api_keys:
+            if key_info.get("is_active"):
+                return key_info.get("key_hash")
 
         return None
 

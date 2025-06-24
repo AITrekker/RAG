@@ -2,9 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type TenantResponse = {
-    id: string;
+export type ApiKeyInfo = {
+    key_prefix: string;
     name: string;
-    description?: (string | null);
+    is_active: boolean;
+    created_at: string;
+    expires_at?: (string | null);
 };
 

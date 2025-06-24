@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements files
@@ -20,7 +21,8 @@ COPY requirements.txt .
 # provided by the base nvcr.io image in a pre-compiled, optimized state.
 # This avoids the "undefined symbol" compilation conflicts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements-base.txt
+#    pip install --no-cache-dir -r requirements-base.txt
+    pip install -r requirements-base.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt

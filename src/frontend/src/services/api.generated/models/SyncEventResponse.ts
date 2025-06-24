@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export type SyncEventResponse = {
-    id: number;
+    id: string;
     sync_run_id: string;
     tenant_id: string;
     event_type: string;

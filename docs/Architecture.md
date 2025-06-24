@@ -27,7 +27,7 @@ The Enterprise RAG Platform has been designed with complete separation between t
 - **Technology**: Python 3.10+, FastAPI
 - **Port**: 8000
 - **Vector Store / Database**: Qdrant
-- **Cache**: Redis
+
 - **Authentication**: API key-based with tenant isolation
 - **Documentation**: Auto-generated OpenAPI/Swagger docs
 
@@ -287,8 +287,7 @@ The architecture ensures that the frontend can be completely replaced or multipl
 - It stores not only the vector embeddings for semantic search but also the document chunks and all associated metadata (filenames, hashes, etc.).
 - This removes the need for a separate relational database like PostgreSQL.
 
-### 4. **Cache (Redis)**
-- Redis is used for caching expensive operations and can be used for managing distributed state if needed (e.g., status of sync jobs).
+
 
 ## Data Flow
 

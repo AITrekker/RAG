@@ -1,4 +1,77 @@
-# Enterprise RAG Pipeline: Intelligent Document Assistant
+# Enterprise RAG Platform
+
+## Quick Start
+
+### Prerequisites
+- Python 3.9+
+- Docker and Docker Compose
+- 8GB+ RAM (16GB+ recommended for optimal ML performance)
+- CUDA-capable GPU (optional but recommended)
+
+### Installation
+
+The project uses a two-stage requirements installation to optimize for development:
+
+1. **Install heavyweight base packages** (PyTorch, Transformers, etc. - ~3GB download):
+   ```bash
+   pip install -r requirements-base.txt
+   ```
+
+2. **Install lightweight application packages** (FastAPI, utilities, etc.):
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+> **Why two files?** 
+> - `requirements-base.txt`: Large ML packages that rarely change (torch, transformers, etc.)
+> - `requirements.txt`: Lightweight packages that update frequently (fastapi, pydantic, etc.)
+> - This allows faster development cycles by only reinstalling lightweight packages
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd RAG
+
+# Set up the development environment
+python scripts/setup_dev.py
+
+# Or manually:
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -r requirements-base.txt
+pip install -r requirements.txt
+```
+
+### Quick Docker Start
+
+```bash
+# Start the full stack
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+## Architecture
+
+**Core Components:**
+- **API:** FastAPI with automatic OpenAPI documentation
+- **Port**: 8000
+- **Vector Store / Database**: Qdrant
+
+- **Authentication**: API key-based with tenant isolation
+- **Documentation**: Auto-generated OpenAPI/Swagger docs
+
+**Tech Stack:**
+- **Backend:** FastAPI, Python 3.9+
+- **Frontend:** React, TypeScript, Vite
+- **RAG & ML:** LlamaIndex, Hugging Face `transformers`, PyTorch
+- **Vector Store & Database:** Qdrant
+
+- **Async Tasking:** Python `asyncio`
+- **Deployment:** Docker, Docker Compose
 
 ## 1. Overview
 
@@ -98,7 +171,7 @@ sequenceDiagram
 - **Backend:** Python, FastAPI
 - **RAG & ML:** LlamaIndex, Hugging Face `transformers`, PyTorch
 - **Vector Store & Database:** Qdrant
-- **Cache:** Redis
+
 - **Async Tasking:** Python `asyncio`
 - **Deployment:** Docker, Docker Compose
 - **Frontend:** React, TypeScript, Vite

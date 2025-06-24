@@ -9,7 +9,11 @@ from typing import List, Optional, Dict, Any
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from functools import lru_cache
+from pathlib import Path
 
+# Define the project's base directory
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+CACHE_DIR = BASE_DIR / "cache"
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -24,29 +28,22 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", env="HOST")
     port: int = Field(default=8000, env="PORT")
     
-    # Security settings
+    # Security settings - will be dynamically overridden in debug mode
     allowed_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173"], 
+        default=["http://localhost:3000"], 
         env="ALLOWED_ORIGINS"
-    )
-    allowed_hosts: List[str] = Field(
-        default=["localhost", "127.0.0.1"], 
-        env="ALLOWED_HOSTS"
     )
     
     # Qdrant settings
     qdrant_url: str = Field(default="http://localhost:6333", env="QDRANT_URL")
     qdrant_api_key: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
     
-    # Redis settings (for caching and rate limiting)
-    redis_url: Optional[str] = Field(default=None, env="REDIS_URL")
-    redis_password: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
-    
     # Embedding model settings
     embedding_model: str = Field(
         default="sentence-transformers/all-MiniLM-L6-v2", 
         env="EMBEDDING_MODEL"
     )
+    embedding_model_dimensions: int = Field(default=384, env="EMBEDDING_MODEL_DIMENSIONS")
     embedding_device: str = Field(default="cpu", env="EMBEDDING_DEVICE")
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
@@ -57,27 +54,18 @@ class Settings(BaseSettings):
     )
     llm_max_length: int = Field(default=1024, env="LLM_MAX_LENGTH")
     llm_temperature: float = Field(default=0.6, env="LLM_TEMPERATURE")
-    llm_cache_dir: str = Field(default="./cache/transformers", env="LLM_CACHE_DIR")
     llm_enable_quantization: bool = Field(default=True, env="LLM_ENABLE_QUANTIZATION")
+    llm_cache_dir: str = Field(default=str(CACHE_DIR / "transformers"), env="LLM_CACHE_DIR")
     
     # Document processing settings
-    max_file_size_mb: int = Field(default=50, env="MAX_FILE_SIZE_MB")
-    supported_file_types: List[str] = Field(
-        default=[".pdf", ".docx", ".txt", ".md", ".html", ".htm"],
-        env="SUPPORTED_FILE_TYPES"
-    )
     chunk_size: int = Field(default=512, env="CHUNK_SIZE")
     chunk_overlap: int = Field(default=50, env="CHUNK_OVERLAP")
     
-    # Storage settings
-    documents_path: str = Field(default="./documents", env="DOCUMENTS_PATH")
-    temp_path: str = Field(default="./temp", env="TEMP_PATH")
+    # Storage settings - Now relative to BASE_DIR
+    documents_path: str = Field(default=str(BASE_DIR / "documents"), env="DOCUMENTS_PATH")
     
     # API settings
     api_v1_str: str = Field(default="/api/v1", env="API_V1_STR")
-    api_rate_limit_per_minute: int = Field(default=60, env="API_RATE_LIMIT_PER_MINUTE")
-    api_rate_limit_per_hour: int = Field(default=1000, env="API_RATE_LIMIT_PER_HOUR")
-    api_timeout_seconds: int = Field(default=30, env="API_TIMEOUT_SECONDS")
     
     # Logging settings
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
@@ -87,24 +75,14 @@ class Settings(BaseSettings):
     )
     log_file: Optional[str] = Field(default=None, env="LOG_FILE")
     
-    # Monitoring settings
-    enable_metrics: bool = Field(default=True, env="ENABLE_METRICS")
-    metrics_port: int = Field(default=9090, env="METRICS_PORT")
-    
-    # Feature flags
-    enable_file_monitoring: bool = Field(default=True, env="ENABLE_FILE_MONITORING")
-    enable_auto_sync: bool = Field(default=True, env="ENABLE_AUTO_SYNC")
-    enable_query_history: bool = Field(default=True, env="ENABLE_QUERY_HISTORY")
-    
     # Development settings
     reload_on_change: bool = Field(default=False, env="RELOAD_ON_CHANGE")
-    mock_llm_responses: bool = Field(default=False, env="MOCK_LLM_RESPONSES")
     
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-    
+
     def get_embedding_config(self) -> dict:
         """Get embedding model configuration."""
         return {
@@ -129,28 +107,24 @@ class Settings(BaseSettings):
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap
         }
-    
-    def is_development(self) -> bool:
-        """Check if running in development mode."""
-        return self.debug
-    
-    def is_production(self) -> bool:
-        """Check if running in production mode."""
-        return not self.debug
-    
+        
     def get_cors_config(self) -> dict:
         """Get CORS configuration."""
+        origins = self.allowed_origins
+        if self.debug:
+            origins = ["*"]
+            
         return {
-            "allow_origins": self.allowed_origins,
+            "allow_origins": origins,
             "allow_credentials": True,
             "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["*"]
         }
 
-
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get cached settings instance. This will now be the single entry point."""
+    # Pydantic-settings automatically loads from .env and environment variables
     return Settings()
 
 

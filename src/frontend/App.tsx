@@ -1,142 +1,85 @@
-import React, { useState, useEffect } from 'react';
-import { TenantProvider, useTenant } from './contexts/TenantContext';
+import { useState } from 'react';
+import { useTenant } from './contexts/TenantContext';
 import { MainLayout } from './components/Layout/MainLayout';
 import { QueryInterface } from './components/Query/QueryInterface';
-import { SyncStatus } from './components/Sync/SyncStatus';
 import { AuditLogViewer } from './components/Audit/AuditLogViewer';
-import { usePerformanceMonitoring } from './hooks/usePerformanceMonitoring';
-import { api } from './services/api';
+import { ApiKeyModal } from './components/ApiKeyModal';
+import { SyncDashboard } from './components/Sync/SyncDashboard';
+import { Toaster } from "@/components/ui/toaster";
 import './App.css';
 
-type ActiveView = 'search' | 'sync' | 'audit' | 'help';
+type ActiveView = 'search' | 'sync' | 'audit';
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('search');
-  const { measureInteraction } = usePerformanceMonitoring();
-  const { tenant } = useTenant();
+  const { apiKey, tenant } = useTenant();
 
-  // Set the tenant ID for all API requests whenever the tenant changes
-  useEffect(() => {
-    if (tenant) {
-      api.setTenantId(tenant.id);
-    }
-  }, [tenant]);
-
-  const handleViewChange = async (view: ActiveView) => {
-    await measureInteraction(`navigation-${view}`, async () => {
-      setActiveView(view);
-    });
+  const handleViewChange = (view: ActiveView) => {
+    setActiveView(view);
   };
+
+  // If there's no API key, force the user to configure one.
+  if (!apiKey) {
+    return (
+      <>
+        <ApiKeyModal />
+        <Toaster />
+      </>
+    );
+  }
 
   const renderContent = () => {
     switch (activeView) {
       case 'search':
-        return (
-          <div className="space-y-6">
-            <div className="text-center">
-              <h1 className="text-3xl font-bold text-gray-900 mb-4">
-                Search Your Documents
-              </h1>
-              <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                Ask questions about your company documents and get instant, accurate answers with source citations.
-              </p>
-            </div>
-            <QueryInterface />
-          </div>
-        );
+        return <QueryInterface />;
       case 'sync':
-        return (
-          <div className="space-y-6">
-            <div className="text-center">
-              <h1 className="text-3xl font-bold text-gray-900 mb-4">
-                Document Synchronization
-              </h1>
-              <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                Monitor and manage document synchronization status and trigger manual syncs when needed.
-              </p>
-            </div>
-            <SyncStatus />
-          </div>
-        );
+        return <SyncDashboard />;
       case 'audit':
         return <AuditLogViewer />;
-      case 'help':
-        return (
-          <div className="space-y-6">
-            <div className="text-center">
-              <h1 className="text-3xl font-bold text-gray-900 mb-4">
-                Help & Documentation
-              </h1>
-              <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                Learn how to use the Enterprise RAG Platform effectively.
-              </p>
-            </div>
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Getting Started</h3>
-                  <ul className="space-y-2 text-gray-600">
-                    <li>• Upload your documents to the designated folder</li>
-                    <li>• Wait for automatic synchronization (every 24 hours)</li>
-                    <li>• Or trigger manual sync from the Sync Status page</li>
-                    <li>• Start asking questions about your documents</li>
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Tips for Better Results</h3>
-                  <ul className="space-y-2 text-gray-600">
-                    <li>• Be specific in your questions</li>
-                    <li>• Use natural language</li>
-                    <li>• Reference document types when relevant</li>
-                    <li>• Check source citations for accuracy</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
       default:
         return null;
     }
   };
 
   return (
-    <MainLayout>
-      {/* Navigation Tabs */}
-      <div className="mb-8">
-        <nav className="flex space-x-8" aria-label="Tabs">
-          {[
-            { id: 'search', name: 'Search', icon: '🔍' },
-            { id: 'sync', name: 'Sync Status', icon: '🔄' },
-            { id: 'audit', name: 'Audit Log', icon: '📄' },
-            { id: 'help', name: 'Help', icon: '❓' }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => handleViewChange(tab.id as ActiveView)}
-              className={`${
-                activeView === tab.id
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm transition-colors`}
-            >
-              <span className="mr-2">{tab.icon}</span>
-              {tab.name}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* Content */}
-      {renderContent()}
-    </MainLayout>
+    <>
+      <MainLayout>
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-gray-800">RAG Platform</h1>
+          <p className="text-lg text-gray-500 mt-2">
+            Selected Tenant: <span className="font-semibold text-blue-600">{tenant || 'None'}</span>
+          </p>
+        </div>
+        <div className="mb-8">
+          <nav className="flex space-x-1" aria-label="Tabs">
+            {[
+              { id: 'search', name: 'Search' },
+              { id: 'sync', name: 'Sync' },
+              { id: 'audit', name: 'Audit Log' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => handleViewChange(tab.id as ActiveView)}
+                className={`
+                  ${activeView === tab.id
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}
+                  px-3 py-2 font-medium text-sm rounded-md transition-colors
+                `}
+                disabled={!tenant}
+              >
+                {tab.name}
+              </button>
+            ))}
+          </nav>
+        </div>
+        <div className="bg-white rounded-lg shadow-md p-6 min-h-[400px]">
+          {tenant ? renderContent() : <div className="text-center text-gray-500">Please select a tenant to begin.</div>}
+        </div>
+      </MainLayout>
+      <Toaster />
+    </>
   );
 }
 
-const WrappedApp = () => (
-  <TenantProvider>
-    <App />
-  </TenantProvider>
-);
-
-export default WrappedApp;
+export default App;

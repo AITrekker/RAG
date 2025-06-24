@@ -2,9 +2,13 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApiKeyInfo } from './ApiKeyInfo';
 export type TenantResponse = {
-    id: string;
+    tenant_id: string;
     name: string;
     description?: (string | null);
+    status: string;
+    created_at: string;
+    api_keys: Array<ApiKeyInfo>;
 };
 

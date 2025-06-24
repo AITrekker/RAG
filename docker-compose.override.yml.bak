@@ -5,15 +5,14 @@ services:
       # Mount source code for hot reload during development
       - ./src/backend:/app/src/backend:delegated
       - ./requirements.txt:/app/requirements.txt:ro
-      # Mount local data directories (using correct paths)
-      - ./data/chroma_db:/app/data/chroma_db
+      # Mount local data directories
       - ./cache/transformers:/app/cache/transformers
       - ./logs:/app/logs
     environment:
       # Development environment variables
       - DEBUG=true
       - LOG_LEVEL=DEBUG
-      - RELOAD=true
+      - RELOAD_ON_CHANGE=true
       - TRANSFORMERS_OFFLINE=0
       - HF_DATASETS_OFFLINE=0
     ports:
@@ -37,16 +36,12 @@ services:
     stdin_open: true
     tty: true
 
-  postgres:
+  qdrant:
     ports:
-      - "5432:5432"
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       # Mount local data for persistence during development
-      - ./data/postgres:/var/lib/postgresql/data
+      - ./data/qdrant:/qdrant/storage
 
-  chroma:
-    volumes:
-      # Mount local data for persistence during development
-      - ./data/chroma_db:/chroma/chroma
-
-  # Redis service not currently configured in main docker-compose.yml 
+   

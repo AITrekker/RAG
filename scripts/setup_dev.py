@@ -149,11 +149,9 @@ def setup_project_structure() -> bool:
         "src/config",
         "scripts",
         "docker/chroma",
-        "docker/nginx",
         "tests",
         "data/chroma_db",  # Using chroma_db instead of chroma
         "data/postgres",
-        "data/redis",
         "cache/transformers",
         "cache/huggingface",
         "logs"

@@ -93,12 +93,20 @@ class TenantUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
+class ApiKeyInfo(BaseModel):
+    key_prefix: str
+    name: str
+    is_active: bool
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+
 class TenantResponse(BaseModel):
-    id: str
+    tenant_id: str
     name: str
     description: Optional[str] = None
-    class Config:
-        from_attributes = True
+    status: str
+    created_at: datetime
+    api_keys: List[ApiKeyInfo]
 
 class TenantListResponse(BaseModel):
     tenants: List[TenantResponse]
@@ -257,4 +265,10 @@ class SyncMetricsResponse(BaseModel):
 
 
 # Update forward references
-SyncConfigRequest.model_rebuild() 
+SyncConfigRequest.model_rebuild()
+
+class CreateApiKeyRequest(BaseModel):
+    tenant_id: str
+
+class CreateApiKeyResponse(BaseModel):
+    api_key: str 

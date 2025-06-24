@@ -1,102 +1,57 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { OpenAPI } from '@/src/services/api.generated/core/OpenAPI';
+import { TenantsService } from '@/src/services/api.generated/services/TenantsService';
+import type { TenantResponse } from '@/src/services/api.generated/models/TenantResponse';
+import type { ApiError } from '@/src/services/api.generated/core/ApiError';
 
-export interface TenantConfig {
-  id: string;
-  name: string;
-  logo?: string;
-  primaryColor?: string;
-  secondaryColor?: string;
-  welcomeMessage?: string;
-}
-
-// Define our available tenants
-const availableTenants: TenantConfig[] = [
-  {
-    id: 'tenant1',
-    name: 'InnovateCorp (Large Corp)',
-    primaryColor: '#1E3A8A', // Dark Blue
-    secondaryColor: '#1D4ED8',
-    welcomeMessage: 'Welcome to InnovateCorp. Efficiency and excellence are our driving principles.'
-  },
-  {
-    id: 'tenant2',
-    name: 'QuantumLeap (Mid-Size)',
-    primaryColor: '#047857', // Emerald
-    secondaryColor: '#059669',
-    welcomeMessage: 'QuantumLeap is growing fast. Let\'s find what you need to succeed.'
-  },
-  {
-    id: 'tenant3',
-    name: 'AgileSphere (Startup)',
-    primaryColor: '#9D174D', // Fuchsia
-    secondaryColor: '#BE185D',
-    welcomeMessage: 'AgileSphere moves quickly. Search our knowledge base to keep up!'
-  }
-];
+// Set the base URL for the API client
+OpenAPI.BASE = "http://localhost:8000";
 
 interface TenantContextType {
-  tenant: TenantConfig | null;
-  setTenantById: (tenantId: string) => void;
-  availableTenants: TenantConfig[];
+  tenant: string | null;
+  tenants: TenantResponse[];
+  selectTenant: (tenantId: string) => void;
+  apiKey: string | null;
+  setApiKey: (key: string) => void;
   isLoading: boolean;
 }
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
-interface TenantProviderProps {
-  children: ReactNode;
-}
+export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [tenant, setTenant] = useState<string | null>(() => localStorage.getItem('tenantId'));
+  const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem('apiKey'));
+  const queryClient = useQueryClient();
 
-export const TenantProvider: React.FC<TenantProviderProps> = ({ children }) => {
-  const [tenant, setTenant] = useState<TenantConfig | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: tenants = [], isLoading } = useQuery<TenantResponse[], ApiError>({
+    queryKey: ['tenants'],
+    queryFn: TenantsService.getTenantsApiV1TenantsGet,
+  });
 
   useEffect(() => {
-    // Load tenant configuration from localStorage or set a default
-    const loadTenantConfig = () => {
-      try {
-        const storedTenantId = localStorage.getItem('tenant-id');
-        const currentTenant = availableTenants.find(t => t.id === storedTenantId);
+    if (apiKey) {
+      OpenAPI.HEADERS = { 'X-API-Key': apiKey };
+      localStorage.setItem('apiKey', apiKey);
+    } else {
+      OpenAPI.HEADERS = {};
+      localStorage.removeItem('apiKey');
+    }
+    // Invalidate tenants query when API key changes to refetch with new credentials
+    queryClient.invalidateQueries({ queryKey: ['tenants'] });
+  }, [apiKey, queryClient]);
 
-        if (currentTenant) {
-          setTenant(currentTenant);
-        } else {
-          // Set tenant1 as the default
-          setTenant(availableTenants[0]);
-          localStorage.setItem('tenant-id', availableTenants[0].id);
-        }
-      } catch (error) {
-        console.error('Failed to load tenant configuration:', error);
-        // Fallback to default if error
-        setTenant(availableTenants[0]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadTenantConfig();
+  const selectTenant = useCallback((tenantId: string) => {
+    setTenant(tenantId);
+    localStorage.setItem('tenantId', tenantId);
   }, []);
 
-  const setTenantById = (tenantId: string) => {
-    const newTenant = availableTenants.find(t => t.id === tenantId);
-    if (newTenant) {
-      setTenant(newTenant);
-      localStorage.setItem('tenant-id', newTenant.id);
-    } else {
-      console.warn(`Tenant with id "${tenantId}" not found.`);
-    }
-  };
-
-  const value = {
-    tenant,
-    setTenantById,
-    availableTenants,
-    isLoading
-  };
+  const handleSetApiKey = useCallback((key: string) => {
+    setApiKey(key);
+  }, []);
 
   return (
-    <TenantContext.Provider value={value}>
+    <TenantContext.Provider value={{ tenant, tenants, selectTenant, apiKey, setApiKey: handleSetApiKey, isLoading }}>
       {children}
     </TenantContext.Provider>
   );
@@ -104,7 +59,7 @@ export const TenantProvider: React.FC<TenantProviderProps> = ({ children }) => {
 
 export const useTenant = (): TenantContextType => {
   const context = useContext(TenantContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useTenant must be used within a TenantProvider');
   }
   return context;

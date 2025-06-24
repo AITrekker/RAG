@@ -1,116 +1,62 @@
 services:
   # Qdrant Vector Database
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.4
     container_name: rag_qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - qdrant_storage:/qdrant/storage
     networks:
       - rag_network
-    restart: unless-stopped
 
   # Backend API Service
   backend:
+    container_name: rag_backend
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
-    container_name: rag_backend
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-      # Using chroma_db and tenant-specific uploads instead of global directories
-      - CUDA_VISIBLE_DEVICES=0
-      - TRANSFORMERS_CACHE=/app/cache/transformers
     ports:
       - "8000:8000"
-      - "5678:5678"  # For debugpy
     volumes:
       - ./src/backend:/app/src/backend
-      - ./scripts:/app/scripts
-      - ./data:/app/data
+      - ./documents:/app/documents
       - ./cache:/app/cache
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/liveness"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    depends_on:
-      - qdrant
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - RELOAD_ON_CHANGE=True
     networks:
       - rag_network
-    restart: unless-stopped
-    # The command runs the uvicorn server, watching only the 'src' directory.
+    depends_on:
+      - qdrant
     command: sh -c "uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"
 
-  # Frontend Development Server
+  # Frontend Service
   frontend:
+    container_name: rag_frontend
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
-    container_name: rag_frontend
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000/api/v1
-      - VITE_APP_TITLE=Enterprise RAG Platform
     ports:
       - "3000:3000"
     volumes:
-      - ./src/frontend:/app/src/frontend
-      - /app/src/frontend/node_modules
+      - ./src/frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1
     networks:
       - rag_network
     depends_on:
       - backend
-    restart: unless-stopped
-
-  # Redis for Caching (Optional for Layer 1, but useful for development)
-  redis:
-    image: redis:7-alpine
-    container_name: rag_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - rag_network
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-
-  # Nginx for reverse proxy and static file serving
-  nginx:
-    image: nginx:alpine
-    container_name: rag_nginx
-    ports:
-      - "80:80"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - backend
-      - frontend
-    networks:
-      - rag_network
-    restart: unless-stopped
-
-volumes:
-  qdrant_data:
-    driver: local
-  redis_data:
-    driver: local
 
 networks:
   rag_network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16 
+
+volumes:
+  qdrant_storage:
+    driver: local 

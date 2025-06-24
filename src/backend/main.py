@@ -13,10 +13,18 @@ import logging
 from contextlib import asynccontextmanager
 
 from src.backend.config.settings import get_settings
-from src.backend.api.v1.routes import query, sync, health, documents, audit
+from src.backend.api.v1.routes import (
+    documents as documents_routes,
+    query as query_routes,
+    health as health_routes,
+    sync as sync_routes,
+    audit as audit_routes,
+    tenants as tenants_routes,
+)
 from src.backend.core.embeddings import get_embedding_service, EmbeddingService
 from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
+from src.backend.core.tenant_service import get_tenant_service, TenantService
 # from src.backend.middleware.tenant_context import TenantHeaderMiddleware # Obsolete
 
 settings = get_settings()
@@ -111,11 +119,12 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-app.include_router(health.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])
-app.include_router(query.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
-app.include_router(documents.router, prefix=f"{settings.api_v1_str}/documents", tags=["Documents"])
-app.include_router(sync.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
-app.include_router(audit.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])
+app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])
+app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
+app.include_router(documents_routes.router, prefix=f"{settings.api_v1_str}/documents", tags=["Documents"])
+app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
+app.include_router(audit_routes.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])
+app.include_router(tenants_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
 
 @app.get("/", include_in_schema=False)
 async def root():

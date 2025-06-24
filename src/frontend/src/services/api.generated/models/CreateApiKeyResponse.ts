@@ -2,8 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { TenantResponse } from './TenantResponse';
-export type TenantListResponse = {
-    tenants: Array<TenantResponse>;
+export type CreateApiKeyResponse = {
+    api_key: string;
 };
 

@@ -38,7 +38,7 @@ setup(
     description="A multi-tenant RAG platform for enterprise document search and retrieval",
     long_description=Path("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
-    url="https://github.com/your-repo/enterprise-rag-platform",  # Replace with your repo URL
+    url="https://github.com/AITrekker/RAG",  # Replace with your repo URL
     python_requires=">=3.11",
     entry_points={
         'console_scripts': [
