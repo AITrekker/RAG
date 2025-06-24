@@ -127,10 +127,30 @@ function Install-Dependencies {
         Write-ColorOutput "[WARN] Force reinstalling dependencies..." "Yellow"
         if (Test-Path "node_modules") { Remove-Item -Recurse -Force "node_modules" }
         if (Test-Path "package-lock.json") { Remove-Item -Force "package-lock.json" }
+        if (Test-Path "yarn.lock") { Remove-Item -Force "yarn.lock" }
     }
     
     if (-not (Test-Path "node_modules")) {
         Write-ColorOutput "[WARN] node_modules not found, installing dependencies..." "Yellow"
+        
+        # Try yarn first on Windows (better for Windows-specific npm issues)
+        try {
+            $yarnVersion = yarn --version
+            Write-ColorOutput "[OK] Using yarn $yarnVersion" "Green"
+            yarn install
+            if ($LASTEXITCODE -eq 0) {
+                Write-ColorOutput "[OK] Dependencies installed with yarn" "Green"
+                return $true
+            }
+            else {
+                Write-ColorOutput "[WARN] yarn install failed, trying npm" "Yellow"
+            }
+        }
+        catch {
+            Write-ColorOutput "[INFO] yarn not available, using npm" "Yellow"
+        }
+        
+        # Fall back to npm
         npm install
         if ($LASTEXITCODE -ne 0) {
             Write-ColorOutput "[ERROR] Failed to install dependencies" "Red"
@@ -146,6 +166,25 @@ function Install-Dependencies {
         
         if ($packageJsonTime -gt $nodeModulesTime) {
             Write-ColorOutput "[WARN] package.json is newer than node_modules, updating dependencies..." "Yellow"
+            
+            # Try yarn first
+            try {
+                $yarnVersion = yarn --version
+                Write-ColorOutput "[OK] Using yarn $yarnVersion" "Green"
+                yarn install
+                if ($LASTEXITCODE -eq 0) {
+                    Write-ColorOutput "[OK] Dependencies updated with yarn" "Green"
+                    return $true
+                }
+                else {
+                    Write-ColorOutput "[WARN] yarn install failed, trying npm" "Yellow"
+                }
+            }
+            catch {
+                Write-ColorOutput "[INFO] yarn not available, using npm" "Yellow"
+            }
+            
+            # Fall back to npm
             npm install
             if ($LASTEXITCODE -ne 0) {
                 Write-ColorOutput "[ERROR] Failed to update dependencies" "Red"
@@ -186,8 +225,26 @@ function Start-Frontend {
     Write-ColorOutput "[INFO] Press Ctrl+C to stop the server" "Yellow"
     Write-Host "----------------------------------------"
     
-    # Run the development server
+    # Run the development server - try yarn first, then npm
     try {
+        # Try yarn first (better for Windows)
+        try {
+            $yarnVersion = yarn --version
+            Write-ColorOutput "[OK] Using yarn $yarnVersion for development server" "Green"
+            yarn dev --host $HostAddress --port $Port
+            if ($LASTEXITCODE -eq 0) {
+                Write-ColorOutput "[OK] Frontend server stopped gracefully" "Green"
+                return $true
+            }
+            else {
+                Write-ColorOutput "[WARN] yarn dev failed, trying npm" "Yellow"
+            }
+        }
+        catch {
+            Write-ColorOutput "[INFO] yarn not available, using npm" "Yellow"
+        }
+        
+        # Fall back to npm
         npm run dev -- --host $HostAddress --port $Port
         Write-ColorOutput "[OK] Frontend server stopped gracefully" "Green"
         return $true

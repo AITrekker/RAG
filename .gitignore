@@ -41,11 +41,73 @@ tasks
 docker-compose.override.yml
 
 # ===================================================================
-# Frontend (Node.js)
+# Frontend (Node.js) - Updated for both npm and yarn
 # ===================================================================
+# Node modules and dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+.next/
+.nuxt/
+.vite/
+
+# Package manager lock files (keep these in repo, but ignore if corrupted)
+# package-lock.json (keep in repo)
+# yarn.lock (keep in repo)
+# pnpm-lock.yaml (keep in repo)
+
+# Environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Frontend specific
 /src/frontend/node_modules/
 /src/frontend/dist/
 /src/frontend/.vite/
+/src/frontend/.env*
+
+# ===================================================================
+# Database & Storage
+# ===================================================================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# PostgreSQL data
+postgres_data/
+pgdata/
+
+# ChromaDB data
+chroma_db/
+chromadb/
+
+# ===================================================================
+# Machine Learning & AI Models
+# ===================================================================
+# Hugging Face cache
+.cache/huggingface/
+.cache/transformers/
+.cache/torch/
+.cache/tensorflow/
+
+# Model files
+*.bin
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+*.onnx
 
 # ===================================================================
 # Test & Coverage Reports
@@ -56,3 +118,45 @@ htmlcov/
 .coverage.*
 .cache
 .pytest_cache/
+.coverage.xml
+*.cover
+.hypothesis/
+
+# ===================================================================
+# Temporary & Backup Files
+# ===================================================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+
+# ===================================================================
+# OS Generated Files
+# ===================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ===================================================================
+# Docker & Container
+# ===================================================================
+.dockerignore
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# ===================================================================
+# Security & Secrets
+# ===================================================================
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+.secrets/

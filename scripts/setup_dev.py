@@ -224,6 +224,25 @@ def setup_frontend_environment() -> bool:
     # Check if package.json exists
     if Path("package.json").exists():
         print_step("Installing Node.js dependencies")
+        
+        # On Windows, try yarn first (better for Windows-specific npm issues)
+        if platform.system() == "Windows":
+            print_step("Windows detected - trying yarn first for better compatibility")
+            
+            # Check if yarn is available
+            success, yarn_version = run_command(["yarn", "--version"], "Checking yarn availability", check=False, capture_output=True)
+            if success:
+                print_step(f"Using yarn {yarn_version}", "SUCCESS")
+                success, _ = run_command(["yarn", "install"], "Installing dependencies with yarn")
+                if success:
+                    os.chdir("../..")
+                    return True
+                else:
+                    print_step("yarn install failed, trying npm", "WARNING")
+            else:
+                print_step("yarn not available, using npm", "WARNING")
+        
+        # Fall back to npm (or use npm on non-Windows)
         success, _ = run_command(["npm", "install"], "Installing npm dependencies")
         if not success:
             os.chdir("../..")

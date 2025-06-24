@@ -25,6 +25,19 @@ def install_requirements():
         sys.exit(1)
 
 # --- Main Setup Logic ---
+# Check if running in a virtual environment
+if not is_in_virtual_env():
+    print("Error: This setup must be run within a virtual environment.")
+    print("Please activate your virtual environment and try again.")
+    print("To create a virtual environment:")
+    print("  python -m venv .venv")
+    print("  # On Windows:")
+    print("  .venv\\Scripts\\activate")
+    print("  # On Unix/MacOS:")
+    print("  source .venv/bin/activate")
+    sys.exit(1)
+
+print("Running in a virtual environment. Proceeding with installation...")
 
 # When setup.py is run for installation, install dependencies first.
 install_requirements()
@@ -38,7 +51,7 @@ setup(
     description="A multi-tenant RAG platform for enterprise document search and retrieval",
     long_description=Path("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
-    url="https://github.com/AITrekker/RAG",  # Replace with your repo URL
+    url="https://github.com/AITrekker/RAG", 
     python_requires=">=3.11",
     entry_points={
         'console_scripts': [

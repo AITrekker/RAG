@@ -83,6 +83,31 @@ python scripts/run_backend.py
 .\scripts\run_frontend.ps1
 ```
 
+## 🪟 **Windows-Specific Frontend Setup**
+
+**If you encounter Rollup native dependency errors on Windows:**
+```bash
+# The setup scripts now automatically handle this by:
+# 1. Trying yarn first (better Windows compatibility)
+# 2. Falling back to npm if yarn is not available
+
+# Manual solution if needed:
+npm install --global yarn
+cd src/frontend
+yarn install
+yarn dev
+```
+
+**Why this happens:**
+- Windows-specific npm bug with optional native dependencies (`@rollup/rollup-win32-x64-msvc`)
+- Yarn handles optional dependencies differently and doesn't have this issue
+- Both `npm run dev` and `yarn dev` work after proper installation
+
+**The setup scripts now automatically:**
+- Detect Windows and try yarn first
+- Fall back to npm if yarn is not available
+- Handle both package managers seamlessly
+
 ## 📁 **Core Scripts (8 Essential Tools)**
 
 ### **🔧 Development Setup**
