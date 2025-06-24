@@ -1,45 +1,50 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
+# Use the official NVIDIA PyTorch container as requested for GPU compatibility
+FROM nvcr.io/nvidia/pytorch:24.04-py3
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-ENV POETRY_NO_INTERACTION 1
-
-# Set work directory
+# Set up the working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Upgrade pip and install essential system packages
+RUN pip install --no-cache-dir --upgrade pip && \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install base requirements first to leverage Docker cache
+# Copy requirements files
 COPY requirements-base.txt .
+COPY requirements.txt .
+
+# Install dependencies from requirements files.
+# We DO NOT reinstall torch, torchvision, or torchaudio, as they are
+# provided by the base nvcr.io image in a pre-compiled, optimized state.
+# This avoids the "undefined symbol" compilation conflicts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements-base.txt
 
-# Copy and install the rest of the requirements
-COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Copy the application source code
+# We copy the contents of src/backend directly into /app so that
+# uvicorn can find main.py at the top level.
 COPY ./src/backend/ /app
+COPY ./scripts/ /app/scripts
 
-# Create a non-root user and set permissions
+# Create a non-root user for security.
+# Note: In some GPU environments, root may be required.
+# If issues arise, this may need to be commented out.
 RUN addgroup --system app && adduser --system --group app
 RUN chown -R app:app /app
-
-# Expose the port the app runs on
-EXPOSE 8000
-EXPOSE 5678
-
-# Switch to the non-root user
 USER app
 
-# Command to run the application
-# The command is overridden in docker-compose.yml for development
-CMD ["tail", "-f", "/dev/null"]
+# Set environment variables for Python
+# We no longer need a deep PYTHONPATH as main.py is at the root.
+ENV PYTHONUNBUFFERED=1
+
+# Expose the application port
+EXPOSE 8000
+
+# The CMD is now handled by docker-compose.yml to allow for easier
+# overriding and script execution before the main app starts.
+# Example CMD: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

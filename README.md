@@ -134,6 +134,30 @@ The `src/backend/api` directory defines the web server's endpoints, acting as th
     - The API will be available at `http://localhost:8000`.
     - The UI will be available at `http://localhost:3000`.
 
+### Database Migrations
+
+This project uses **Alembic** to manage all database schema changes. The `SQLAlchemy` models in `src/backend/models/` are the single source of truth for the database schema.
+
+**The `scripts/init_db.sql` file is deprecated for schema changes.** It is only used by the initial Docker container setup to create the database and user roles. Do not add or modify tables in this file.
+
+To make a change to the database schema, follow this process:
+
+1.  **Modify a Model:** Make your desired changes to the Python models in `src/backend/models/`.
+2.  **Generate a Migration Script:** Run the `alembic revision` command from within the `backend` service container to automatically generate a migration script.
+    ```bash
+    # From your host machine, exec into the running backend container
+    docker-compose exec backend bash
+
+    # Inside the container, run the autogenerate command
+    alembic revision --autogenerate -m "Your descriptive migration message"
+    ```
+3.  **Review the Script:** A new file will be created in `src/backend/migrations/versions/`. **Always review this file** to ensure it accurately reflects the changes you intended.
+4.  **Apply the Migration:** The migrations are applied automatically when the `backend` container starts up. To apply them manually for testing, you can run:
+    ```bash
+    # Inside the container
+    alembic upgrade head
+    ```
+
 ## 7. Project Roadmap
 
 This `README` outlines the plan for the initial MVP. We have a comprehensive roadmap for future development, including:

@@ -3,6 +3,17 @@ fastapi==0.115.13
 uvicorn[standard]==0.34.3
 python-multipart==0.0.9
 
+# Vector Database
+qdrant-client==1.9.2
+
+# AI / ML - Core
+transformers==4.43.3
+sentence-transformers==3.0.1
+accelerate==0.33.0
+
+# AI / ML - RAG & Vector Store
+langchain==0.2.11
+
 # Testing
 pytest==8.4.1
 pytest-asyncio>=0.21.0
@@ -24,6 +35,8 @@ numpy>=1.24.0
 psutil>=5.9.0
 watchdog>=3.0.0
 GPUtil>=1.4.0
+requests==2.32.3
+nvidia-ml-py3==7.352.0
 
 # Document Loaders & Parsers
 pypdf==5.6.0
@@ -46,4 +59,9 @@ schedule>=1.2.0
 # CLI & Output
 rich==14.0.0
 typer==0.16.0
-fpdf2==2.7.8 
+fpdf2==2.7.8
+
+# For development
+openpyxl==3.1.5
+ipykernel==6.29.5
+debugpy==1.8.2 

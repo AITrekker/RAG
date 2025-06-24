@@ -135,12 +135,15 @@ class LLMService:
                 )
                 logger.info("Enabling 8-bit quantization for memory efficiency")
             
-            # Determine the correct AutoModel class
+            # Determine the correct AutoModel class and pipeline task
             if "t5" in self.model_name or "flan" in self.model_name:
                 model_class = AutoModelForSeq2SeqLM
+                pipeline_task = "text2text-generation"
+                logger.info("Using Seq2Seq model architecture.")
             else:
-                # This can be expanded for other model types
-                raise ValueError(f"Unsupported model architecture for model: {self.model_name}")
+                model_class = AutoModelForCausalLM
+                pipeline_task = "text-generation"
+                logger.info("Using Causal LM model architecture.")
 
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -173,7 +176,7 @@ class LLMService:
             
             # Create text generation pipeline
             pipeline_kwargs = {
-                "task": "text-generation",
+                "task": pipeline_task,
                 "model": self.model,
                 "tokenizer": self.tokenizer,
                 "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
@@ -252,16 +255,20 @@ class LLMService:
                 "top_k": top_k,
                 "repetition_penalty": repetition_penalty,
                 "pad_token_id": self.tokenizer.eos_token_id,
-                "return_full_text": False,  # Only return new tokens
-                "clean_up_tokenization_spaces": True
             }
-            
-            # Generate with the pipeline
-            outputs = self.pipeline(full_prompt, **generation_kwargs)
+
+            # The 'text2text-generation' pipeline does not support 'return_full_text'
+            if self.pipeline.task == "text-generation":
+                generation_kwargs["return_full_text"] = False
+
+            response = self.pipeline(
+                full_prompt,
+                **generation_kwargs
+            )
             
             # Extract generated text
-            if outputs and len(outputs) > 0:
-                generated_text = outputs[0]["generated_text"]
+            if response and len(response) > 0:
+                generated_text = response[0]["generated_text"]
             else:
                 generated_text = ""
             

@@ -14,11 +14,6 @@ from .embeddings import get_embedding_service, EmbeddingService
 from .llm_service import get_llm_service, LLMService
 from ..utils.vector_store import get_vector_store_manager, VectorStoreManager
 from ..models.api_models import RAGResponse, RAGSource
-from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +52,6 @@ class RAGPipeline:
         start_time = time.time()
         logger.info(f"Processing query for tenant '{tenant_id}': '{query}'")
 
-        # 1. Retrieve relevant document chunks
         try:
             retrieved_chunks = await self._retrieve_context(query, tenant_id)
             if not retrieved_chunks:
@@ -75,14 +69,13 @@ class RAGPipeline:
             logger.error(f"Error during context retrieval for tenant '{tenant_id}': {e}", exc_info=True)
             raise RuntimeError("Failed to retrieve document context.") from e
 
-        # 2. Generate a response using the LLM
         try:
-            llm_response = self.llm_service.generate_rag_response(query, retrieved_chunks)
+            context_str = "\n".join([chunk['text'] for chunk in retrieved_chunks])
+            llm_response = self.llm_service.generate_response(query, context_str)
         except Exception as e:
             logger.error(f"Error during LLM generation for tenant '{tenant_id}': {e}", exc_info=True)
             raise RuntimeError("Failed to generate a response from the language model.") from e
         
-        # 3. Format the final response
         processing_time = time.time() - start_time
         logger.info(f"Successfully processed query in {processing_time:.2f} seconds.")
 
@@ -100,7 +93,7 @@ class RAGPipeline:
 
     async def _retrieve_context(self, query: str, tenant_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
-        Retrieves the most relevant document chunks for a given query.
+        Retrieves the most relevant document chunks for a given query from Qdrant.
 
         Args:
             query: The user's question.
@@ -111,33 +104,33 @@ class RAGPipeline:
             A list of retrieved chunks, each as a dictionary.
         """
         logger.info(f"Generating embedding for query: '{query}'")
-        query_embedding = self.embedding_service.encode_texts([query])
+        query_embedding_result = self.embedding_service.encode_texts([query])
         
-        if query_embedding.size == 0:
+        if not query_embedding_result.success or not query_embedding_result.embeddings:
             logger.error("Failed to generate query embedding.")
             return []
+            
+        query_embedding = query_embedding_result.embeddings[0]
 
         logger.info(f"Searching vector store for tenant '{tenant_id}'...")
-        vector_store = self.vector_store_manager.get_collection_for_tenant(tenant_id)
         
-        search_results = vector_store.query(
-            query_embeddings=query_embedding.tolist(),
-            n_results=top_k,
-            include=["metadatas", "documents", "distances"]
+        search_results = self.vector_store_manager.similarity_search(
+            tenant_id=tenant_id,
+            query_embedding=query_embedding,
+            top_k=top_k
         )
         
-        # The result structure from ChromaDB is a bit nested.
         retrieved_chunks = []
-        if search_results and search_results['ids'][0]:
-            for i, distance in enumerate(search_results['distances'][0]):
-                metadata = search_results['metadatas'][0][i]
+        if search_results:
+            for point in search_results:
+                payload = point.payload or {}
                 chunk_data = {
-                    "id": search_results['ids'][0][i],
-                    "text": search_results['documents'][0][i],
-                    "score": 1 - distance,  # Convert distance to similarity score
-                    "filename": metadata.get("filename"),
-                    "page_number": metadata.get("page_number"),
-                    "chunk_index": metadata.get("chunk_index"),
+                    "id": point.id,
+                    "text": payload.get("content", ""),
+                    "score": point.score,
+                    "source": payload.get("source"),
+                    "page_number": payload.get("page_number"),
+                    "document_id": payload.get("document_id"),
                 }
                 retrieved_chunks.append(chunk_data)
 
@@ -149,7 +142,6 @@ class RAGPipeline:
         if not chunks:
             return 0.0
         
-        # Average the scores of the retrieved chunks
         avg_score = sum(chunk.get('score', 0.0) for chunk in chunks) / len(chunks)
         return round(avg_score, 2)
 

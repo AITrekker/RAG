@@ -1,573 +1,153 @@
 """
-Document processor for the Enterprise RAG Platform.
+Stateless Document Processor for the Enterprise RAG Platform.
 
-This module handles document loading, content extraction, and chunking
-for PDF, Word, and text files using LlamaIndex and custom processing logic.
-Implements fixed-size chunking strategy with configurable overlap.
+This module provides a `DocumentProcessor` that handles loading, content
+extraction, and chunking for various file types (PDF, Word, text, HTML).
+It is designed to be a stateless utility that does not interact with any
+database or persistence layer. Its sole responsibility is to convert a file
+into a structured representation of its content and metadata.
 """
 
-import os
 import hashlib
 import mimetypes
-import uuid
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Tuple, Union
-from pathlib import Path
 import logging
-from dataclasses import dataclass
+from typing import List, Dict, Any, Optional
+from pathlib import Path
+from dataclasses import dataclass, field
 
 # LlamaIndex imports
-from llama_index.core import Document as LlamaDocument
-from llama_index.readers.file import (
-    PDFReader, 
-    DocxReader, 
-    UnstructuredReader
-)
+from llama_index.core.readers.base import BaseReader
+from llama_index.readers.file import PDFReader, DocxReader, UnstructuredReader
 from llama_index.core.text_splitter import TokenTextSplitter
-from llama_index.core.node_parser import SimpleNodeParser
 
-# Local imports
-from ..models.document import (
-    Document, DocumentChunk, DocumentStatus, DocumentType, ChunkType,
-    create_document_from_file, create_document_chunk
-)
-from ..utils.vector_store import VectorStoreManager
 from ..utils.html_processor import HTMLProcessor
-from ..config.settings import settings
-from ..core.tenant_manager import get_tenant_manager
-from ..db.session import get_db
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class Chunk:
+    """A structured representation of a piece of text from a document."""
+    id: str
+    text: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
-class ChunkingConfig:
-    """Configuration for document chunking strategy."""
-    chunk_size: int = 512  # Target chunk size in tokens
-    chunk_overlap: int = 50  # Overlap between chunks in tokens
-    min_chunk_size: int = 100  # Minimum chunk size to avoid tiny chunks
-    max_chunk_size: int = 1024  # Maximum chunk size
-    separator: str = "\n\n"  # Preferred separator for chunks
-    preserve_sentences: bool = True  # Try to preserve sentence boundaries
-    
-    def validate(self):
-        """Validate chunking configuration."""
-        if self.chunk_size <= 0:
-            raise ValueError("chunk_size must be positive")
-        if self.chunk_overlap < 0:
-            raise ValueError("chunk_overlap cannot be negative")
-        if self.chunk_overlap >= self.chunk_size:
-            raise ValueError("chunk_overlap must be less than chunk_size")
-        if self.min_chunk_size <= 0:
-            raise ValueError("min_chunk_size must be positive")
-        if self.max_chunk_size <= self.chunk_size:
-            raise ValueError("max_chunk_size must be greater than chunk_size")
-
-
-@dataclass
-class ProcessingResult:
-    """Result of document processing operation."""
-    success: bool
-    document: Optional[Document] = None
-    chunks: List[DocumentChunk] = None
-    error_message: Optional[str] = None
-    processing_metadata: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.chunks is None:
-            self.chunks = []
-        if self.processing_metadata is None:
-            self.processing_metadata = {}
-
+class ProcessedDocument:
+    """The structured output of processing a single file."""
+    doc_id: str
+    filename: str
+    metadata: Dict[str, Any]
+    chunks: List[Chunk]
 
 class DocumentProcessor:
     """
-    Main document processor for handling various file types.
-    
-    Supports PDF, Word documents, and text files with configurable
-    chunking strategies and metadata extraction.
+    A stateless utility to process files into structured documents and chunks.
     """
     
-    def __init__(self, chunking_config: ChunkingConfig = None):
-        """Initialize document processor with configuration."""
-        self.chunking_config = chunking_config or ChunkingConfig()
-        self.chunking_config.validate()
-        
-        # Initialize LlamaIndex readers
-        self.pdf_reader = PDFReader()
-        self.docx_reader = DocxReader()
-        self.unstructured_reader = UnstructuredReader()
-        self.html_processor = HTMLProcessor()
-        
-        # Initialize text splitter
+    def __init__(
+        self,
+        chunk_size: int = 512,
+        chunk_overlap: int = 50,
+    ):
+        """
+        Initializes the DocumentProcessor with a chunking strategy.
+        """
         self.text_splitter = TokenTextSplitter(
-            chunk_size=self.chunking_config.chunk_size,
-            chunk_overlap=self.chunking_config.chunk_overlap,
-            separator=self.chunking_config.separator
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
-        
-        # Supported file extensions
-        self.supported_extensions = {
-            '.pdf': DocumentType.PDF,
-            '.doc': DocumentType.WORD,
-            '.docx': DocumentType.WORD,
-            '.txt': DocumentType.TEXT,
-            '.md': DocumentType.MARKDOWN,
-            '.html': DocumentType.HTML,
-            '.htm': DocumentType.HTML,
+        self.html_processor = HTMLProcessor()
+        self.file_readers: Dict[str, BaseReader] = {
+            ".pdf": PDFReader(),
+            ".docx": DocxReader(),
+            ".doc": UnstructuredReader(),
+            ".txt": UnstructuredReader(),
+            ".md": UnstructuredReader(),
         }
-        
-        logger.info(f"DocumentProcessor initialized with chunk_size={self.chunking_config.chunk_size}")
-    
-    def process_file(
-        self, 
-        file_path: str, 
-        tenant_id: str,
-        filename: str = None
-    ) -> ProcessingResult:
+        logger.info(f"DocumentProcessor initialized with chunk_size={chunk_size}")
+
+    def process_file(self, file_path: Path) -> ProcessedDocument:
         """
-        Process a file and return document with chunks.
-        
+        Loads a file, extracts its content, and splits it into chunks.
+
         Args:
-            file_path: Path to the file to process
-            tenant_id: Tenant ID for isolation
-            filename: Optional custom filename (defaults to file basename)
-            
+            file_path: The path to the file to be processed.
+
         Returns:
-            ProcessingResult containing document and chunks or error information
+            A ProcessedDocument containing the file's metadata and a list of chunks.
+            
+        Raises:
+            ValueError: If the file type is not supported.
         """
-        try:
-            # Resolve tenant_id to UUID first
-            db = next(get_db())
-            tenant_manager = get_tenant_manager(db)
-            tenant_uuid = tenant_manager.get_tenant_uuid(tenant_id)
-            
-            if not tenant_uuid:
-                return ProcessingResult(
-                    success=False,
-                    error_message=f"Tenant not found: {tenant_id}"
-                )
-            
-            # Validate file path
-            if not os.path.exists(file_path):
-                return ProcessingResult(
-                    success=False,
-                    error_message=f"File not found: {file_path}"
-                )
-            
-            # Get file information
-            file_info = self._get_file_info(file_path, filename)
-            
-            # Check if file type is supported
-            if file_info['document_type'] == DocumentType.UNKNOWN:
-                return ProcessingResult(
-                    success=False,
-                    error_message=f"Unsupported file type: {file_info['extension']}"
-                )
-            
-            logger.info(f"Processing file: {file_info['filename']} ({file_info['file_size']} bytes)")
-            
-            # Create document instance using resolved UUID
-            document = create_document_from_file(
-                tenant_id=tenant_id,
-                file_path=file_path,
-                filename=file_info['filename'],
-                file_size=file_info['file_size'],
-                file_hash=file_info['file_hash'],
-                mime_type=file_info['mime_type'],
-                file_modified_at=file_info['modified_at'],
-                tenant_uuid=tenant_uuid  # Pass the resolved UUID
-            )
-            
-            # Update document status
-            document.status = DocumentStatus.PROCESSING.value
-            document.processing_started_at = datetime.now(timezone.utc)
-            
-            # Extract content based on file type
-            content_result = self._extract_content(file_path, file_info['document_type'])
-            if not content_result['success']:
-                document.status = DocumentStatus.FAILED.value
-                document.processing_error = content_result['error']
-                return ProcessingResult(
-                    success=False,
-                    document=document,
-                    error_message=content_result['error']
-                )
-            
-            # Update document with extracted content metadata
-            document.title = content_result.get('title')
-            document.content_preview = content_result['content'][:500] if content_result['content'] else None
-            document.word_count = len(content_result['content'].split()) if content_result['content'] else 0
-            document.page_count = content_result.get('page_count', 1)
-            document.language = content_result.get('language', 'en')
-            
-            # Create chunks
-            chunks_result = self._create_chunks(
-                content_result['content'],
-                document.id,  # Pass UUID object directly
-                tenant_id,
-                content_result.get('metadata', {}),
-                tenant_uuid=tenant_uuid  # Pass the resolved UUID
-            )
-            
-            if not chunks_result['success']:
-                document.status = DocumentStatus.FAILED.value
-                document.processing_error = chunks_result['error']
-                return ProcessingResult(
-                    success=False,
-                    document=document,
-                    error_message=chunks_result['error']
-                )
-            
-            # Update document with chunk information
-            document.total_chunks = len(chunks_result['chunks'])
-            document.status = DocumentStatus.COMPLETED.value
-            document.processing_completed_at = datetime.now(timezone.utc)
-            
-            # Create processing metadata
-            processing_metadata = {
-                'chunking_config': {
-                    'chunk_size': self.chunking_config.chunk_size,
-                    'chunk_overlap': self.chunking_config.chunk_overlap,
-                    'method': 'fixed_size'
-                },
-                'content_extraction': content_result.get('metadata', {}),
-                'processing_time_seconds': (
-                    document.processing_completed_at - document.processing_started_at
-                ).total_seconds()
+        if not file_path.is_file():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        file_extension = file_path.suffix.lower()
+        
+        # Handle HTML separately
+        if file_extension in [".html", ".htm"]:
+            raw_text = self.html_processor.extract_text(file_path.read_text(encoding='utf-8'))
+        else:
+            reader = self.file_readers.get(file_extension)
+            if not reader:
+                raise ValueError(f"Unsupported file type: {file_extension}")
+            # LlamaIndex readers return a list of Document objects
+            llama_docs = reader.load_data(file=file_path)
+            raw_text = "\n\n".join([doc.get_content() for doc in llama_docs])
+
+        # Split the text into chunks
+        text_chunks = self.text_splitter.split_text(raw_text)
+        
+        # Create metadata
+        doc_id, file_metadata = self._create_file_metadata(file_path)
+
+        # Create structured Chunk objects
+        chunks = []
+        for i, text_chunk in enumerate(text_chunks):
+            chunk_id = f"{doc_id}_chunk_{i}"
+            chunk_metadata = {
+                "doc_id": doc_id,
+                "filename": file_path.name,
+                "chunk_index": i
             }
-            
-            logger.info(f"Successfully processed {file_info['filename']}: {len(chunks_result['chunks'])} chunks")
-            
-            return ProcessingResult(
-                success=True,
-                document=document,
-                chunks=chunks_result['chunks'],
-                processing_metadata=processing_metadata
-            )
-            
-        except Exception as e:
-            logger.error(f"Error processing file {file_path}: {str(e)}")
-            return ProcessingResult(
-                success=False,
-                error_message=f"Processing error: {str(e)}"
-            )
-    
-    def _get_file_info(self, file_path: str, filename: str = None) -> Dict[str, Any]:
-        """Extract file information and metadata."""
-        path_obj = Path(file_path)
+            chunks.append(Chunk(id=chunk_id, text=text_chunk, metadata=chunk_metadata))
+
+        logger.info(f"Processed '{file_path.name}' into {len(chunks)} chunks.")
         
-        # Use provided filename or extract from path
-        final_filename = filename or path_obj.name
-        
-        # Get file stats
-        stat = os.stat(file_path)
-        file_size = stat.st_size
-        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-        
-        # Calculate file hash
+        return ProcessedDocument(
+            doc_id=doc_id,
+            filename=file_path.name,
+            metadata=file_metadata,
+            chunks=chunks
+        )
+
+    def _create_file_metadata(self, file_path: Path) -> tuple[str, Dict[str, Any]]:
+        """Creates a unique ID and extracts metadata from a file."""
         file_hash = self._calculate_file_hash(file_path)
+        doc_id = str(file_hash) # Use hash for a stable ID
         
-        # Determine file type
-        extension = path_obj.suffix.lower()
-        document_type = self.supported_extensions.get(extension, DocumentType.UNKNOWN)
-        
-        # Get MIME type
+        file_stat = file_path.stat()
         mime_type, _ = mimetypes.guess_type(file_path)
         
-        return {
-            'filename': final_filename,
-            'extension': extension,
-            'file_size': file_size,
-            'file_hash': file_hash,
-            'mime_type': mime_type,
-            'document_type': document_type,
-            'modified_at': modified_at
+        metadata = {
+            "source": file_path.name,
+            "file_path": str(file_path),
+            "file_size": file_stat.st_size,
+            "file_hash": file_hash,
+            "mime_type": mime_type,
+            "created_at": file_stat.st_ctime,
+            "modified_at": file_stat.st_mtime,
         }
-    
-    def _calculate_file_hash(self, file_path: str) -> str:
-        """Calculate SHA-256 hash of file."""
-        hash_sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_sha256.update(chunk)
-        return hash_sha256.hexdigest()
-    
-    def _extract_content(self, file_path: str, document_type: DocumentType) -> Dict[str, Any]:
-        """
-        Extract content from file based on its type.
-        
-        Delegates to specialized extraction methods for each document type.
-        """
-        if document_type == DocumentType.PDF:
-            return self._extract_pdf_content(file_path)
-        elif document_type == DocumentType.WORD:
-            return self._extract_word_content(file_path)
-        elif document_type in [DocumentType.TEXT, DocumentType.MARKDOWN]:
-            return self._extract_text_content(file_path)
-        elif document_type == DocumentType.HTML:
-            return self.html_processor.extract_content(file_path)
-        else:
-            logger.warning(f"Unsupported document type: {document_type}, attempting generic extraction")
-            # Fallback for other text-based formats
-            return self._extract_text_content(file_path)
+        return doc_id, metadata
 
-    def _extract_pdf_content(self, file_path: str) -> Dict[str, Any]:
-        """Extract content from PDF file."""
-        try:
-            documents = self.pdf_reader.load_data(file=Path(file_path))
-            
-            if not documents:
-                return {
-                    'success': False,
-                    'error': "No content extracted from PDF"
-                }
-            
-            # Combine all document content
-            content = "\n\n".join([doc.text for doc in documents])
-            
-            # Extract metadata
-            metadata = documents[0].metadata if documents else {}
-            
-            return {
-                'success': True,
-                'content': content,
-                'title': metadata.get('title'),
-                'page_count': len(documents),
-                'language': metadata.get('language', 'en'),
-                'metadata': metadata
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f"PDF extraction error: {str(e)}"
-            }
-    
-    def _extract_word_content(self, file_path: str) -> Dict[str, Any]:
-        """Extract content from Word document."""
-        try:
-            documents = self.docx_reader.load_data(file=Path(file_path))
-            
-            if not documents:
-                return {
-                    'success': False,
-                    'error': "No content extracted from Word document"
-                }
-            
-            # Combine all document content
-            content = "\n\n".join([doc.text for doc in documents])
-            
-            # Extract metadata
-            metadata = documents[0].metadata if documents else {}
-            
-            return {
-                'success': True,
-                'content': content,
-                'title': metadata.get('title'),
-                'page_count': 1,  # Word docs don't have clear page boundaries
-                'language': metadata.get('language', 'en'),
-                'metadata': metadata
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f"Word document extraction error: {str(e)}"
-            }
-    
-    def _extract_text_content(self, file_path: str, encoding: str = 'utf-8') -> Dict[str, Any]:
-        """
-        Extract content from a text-based file (TXT, MD).
-        
-        Uses UnstructuredReader for robust text extraction.
-        
-        Args:
-            file_path: Path to the text file
-            encoding: File encoding
-            
-        Returns:
-            Dictionary containing extracted content and metadata
-        """
-        try:
-            # For simple text files, UnstructuredReader is effective
-            documents = self.unstructured_reader.load_data(file=Path(file_path))
-            
-            if not documents:
-                return {'success': False, 'error': "Failed to load text content"}
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """Calculates the SHA-256 hash of a file."""
+        hasher = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            while chunk := f.read(8192):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
-            content = "\n\n".join([doc.get_content() for doc in documents])
-            metadata = documents[0].metadata if documents else {}
-            title = metadata.get('title', Path(file_path).stem)
-            
-            return {
-                'success': True,
-                'content': content,
-                'title': title,
-                'page_count': 1,
-                'metadata': metadata
-            }
-        except Exception as e:
-            logger.error(f"Error extracting content from text file {file_path}: {e}")
-            return {'success': False, 'error': f"Text extraction failed: {e}"}
-    
-    def _create_chunks(
-        self, 
-        content: str, 
-        document_id: Union[str, uuid.UUID], 
-        tenant_id: str,
-        metadata: Dict[str, Any] = None,
-        tenant_uuid: str = None
-    ) -> Dict[str, Any]:
-        """Create chunks from document content using fixed-size strategy."""
-        try:
-            if not content or not content.strip():
-                return {
-                    'success': False,
-                    'error': "No content to chunk"
-                }
-            
-            # Ensure we have a valid tenant_uuid
-            if not tenant_uuid:
-                # This shouldn't happen with our fix, but let's be safe
-                db = next(get_db())
-                tenant_manager = get_tenant_manager(db)
-                tenant_uuid = tenant_manager.get_tenant_uuid(tenant_id)
-                
-                if not tenant_uuid:
-                    return {
-                        'success': False,
-                        'error': f"Cannot resolve tenant_id '{tenant_id}' to UUID"
-                    }
-            
-            # Split content into chunks using LlamaIndex text splitter
-            text_chunks = self.text_splitter.split_text(content)
-            
-            if not text_chunks:
-                return {
-                    'success': False,
-                    'error': "Text splitter produced no chunks"
-                }
-            
-            chunks = []
-            for i, chunk_content in enumerate(text_chunks):
-                # Skip chunks that are too small, but allow chunks from small documents
-                # If the original content is small, be more lenient with chunk size
-                min_size = self.chunking_config.min_chunk_size
-                if len(content) < 500:  # For small documents, use smaller minimum
-                    min_size = 20  # Much smaller minimum for small documents
-                
-                if len(chunk_content.strip()) < min_size:
-                    continue
-                
-                # Determine chunk type (basic heuristics)
-                chunk_type = self._determine_chunk_type(chunk_content)
-                
-                # Create chunk instance - always use tenant_uuid
-                chunk = create_document_chunk(
-                    document_id=document_id,
-                    tenant_id=tenant_id,  # Keep original for any logging
-                    content=chunk_content.strip(),
-                    chunk_index=i,
-                    chunk_method="fixed_size",
-                    chunk_size=self.chunking_config.chunk_size,
-                    overlap_size=self.chunking_config.chunk_overlap,
-                    chunk_type=chunk_type.value,
-                    tenant_uuid=tenant_uuid  # Always pass the resolved UUID
-                )
-                
-                chunks.append(chunk)
-            
-            logger.info(f"Created {len(chunks)} chunks from content ({len(content)} characters)")
-            
-            return {
-                'success': True,
-                'chunks': chunks,
-                'metadata': {
-                    'original_content_length': len(content),
-                    'total_chunks': len(chunks),
-                    'avg_chunk_size': sum(len(c.content) for c in chunks) / len(chunks) if chunks else 0
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Chunking error: {str(e)}")
-            return {
-                'success': False,
-                'error': f"Chunking failed: {str(e)}"
-            }
-    
-    def _determine_chunk_type(self, content: str) -> ChunkType:
-        """Determine chunk type based on content analysis."""
-        content_lower = content.lower().strip()
-        
-        # Check for title patterns
-        if (len(content) < 100 and 
-            ('\n' not in content or content.count('\n') <= 1) and
-            not content.endswith('.') and
-            content.isupper() or content.istitle()):
-            return ChunkType.TITLE
-        
-        # Check for heading patterns
-        if (content.startswith('#') or 
-            (len(content) < 200 and content.endswith(':')) or
-            content_lower.startswith(('chapter', 'section', 'part'))):
-            return ChunkType.HEADING
-        
-        # Check for list items
-        if (content.strip().startswith(('•', '-', '*', '1.', '2.', '3.')) or
-            content.count('\n•') > 2 or content.count('\n-') > 2):
-            return ChunkType.LIST_ITEM
-        
-        # Check for code blocks
-        if ('```' in content or content.count('    ') > 3 or
-            content_lower.count('def ') > 0 or content_lower.count('function') > 0):
-            return ChunkType.CODE
-        
-        # Check for quotes
-        if content.strip().startswith('"') and content.strip().endswith('"'):
-            return ChunkType.QUOTE
-        
-        # Default to paragraph
-        return ChunkType.PARAGRAPH
-    
-    def update_chunking_config(self, config: ChunkingConfig):
-        """Update chunking configuration."""
-        config.validate()
-        self.chunking_config = config
-        
-        # Update text splitter
-        self.text_splitter = TokenTextSplitter(
-            chunk_size=config.chunk_size,
-            chunk_overlap=config.chunk_overlap,
-            separator=config.separator
-        )
-        
-        logger.info(f"Updated chunking config: chunk_size={config.chunk_size}, overlap={config.chunk_overlap}")
-    
-    def get_supported_extensions(self) -> List[str]:
-        """Get list of supported file extensions."""
-        return list(self.supported_extensions.keys())
-    
-    def is_supported_file(self, file_path: str) -> bool:
-        """Check if file type is supported."""
-        extension = Path(file_path).suffix.lower()
-        return extension in self.supported_extensions
-
-
-# Utility functions
 def create_default_processor() -> DocumentProcessor:
-    """Create document processor with default configuration."""
-    config = ChunkingConfig(**settings.get_chunking_config())
-    return DocumentProcessor(config)
-
-
-def create_optimized_processor(chunk_size: int = 768, overlap: int = 64) -> DocumentProcessor:
-    """Create document processor optimized for embedding models."""
-    config = ChunkingConfig(
-        chunk_size=chunk_size,
-        chunk_overlap=overlap,
-        min_chunk_size=128,
-        max_chunk_size=1024
-    )
-    return DocumentProcessor(config) 
+    """Factory function to create a default DocumentProcessor."""
+    return DocumentProcessor() 

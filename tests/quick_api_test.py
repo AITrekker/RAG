@@ -18,7 +18,8 @@ API_KEY = "dev-api-key-123"  # Default API key
 # Headers for authenticated requests
 AUTH_HEADERS = {
     "X-API-Key": API_KEY,
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    "X-Tenant-Id": "tenant1"
 }
 
 def test_endpoint(method: str, endpoint: str, data: Dict[Any, Any] = None, 
@@ -32,7 +33,7 @@ def test_endpoint(method: str, endpoint: str, data: Dict[Any, Any] = None,
         elif method == "POST":
             if files:
                 # For file uploads, don't include Content-Type in headers
-                headers = {"X-API-Key": API_KEY}
+                headers = {"X-API-Key": API_KEY, "X-Tenant-Id": "tenant1"}
                 response = requests.post(url, headers=headers, files=files, timeout=10)
             else:
                 response = requests.post(url, headers=AUTH_HEADERS, json=data, timeout=10)

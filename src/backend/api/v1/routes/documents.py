@@ -1,50 +1,31 @@
 """
 Document management API endpoints for the Enterprise RAG Platform.
 
-Handles document upload, listing, deletion, and metadata operations.
+Handles document upload, listing, and deletion using a Qdrant-based backend.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Security, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List
 import logging
-import uuid
+import tempfile
 import os
-from datetime import datetime
 from pathlib import Path
 
-from ....db.session import get_db
-from ....middleware.auth import get_current_tenant, require_authentication
-from ....middleware.tenant_context import get_current_tenant_id
-from ....core.document_ingestion import DocumentIngestionPipeline
-from ....utils.tenant_filesystem import TenantFileSystemManager
-from ....utils.vector_store import get_vector_store_manager
-from ....models.api_models import (
-    DocumentResponse, DocumentListResponse, DocumentUploadResponse,
-    DocumentMetadata, DocumentUpdateRequest
+from .....middleware.tenant_context import get_tenant_from_header
+from .....core.document_ingestion import DocumentIngestionPipeline
+from .....utils.vector_store import get_vector_store_manager
+from .....models.api_models import (
+    DocumentListResponse, DocumentUploadResponse, DocumentResponse
 )
-from ..providers import get_document_service
-from ....services.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Dependency to get filesystem manager
-def get_filesystem_manager() -> TenantFileSystemManager:
-    """Dependency to get filesystem manager."""
-    return TenantFileSystemManager()
-
-# Dependency to get document ingestion pipeline
 def get_ingestion_pipeline(
-    tenant_id: str = Security(get_current_tenant),
-    # db: Session = Depends(get_db) - This is no longer needed at the pipeline level
+    tenant_id: str = Depends(get_tenant_from_header),
 ) -> DocumentIngestionPipeline:
-    """Dependency to get document ingestion pipeline."""
-    # The pipeline now gets the vector_store_manager from a global instance
-    # And other managers are initialized within its constructor.
-    # The `db` session is passed to the pipeline's methods, not its constructor.
+    """Dependency to get the document ingestion pipeline for the current tenant."""
     return DocumentIngestionPipeline(
         tenant_id=tenant_id,
         vector_store_manager=get_vector_store_manager()
@@ -54,353 +35,137 @@ def get_ingestion_pipeline(
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
-    tenant_id: str = Security(get_current_tenant),
-    fs_manager: TenantFileSystemManager = Depends(get_filesystem_manager),
+    tenant_id: str = Depends(get_tenant_from_header),
     ingestion_pipeline: DocumentIngestionPipeline = Depends(get_ingestion_pipeline)
 ):
     """
-    Upload a document for processing and indexing.
-    
-    Accepts various file formats (PDF, DOCX, TXT, etc.) and processes them
-    through the document ingestion pipeline.
+    Uploads, processes, and indexes a document in one go.
     """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename cannot be empty.")
+        
+    # Use a temporary file to handle the upload
     try:
-        logger.info(f"Uploading document '{file.filename}' for tenant {tenant_id}")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
         
-        # Validate file
-        if not file.filename:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Filename is required"
-            )
-        
-        # Check file size (10MB limit)
-        if file.size and file.size > 10 * 1024 * 1024:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="File size exceeds 10MB limit"
-            )
-        
-        # Generate document ID
-        document_id = str(uuid.uuid4())
-        
-        # Save file to tenant's upload directory
-        file_path = await fs_manager.save_uploaded_file(
-            tenant_id=tenant_id,
-            file=file,
-            document_id=document_id
-        )
-        
-        # Process document through ingestion pipeline
-        result = await ingestion_pipeline.process_document(
-            file_path=file_path,
-            document_id=document_id,
-            filename=file.filename,
-            content_type=file.content_type
-        )
-        
+        logger.info(f"Temporarily saved uploaded file to {tmp_path}")
+
+        doc_id, chunks = await ingestion_pipeline.ingest_document(file_path=tmp_path)
+
         return DocumentUploadResponse(
-            document_id=document_id,
+            document_id=doc_id,
             filename=file.filename,
             status="processed",
-            chunks_created=result.chunks_created,
-            processing_time=result.processing_time,
-            file_size=file.size or 0,
-            upload_timestamp=datetime.utcnow()
+            chunks_created=len(chunks)
         )
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to upload document for tenant {tenant_id}: {e}")
+        logger.error(f"Failed to upload document for tenant {tenant_id}: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload and process document"
+            status_code=500,
+            detail=f"Failed to upload and process document: {e}"
         )
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 @router.get("/", response_model=DocumentListResponse)
 async def list_documents(
-    page: int = 1,
-    page_size: int = 20,
-    search: Optional[str] = None,
-    tenant_id: str = Security(get_current_tenant),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_from_header),
+    vector_store_manager = Depends(get_vector_store_manager)
 ):
     """
-    List all documents for the current tenant.
-    
-    Returns paginated list of documents with optional search filtering.
+    Lists all documents for the current tenant by fetching metadata from Qdrant.
+    NOTE: This can be inefficient and is intended for simple overviews.
     """
     try:
-        logger.info(f"Listing documents for tenant {tenant_id}, page {page}")
+        collection_name = f"tenant_{tenant_id}_documents"
         
-        # Import the model here to avoid circular imports
-        from ....models.tenant import TenantDocument
+        # This is a simplified approach. For production, a more robust
+        # metadata storage or a different query strategy would be needed.
+        response, _ = vector_store_manager.client.scroll(
+            collection_name=collection_name,
+            limit=1000, # Adjust limit as needed
+            with_payload=["document_id", "source"]
+        )
         
-        # Build query
-        query = db.query(TenantDocument).filter(TenantDocument.tenant_id == tenant_id)
-        
-        # Apply search filter if provided
-        if search:
-            search_term = f"%{search.lower()}%"
-            query = query.filter(TenantDocument.filename.ilike(search_term))
-        
-        # Get total count for pagination
-        total_count = query.count()
-        
-        # Apply pagination and get results
-        documents = query.order_by(TenantDocument.created_at.desc())\
-                        .offset((page - 1) * page_size)\
-                        .limit(page_size)\
-                        .all()
-        
-        # Convert to response model
-        document_responses = []
-        for doc in documents:
-            document_responses.append(DocumentResponse(
-                document_id=doc.document_id,
-                filename=doc.filename,
-                upload_timestamp=doc.created_at,
-                file_size=doc.file_size_bytes,
-                status=doc.status,
-                chunks_count=doc.chunk_count,
-                content_type=doc.mime_type,
-                metadata={
-                    "document_type": doc.document_type,
-                    "file_hash": doc.file_hash,
-                    "file_path": doc.file_path,
-                    "embedding_model": doc.embedding_model,
-                    "processed_at": doc.processed_at.isoformat() if doc.processed_at else None,
-                    "error_message": doc.error_message
-                }
-            ))
-        
+        # Deduplicate documents based on document_id
+        documents_map = {}
+        for point in response:
+            doc_id = point.payload.get("document_id")
+            if doc_id and doc_id not in documents_map:
+                documents_map[doc_id] = DocumentResponse(
+                    document_id=doc_id,
+                    filename=point.payload.get("source"),
+                    status="processed"
+                )
+
+        doc_list = list(documents_map.values())
+
         return DocumentListResponse(
-            documents=document_responses,
-            total_count=total_count,
-            page=page,
-            page_size=page_size
+            documents=doc_list,
+            total_count=len(doc_list)
         )
-        
     except Exception as e:
-        logger.error(f"Failed to list documents for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve document list"
-        )
+        # This can happen if the collection doesn't exist yet
+        if "not found" in str(e).lower():
+            return DocumentListResponse(documents=[], total_count=0)
+            
+        logger.error(f"Failed to list documents for tenant {tenant_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve document list.")
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: str,
-    tenant_id: str = Security(get_current_tenant),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_from_header),
+    vector_store_manager = Depends(get_vector_store_manager)
 ):
     """
-    Get detailed information about a specific document.
-    
-    Returns comprehensive document information including metadata and processing status.
+    Gets metadata for a specific document by its ID.
     """
     try:
-        logger.info(f"Retrieving document {document_id} for tenant {tenant_id}")
+        collection_name = f"tenant_{tenant_id}_documents"
         
-        # TODO: Implement actual document retrieval from database
-        # For now, return mock data or 404
-        
-        if document_id.startswith("doc-"):
-            return DocumentResponse(
-                document_id=document_id,
-                filename=f"document_{document_id}.pdf",
-                upload_timestamp=datetime.utcnow(),
-                file_size=2048,
-                status="processed",
-                chunks_count=15,
-                content_type="application/pdf",
-                metadata={"page_count": 8}
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found"
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to retrieve document {document_id} for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve document information"
+        # Scroll to find one point related to this document_id to fetch metadata
+        response, _ = vector_store_manager.client.scroll(
+            collection_name=collection_name,
+            scroll_filter=models.Filter(
+                must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
+            ),
+            limit=1,
+            with_payload=True
         )
 
+        if not response:
+            raise HTTPException(status_code=404, detail="Document not found")
 
-@router.put("/{document_id}", response_model=DocumentResponse)
-async def update_document(
-    document_id: str,
-    request: DocumentUpdateRequest,
-    tenant_id: str = Security(get_current_tenant),
-    db: Session = Depends(get_db)
-):
-    """
-    Update document metadata.
-    
-    Allows updating document metadata such as tags, description, etc.
-    """
-    try:
-        logger.info(f"Updating document {document_id} for tenant {tenant_id}")
-        
-        # TODO: Implement actual document update in database
-        
+        payload = response[0].payload
         return DocumentResponse(
             document_id=document_id,
-            filename=f"updated_document_{document_id}.pdf",
-            upload_timestamp=datetime.utcnow(),
-            file_size=2048,
-            status="processed",
-            chunks_count=15,
-            content_type="application/pdf",
-            metadata=request.metadata or {}
+            filename=payload.get("source"),
+            status="processed"
         )
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update document {document_id} for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update document"
-        )
+        logger.error(f"Failed to retrieve document {document_id} for tenant {tenant_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve document information.")
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
-    doc_service: DocumentService = Depends(get_document_service),
-    tenant_id: str = Security(get_current_tenant)
+    ingestion_pipeline: DocumentIngestionPipeline = Depends(get_ingestion_pipeline)
 ):
     """
-    Delete a document and its associated data.
-    
-    This endpoint is now a thin wrapper around the DocumentService.
+    Deletes a document and all its associated chunks from the vector store.
     """
     try:
-        doc_service.delete_document(document_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        logger.info(f"Deleting document {document_id} for tenant {ingestion_pipeline.tenant_id}")
+        ingestion_pipeline.delete_document(document_id)
     except Exception as e:
-        logger.error(f"API: Failed to delete document {document_id}: {e}")
-        # Re-raising as a generic 500 error to avoid leaking implementation details
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while deleting the document."
-        )
-
-
-@router.delete("/clear", status_code=status.HTTP_204_NO_CONTENT)
-async def clear_all_documents(
-    doc_service: DocumentService = Depends(get_document_service),
-    tenant_id: str = Security(get_current_tenant)
-):
-    """
-    Delete all documents for the current tenant.
-    
-    This endpoint is now a thin wrapper around the DocumentService.
-    """
-    try:
-        deleted_count = doc_service.clear_all_documents()
-        logger.info(f"API: Cleared {deleted_count} documents successfully.")
-    except Exception as e:
-        logger.error(f"API: Failed to clear all documents: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while clearing documents."
-        )
-
-
-@router.get("/{document_id}/download")
-async def download_document(
-    document_id: str,
-    tenant_id: str = Security(get_current_tenant),
-    fs_manager: TenantFileSystemManager = Depends(get_filesystem_manager)
-):
-    """
-    Download the original document file.
-    
-    Returns the original uploaded file for download.
-    """
-    try:
-        logger.info(f"Downloading document {document_id} for tenant {tenant_id}")
-        
-        # TODO: Implement actual file download
-        # For now, return 404
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document file not found"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to download document {document_id} for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to download document"
-        )
-
-
-@router.get("/{document_id}/chunks")
-async def get_document_chunks(
-    document_id: str,
-    page: int = 1,
-    page_size: int = 20,
-    tenant_id: str = Security(get_current_tenant),
-    db: Session = Depends(get_db)
-):
-    """
-    Get chunks/segments of a specific document.
-    
-    Returns paginated list of document chunks with their embeddings metadata.
-    """
-    try:
-        logger.info(f"Retrieving chunks for document {document_id}, tenant {tenant_id}")
-        
-        # TODO: Implement actual chunk retrieval from database
-        # For now, return mock data
-        
-        mock_chunks = [
-            {
-                "chunk_id": f"chunk-{i}",
-                "document_id": document_id,
-                "chunk_index": i,
-                "text": f"This is chunk {i} of the document...",
-                "page_number": (i // 3) + 1,
-                "start_char": i * 100,
-                "end_char": (i + 1) * 100,
-                "embedding_vector": None,  # Don't return actual vectors
-                "metadata": {"chunk_type": "paragraph"}
-            }
-            for i in range(1, 16)
-        ]
-        
-        # Apply pagination
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        paginated_chunks = mock_chunks[start_idx:end_idx]
-        
-        return {
-            "chunks": paginated_chunks,
-            "total_count": len(mock_chunks),
-            "page": page,
-            "page_size": page_size
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to retrieve chunks for document {document_id}, tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve document chunks"
-        ) 
+        logger.error(f"Failed to delete document {document_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete document.") 

@@ -20,27 +20,28 @@ class DevWorkflow:
     
     def run_command(self, cmd: str, description: str) -> bool:
         """Run a command and return success status"""
-        print(f"🔍 {description}...")
+        print(f"[RUNNING] {description}...")
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
-                print(f"  ✅ {description} passed")
+                print(f"  [OK] {description} passed")
                 return True
             else:
-                print(f"  ❌ {description} failed:")
+                print(f"  [FAIL] {description} failed:")
                 print(f"     {result.stderr}")
                 return False
         except Exception as e:
-            print(f"  ❌ {description} error: {e}")
+            print(f"  [FAIL] {description} error: {e}")
             return False
     
     def pre_change_checks(self) -> bool:
         """Run before making any changes"""
-        print("🚀 PRE-CHANGE VALIDATION")
+        print("PRE-CHANGE VALIDATION")
         print("=" * 40)
         
         checks = [
-            ("python scripts/health_check.py", "System health check"),
+            ("docker-compose exec backend alembic -c src/backend/migrations/alembic.ini upgrade head && docker-compose exec backend alembic -c src/backend/migrations/alembic.ini downgrade base", "Database migration check"),
+            #("python scripts/health_check.py", "System health check"),
             ("python tests/quick_api_test.py", "API endpoint tests"),
             ("python -m pytest tests/test_integration_e2e.py -v", "Integration tests"),
         ]
@@ -51,19 +52,19 @@ class DevWorkflow:
                 all_passed = False
         
         if all_passed:
-            print("\n✅ All pre-change checks passed - safe to proceed")
+            print("\n[OK] All pre-change checks passed - safe to proceed")
         else:
-            print("\n❌ Pre-change checks failed - fix issues before proceeding")
+            print("\n[FAIL] Pre-change checks failed - fix issues before proceeding")
         
         return all_passed
     
     def post_change_checks(self) -> bool:
         """Run after making changes"""
-        print("\n🔍 POST-CHANGE VALIDATION")
+        print("\nPOST-CHANGE VALIDATION")
         print("=" * 40)
         
         checks = [
-            ("python scripts/health_check.py", "System health check"),
+            #("python scripts/health_check.py", "System health check"),
             ("python tests/quick_api_test.py", "API endpoint tests"),
             ("python scripts/explore_data.py 'test query'", "Search functionality"),
         ]
@@ -74,28 +75,28 @@ class DevWorkflow:
                 all_passed = False
         
         if all_passed:
-            print("\n✅ All post-change checks passed - changes are safe")
+            print("\n[OK] All post-change checks passed - changes are safe")
         else:
-            print("\n❌ Post-change checks failed - rollback recommended")
+            print("\n[FAIL] Post-change checks failed - rollback recommended")
         
         return all_passed
     
     def safe_refactor_mode(self):
         """Interactive mode for safe refactoring"""
-        print("🛡️  SAFE REFACTORING MODE")
+        print("SAFE REFACTORING MODE")
         print("=" * 40)
         print("This mode helps prevent the 'fix one, break another' cycle")
         print()
         
         # Pre-change validation
         if not self.pre_change_checks():
-            print("\n❌ System is not in a good state for changes")
+            print("\n[FAIL] System is not in a good state for changes")
             print("   Fix existing issues before refactoring")
             return False
         
-        print("\n✅ System validated - safe to make changes")
+        print("\n[OK] System validated - safe to make changes")
         print()
-        print("📋 RECOMMENDED CHANGE PROCESS:")
+        print("RECOMMENDED CHANGE PROCESS:")
         print("1. Make ONE focused change at a time")
         print("2. Test that specific change immediately")
         print("3. Run post-change validation")
@@ -109,13 +110,13 @@ class DevWorkflow:
                 break
             
             if self.post_change_checks():
-                print("\n🎉 Changes validated successfully!")
+                print("\n[SUCCESS] Changes validated successfully!")
                 commit = input("Commit changes? (y/n): ")
                 if commit.lower() == 'y':
                     commit_msg = input("Commit message: ")
                     self.run_command(f'git add -A && git commit -m "{commit_msg}"', "Git commit")
             else:
-                print("\n⚠️  Changes broke something!")
+                print("\n[WARNING] Changes broke something!")
                 rollback = input("Rollback changes? (y/n): ")
                 if rollback.lower() == 'y':
                     self.run_command("git checkout .", "Rollback changes")

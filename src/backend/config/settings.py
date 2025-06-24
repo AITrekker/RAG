@@ -33,28 +33,9 @@ class Settings(BaseSettings):
         env="ALLOWED_HOSTS"
     )
     
-    # Database settings
-    database_url: str = Field(
-        default="postgresql://rag_user:rag_password@localhost:5432/rag_database", 
-        env="DATABASE_URL"
-    )
-    database_pool_size: int = Field(default=10, env="DATABASE_POOL_SIZE")
-    database_max_overflow: int = Field(default=20, env="DATABASE_MAX_OVERFLOW")
-    
-    # Production-ready PostgreSQL settings
-    database_pool_timeout: int = Field(default=30, env="DATABASE_POOL_TIMEOUT")
-    database_pool_recycle: int = Field(default=3600, env="DATABASE_POOL_RECYCLE")  # 1 hour
-    database_pool_pre_ping: bool = Field(default=True, env="DATABASE_POOL_PRE_PING")
-    database_statement_timeout: int = Field(default=60000, env="DATABASE_STATEMENT_TIMEOUT")  # 60 seconds
-    database_lock_timeout: int = Field(default=30000, env="DATABASE_LOCK_TIMEOUT")  # 30 seconds
-    database_idle_in_transaction_timeout: int = Field(default=300000, env="DATABASE_IDLE_IN_TRANSACTION_TIMEOUT")  # 5 minutes
-    database_ssl_mode: str = Field(default="prefer", env="DATABASE_SSL_MODE")
-    database_connect_timeout: int = Field(default=10, env="DATABASE_CONNECT_TIMEOUT")
-    
-    # Database backup and maintenance settings
-    database_backup_retention_days: int = Field(default=30, env="DATABASE_BACKUP_RETENTION_DAYS")
-    database_maintenance_window: str = Field(default="02:00-04:00", env="DATABASE_MAINTENANCE_WINDOW")
-    enable_database_logging: bool = Field(default=True, env="ENABLE_DATABASE_LOGGING")
+    # Qdrant settings
+    qdrant_url: str = Field(default="http://localhost:6333", env="QDRANT_URL")
+    qdrant_api_key: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
     
     # Redis settings (for caching and rate limiting)
     redis_url: Optional[str] = Field(default=None, env="REDIS_URL")
@@ -127,28 +108,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-    
-    def get_database_url(self) -> str:
-        """Get the complete database URL."""
-        return self.database_url
-    
-    def get_database_config(self) -> dict:
-        """Get production-ready database configuration."""
-        return {
-            "url": self.database_url,
-            "pool_size": self.database_pool_size,
-            "max_overflow": self.database_max_overflow,
-            "pool_timeout": self.database_pool_timeout,
-            "pool_recycle": self.database_pool_recycle,
-            "pool_pre_ping": self.database_pool_pre_ping,
-            "connect_args": {
-                "connect_timeout": self.database_connect_timeout,
-                "options": f"-c statement_timeout={self.database_statement_timeout}ms "
-                          f"-c lock_timeout={self.database_lock_timeout}ms "
-                          f"-c idle_in_transaction_session_timeout={self.database_idle_in_transaction_timeout}ms",
-                "sslmode": self.database_ssl_mode
-            }
-        }
     
     def get_vector_store_config(self) -> dict:
         """Get vector store configuration."""
@@ -292,7 +251,7 @@ def get_test_settings() -> Settings:
     """Get test-specific settings with test database."""
     settings = get_settings()
     # Override for testing - use a separate test database
-    settings.database_url = "postgresql://rag_user:rag_password@localhost:5432/rag_test_database"
+    settings.qdrant_url = "http://localhost:6333"
     settings.vector_store_path = "./test_chroma_db"
     settings.documents_path = "./test_documents"
     settings.mock_llm_responses = True
