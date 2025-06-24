@@ -17,7 +17,19 @@ openai==1.89.0
 chromadb==1.0.13
 
 # Database
-sqlalchemy==2.0.41
+# sqlalchemy==2.0.41
 alembic>=1.12.0
 psycopg2-binary>=2.9.0
-asyncpg>=0.28.0 
+asyncpg>=0.28.0
+
+# LlamaIndex Embeddings & LLMs
+llama-index-embeddings-huggingface
+llama-index-llms-huggingface
+llama-index-vector-stores-qdrant
+qdrant-client
+fastapi
+uvicorn
+python-dotenv
+redis
+schedule
+watchdog 

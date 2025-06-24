@@ -15,10 +15,10 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.backend.db.session import get_db
+# from src.backend.db.session import get_db
 from src.backend.utils.vector_store import get_vector_store_manager
 from src.backend.core.embeddings import get_embedding_service
-from sqlalchemy import text
+# from sqlalchemy import text
 import numpy as np
 
 def show_overview():
@@ -27,27 +27,31 @@ def show_overview():
     print("=" * 60)
     
     try:
-        db = next(get_db())
+        # db = next(get_db())
         
-        # Quick stats
-        doc_count = db.execute(text("SELECT COUNT(*) FROM documents")).scalar()
-        chunk_count = db.execute(text("SELECT COUNT(*) FROM document_chunks")).scalar()
-        tenant_count = db.execute(text("SELECT COUNT(*) FROM tenants")).scalar()
+        # # Quick stats
+        # doc_count = db.execute(text("SELECT COUNT(*) FROM documents")).scalar()
+        # chunk_count = db.execute(text("SELECT COUNT(*) FROM document_chunks")).scalar()
+        # tenant_count = db.execute(text("SELECT COUNT(*) FROM tenants")).scalar()
         
-        print(f"Quick Stats:")
-        print(f"   Documents: {doc_count}")
-        print(f"   Chunks: {chunk_count}")
-        print(f"   Tenants: {tenant_count}")
+        # print(f"Quick Stats:")
+        # print(f"   Documents: {doc_count}")
+        # print(f"   Chunks: {chunk_count}")
+        # print(f"   Tenants: {tenant_count}")
         
         # Vector store info
         vector_manager = get_vector_store_manager()
-        collections = vector_manager.client.list_collections()
-        total_vectors = sum(collection.count() for collection in collections)
+        collections = vector_manager.client.get_collections().collections
         
+        total_vectors = 0
+        for collection in collections:
+            count_result = vector_manager.client.count(collection_name=collection.name, exact=True)
+            total_vectors += count_result.count
+
         print(f"   Vector Collections: {len(collections)}")
         print(f"   Total Vectors: {total_vectors}")
         
-        db.close()
+        # db.close()
         
     except Exception as e:
         print(f"Error getting overview: {e}")
@@ -58,38 +62,39 @@ def show_documents_detailed():
     print("=" * 50)
     
     try:
-        db = next(get_db())
+        # db = next(get_db())
         
-        # Get documents with tenant names
-        result = db.execute(text("""
-            SELECT d.filename, d.file_size, d.status, 
-                   t.name as tenant_name, d.created_at,
-                   COUNT(dc.id) as chunk_count
-            FROM documents d
-            JOIN tenants t ON d.tenant_id = t.id
-            LEFT JOIN document_chunks dc ON d.id = dc.document_id
-            GROUP BY d.id, d.filename, d.file_size, d.status, t.name, d.created_at
-            ORDER BY d.created_at DESC 
-            LIMIT 10
-        """))
+        # # Get documents with tenant names
+        # result = db.execute(text("""
+        #     SELECT d.filename, d.file_size, d.status, 
+        #            t.name as tenant_name, d.created_at,
+        #            COUNT(dc.id) as chunk_count
+        #     FROM documents d
+        #     JOIN tenants t ON d.tenant_id = t.id
+        #     LEFT JOIN document_chunks dc ON d.id = dc.document_id
+        #     GROUP BY d.id, d.filename, d.file_size, d.status, t.name, d.created_at
+        #     ORDER BY d.created_at DESC 
+        #     LIMIT 10
+        # """))
         
-        documents = result.fetchall()
+        # documents = result.fetchall()
         
-        if documents:
-            print(f"Recent documents:")
-            for filename, file_size, status, tenant_name, created_at, chunk_count in documents:
-                size_kb = file_size / 1024 if file_size else 0
-                print(f"  {filename}")
-                print(f"     Tenant: {tenant_name}")
-                print(f"     Size: {size_kb:.1f} KB")
-                print(f"     Status: {status}")
-                print(f"     Chunks: {chunk_count}")
-                print(f"     Created: {created_at.strftime('%Y-%m-%d %H:%M')}")
-                print()
-        else:
-            print("No documents found.")
+        # if documents:
+        #     print(f"Recent documents:")
+        #     for filename, file_size, status, tenant_name, created_at, chunk_count in documents:
+        #         size_kb = file_size / 1024 if file_size else 0
+        #         print(f"  {filename}")
+        #         print(f"     Tenant: {tenant_name}")
+        #         print(f"     Size: {size_kb:.1f} KB")
+        #         print(f"     Status: {status}")
+        #         print(f"     Chunks: {chunk_count}")
+        #         print(f"     Created: {created_at.strftime('%Y-%m-%d %H:%M')}")
+        #         print()
+        # else:
+        #     print("No documents found.")
             
-        db.close()
+        # db.close()
+        print("Note: This function needs to be rewritten to fetch data from Qdrant.")
         
     except Exception as e:
         print(f"Error querying documents: {e}")
@@ -101,20 +106,36 @@ def show_embeddings_sample():
     
     try:
         vector_manager = get_vector_store_manager()
-        collections = vector_manager.client.list_collections()
+        collections_response = vector_manager.client.get_collections()
+        collections = collections_response.collections
         
+        if not collections:
+            print("No collections found.")
+            return
+
         # Find collection with most documents
-        best_collection = max(collections, key=lambda c: c.count(), default=None)
-        
-        if best_collection and best_collection.count() > 0:
-            print(f"Collection: {best_collection.name} ({best_collection.count()} documents)")
+        best_collection_name = ""
+        max_count = -1
+        for collection in collections:
+            count_result = vector_manager.client.count(collection_name=collection.name, exact=True)
+            if count_result.count > max_count:
+                max_count = count_result.count
+                best_collection_name = collection.name
+
+        if best_collection_name and max_count > 0:
+            print(f"Collection: {best_collection_name} ({max_count} documents)")
             
             # Get sample with embedding
-            sample = best_collection.get(limit=1, include=['documents', 'embeddings', 'metadatas'])
+            sample, _ = vector_manager.client.scroll(
+                collection_name=best_collection_name,
+                limit=1,
+                with_payload=True,
+                with_vectors=True
+            )
             
-            if sample.get('embeddings') and len(sample['embeddings']) > 0:
-                embedding = sample['embeddings'][0]
-                print(f"  Document ID: {sample['ids'][0]}")
+            if sample and sample[0].vector:
+                embedding = sample[0].vector
+                print(f"  Document ID: {sample[0].id}")
                 print(f"  Embedding dimensions: {len(embedding)}")
                 print(f"  Sample values: {[round(x, 4) for x in embedding[:5]]} ... {[round(x, 4) for x in embedding[-3:]]}")
                 
@@ -139,36 +160,45 @@ def test_search(query="What is the company mission?"):
         vector_manager = get_vector_store_manager()
         embedding_service = get_embedding_service()
         
+        collections_response = vector_manager.client.get_collections()
+        collections = collections_response.collections
+
+        if not collections:
+            print("No collections with data available for search.")
+            return
+
         # Find best collection
-        collections = vector_manager.client.list_collections()
-        best_collection = max(collections, key=lambda c: c.count(), default=None)
-        
-        if not best_collection or best_collection.count() == 0:
+        best_collection_name = ""
+        max_count = -1
+        for collection in collections:
+            count_result = vector_manager.client.count(collection_name=collection.name, exact=True)
+            if count_result.count > max_count:
+                max_count = count_result.count
+                best_collection_name = collection.name
+
+        if not best_collection_name:
             print("No collections with data available for search.")
             return
             
-        print(f"Searching in: {best_collection.name}")
+        print(f"Searching in: {best_collection_name}")
         
         # Create query embedding
-        query_embedding = embedding_service.encode_texts([query])[0]
+        query_embedding = embedding_service.encode_texts([query])[0].tolist()
         
         # Search
-        results = best_collection.query(
-            query_embeddings=[query_embedding.tolist()],
-            n_results=3,
-            include=['documents', 'distances']
+        results = vector_manager.similarity_search(
+            tenant_id="default",  # Assuming a default tenant for this script
+            query_embedding=query_embedding,
+            top_k=3
         )
         
-        if results['ids'] and results['ids'][0]:
-            print(f"Top {len(results['ids'][0])} results:")
-            for i, (doc_id, doc, distance) in enumerate(zip(
-                results['ids'][0], 
-                results['documents'][0], 
-                results['distances'][0]
-            )):
-                similarity = 1 - distance
+        if results:
+            print(f"Top {len(results)} results:")
+            for i, result in enumerate(results):
+                similarity = result.score
+                content = result.payload.get('text', 'N/A')
                 print(f"\n  {i+1}. Similarity: {similarity:.3f}")
-                print(f"     Content: {doc[:100]}...")
+                print(f"     Content: {content[:100]}...")
         else:
             print("No results found.")
             
@@ -180,18 +210,14 @@ def show_direct_access_info():
     print("\nDirect Database Access")
     print("=" * 50)
     
-    print("PostgreSQL (Document metadata):")
-    print("   Connection: postgresql://rag_user:rag_password@localhost:5432/rag_database")
-    print("   Docker exec: docker exec -it rag_postgres psql -U rag_user -d rag_database")
+    print("Qdrant Vector Database (Embeddings & Metadata):")
+    print("   Web UI / API: http://localhost:6333/dashboard")
+    print("   gRPC port: 6334")
     print()
-    print("Chroma Vector Store (Embeddings):")
-    print("   HTTP API: http://localhost:8000")
-    print("   Admin UI: Access via Chroma client")
-    print()
-    print("Useful SQL queries:")
-    print("   SELECT filename, status FROM documents ORDER BY created_at DESC;")
-    print("   SELECT t.name, COUNT(d.id) FROM tenants t LEFT JOIN documents d ON t.id = d.tenant_id GROUP BY t.name;")
-    print("   SELECT content FROM document_chunks WHERE document_id = 'your-doc-id';")
+    print("Useful Qdrant Client commands:")
+    print("   client.get_collections()")
+    print("   client.scroll(collection_name='your_collection', limit=10)")
+    print("   client.count(collection_name='your_collection', exact=True)")
 
 def main():
     """Main function with menu options."""

@@ -64,8 +64,7 @@ def check_dependencies():
         'uvicorn': 'uvicorn',
         'transformers': 'transformers',
         'llama-index': 'llama_index',
-        'sqlalchemy': 'sqlalchemy',
-        'chromadb': 'chromadb',
+        'qdrant-client': 'qdrant_client',
         'python-dotenv': 'dotenv'
     }
     
@@ -93,8 +92,8 @@ def setup_environment(log_level="INFO"):
     # Default environment variables
     env_vars = {
         'PYTHONPATH': str(project_root),
-        'DATABASE_URL': 'postgresql://rag_user:rag_password@localhost:5432/rag_database',
-        # Using chroma_db and tenant-specific uploads instead of global directories
+        'QDRANT_URL': 'http://localhost:6333',
+        # Using tenant-specific uploads instead of global directories
         'HF_HOME': str(project_root / 'cache' / 'transformers'),
         'HF_HUB_DISABLE_SYMLINKS_WARNING': '1',
         'LOG_LEVEL': log_level.upper(),  # Set from command line argument

@@ -97,10 +97,11 @@ sequenceDiagram
 
 - **Backend:** Python, FastAPI
 - **RAG & ML:** LlamaIndex, Hugging Face `transformers`, PyTorch
-- **Database:** SQLAlchemy, Alembic (for migrations), PostgreSQL
-- **Vector Store:** Chroma / FAISS (to be decided)
+- **Vector Store & Database:** Qdrant
+- **Cache:** Redis
+- **Async Tasking:** Python `asyncio`
 - **Deployment:** Docker, Docker Compose
-- **Frontend:** React, TypeScript (as per plan)
+- **Frontend:** React, TypeScript, Vite
 
 ## 5. Backend API Structure
 
@@ -236,3 +237,11 @@ To provide full visibility and traceability, the system includes a comprehensive
     *   Any error messages associated with a failure.
 
 This creates a detailed and permanent record of all data ingestion activities within the system, turning the previously "black box" sync process into a fully transparent and debuggable one.
+
+## 10. Backend Directory Structure
+
+- **`src/backend/core`**: Core business logic, including services for syncing, auditing, and tenant management.
+- **`src/backend/models`**: Defines Pydantic models for API request/response validation.
+- **`src/backend/api`**: FastAPI routing and endpoints.
+- **`src/backend/services`**: Business logic for interacting with documents, tenants, etc.
+- **`src/backend/utils`**: Core utilities including the `VectorStoreManager` for Qdrant.

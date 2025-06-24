@@ -22,11 +22,11 @@ import threading
 from contextlib import contextmanager
 
 from fastapi import Request, Response
-from sqlalchemy.orm import Session
-from sqlalchemy import text
+# from sqlalchemy.orm import Session
+# from sqlalchemy import text
 
 from ..config.settings import get_settings
-from ..db.session import get_db
+# from ..db.session import get_db
 
 settings = get_settings()
 
@@ -381,10 +381,7 @@ class SystemMonitor:
         # Database connections (if possible)
         active_connections = 0
         try:
-            db = next(get_db())
-            result = db.execute(text("SELECT count(*) FROM pg_stat_activity WHERE state = 'active'"))
-            active_connections = result.scalar()
-            db.close()
+            pass  # DB connection count optional
         except Exception:
             pass  # DB connection count optional
             

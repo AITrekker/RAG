@@ -9,7 +9,7 @@ import logging
 
 from src.backend.core.rag_pipeline import get_rag_pipeline, RAGPipeline
 from src.backend.models.api_models import QueryRequest, QueryResponse, SourceCitation
-from src.backend.middleware.tenant_context import get_tenant_from_header
+from src.backend.middleware.auth import require_authentication
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.post("", response_model=QueryResponse)
 async def process_query(
     request: QueryRequest,
-    tenant_id: str = Depends(get_tenant_from_header),
+    tenant: str = Depends(require_authentication),
     rag_pipeline: RAGPipeline = Depends(get_rag_pipeline)
 ):
     """
@@ -27,12 +27,12 @@ async def process_query(
     if not request.query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    logger.info(f"Received query from tenant '{tenant_id}': {request.query}")
+    logger.info(f"Received query from tenant '{tenant}': {request.query}")
     
     try:
         rag_response = await rag_pipeline.process_query(
             query=request.query, 
-            tenant_id=tenant_id
+            tenant_id=tenant
         )
         
         # The rag_response.sources should already be in the correct format,
@@ -58,5 +58,5 @@ async def process_query(
             llm_metadata=rag_response.llm_metadata
         )
     except Exception as e:
-        logger.error(f"Error processing query for tenant '{tenant_id}': {e}", exc_info=True)
+        logger.error(f"Error processing query for tenant '{tenant}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to process query.") 

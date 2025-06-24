@@ -34,29 +34,17 @@ class VectorStoreManager:
             logger.error(f"Failed to connect to Qdrant: {e}")
             raise
 
-    def get_collection_for_tenant(self, tenant_id: str, embedding_size: int) -> str:
+    def get_collection_for_tenant(self, tenant_id: str, embedding_size: int) -> models.CollectionInfo:
         """
-        Ensures a collection exists for the given tenant. If not, it creates one.
-
-        Args:
-            tenant_id: The ID of the tenant.
-            embedding_size: The dimension of the vectors to be stored.
-
-        Returns:
-            The name of the collection for the tenant.
+        Retrieves or creates a Qdrant collection for a specific tenant.
         """
-        collection_name = f"tenant_{tenant_id}_documents"
-        try:
-            self.client.get_collection(collection_name=collection_name)
-            logger.debug(f"Collection '{collection_name}' already exists.")
-        except Exception:
-            logger.info(f"Collection '{collection_name}' not found. Creating new collection.")
-            self.client.recreate_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(size=embedding_size, distance=Distance.COSINE),
-            )
-            logger.info(f"Successfully created collection '{collection_name}'.")
-        return collection_name
+        collection_name = self._get_collection_name_for_tenant(tenant_id)
+        self.ensure_collection_exists(collection_name, embedding_size)
+        return self.client.get_collection(collection_name=collection_name)
+
+    def get_collection_name_for_tenant(self, tenant_id: str) -> str:
+        """Gets the Qdrant collection name for a given tenant."""
+        return self._get_collection_name_for_tenant(tenant_id)
 
     def add_documents(
         self,
@@ -72,7 +60,7 @@ class VectorStoreManager:
             points: A list of Qdrant PointStructs to add.
             embedding_size: The dimension of the vectors, used if collection needs creation.
         """
-        collection_name = self.get_collection_for_tenant(tenant_id, embedding_size)
+        collection_name = self._get_collection_name_for_tenant(tenant_id)
         
         operation_info = self.client.upsert(
             collection_name=collection_name,
@@ -101,7 +89,7 @@ class VectorStoreManager:
         Returns:
             A list of search results.
         """
-        collection_name = f"tenant_{tenant_id}_documents"
+        collection_name = self._get_collection_name_for_tenant(tenant_id)
         
         search_results = self.client.search(
             collection_name=collection_name,
@@ -120,13 +108,14 @@ class VectorStoreManager:
             tenant_id: The ID of the tenant.
             point_ids: A list of point IDs to delete.
         """
-        collection_name = f"tenant_{tenant_id}_documents"
+        collection_name = self._get_collection_name_for_tenant(tenant_id)
         
         self.client.delete(
             collection_name=collection_name,
             points_selector=models.PointIdsList(points=point_ids),
             wait=True,
         )
+        logger.info(f"Deleted {len(point_ids)} points from collection '{collection_name}'.")
 
     def delete_tenant_collection(self, tenant_id: str) -> bool:
         """
@@ -138,7 +127,7 @@ class VectorStoreManager:
         Returns:
             True if deletion was successful, False otherwise.
         """
-        collection_name = f"tenant_{tenant_id}_documents"
+        collection_name = self._get_collection_name_for_tenant(tenant_id)
         try:
             result = self.client.delete_collection(collection_name=collection_name)
             if result:
@@ -147,6 +136,42 @@ class VectorStoreManager:
         except Exception as e:
             logger.error(f"Error deleting collection '{collection_name}': {e}")
             return False
+
+    def delete_documents_by_path(self, tenant_id: str, file_path: str):
+        """Deletes all points associated with a specific file_path from a tenant's collection."""
+        collection_name = self._get_collection_name_for_tenant(tenant_id)
+        logger.info(f"Attempting to delete all points for file '{file_path}' from collection '{collection_name}'.")
+
+        # Use a filter to select points where the metadata contains the matching file_path
+        must_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="metadata.file_path",
+                    match=models.MatchValue(value=file_path)
+                )
+            ]
+        )
+
+        self.client.delete(
+            collection_name=collection_name,
+            points_selector=must_filter,
+        )
+        logger.info(f"Delete operation completed for file '{file_path}' in collection '{collection_name}'.")
+
+    def ensure_collection_exists(self, collection_name: str, vector_size: int):
+        """Creates a collection if it doesn't already exist."""
+        try:
+            self.client.get_collection(collection_name=collection_name)
+        except Exception:
+            self.client.create_collection(
+                collection_name=collection_name,
+                vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE)
+            )
+            logger.info(f"Created new collection: {collection_name}")
+
+    def _get_collection_name_for_tenant(self, tenant_id: str) -> str:
+        """Gets the Qdrant collection name for a given tenant."""
+        return f"tenant_{tenant_id}_documents"
 
 # Singleton instance of the VectorStoreManager
 _vector_store_manager_instance: Optional[VectorStoreManager] = None

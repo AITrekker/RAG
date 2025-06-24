@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     
     # Application settings
     app_name: str = Field(default="Enterprise RAG Platform", env="APP_NAME")
+    project_name: str = Field(default="Enterprise RAG Platform", env="PROJECT_NAME")
     debug: bool = Field(default=False, env="DEBUG")
     version: str = Field(default="1.0.0", env="VERSION")
     
@@ -40,12 +41,6 @@ class Settings(BaseSettings):
     # Redis settings (for caching and rate limiting)
     redis_url: Optional[str] = Field(default=None, env="REDIS_URL")
     redis_password: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
-    
-    # Vector store settings
-    vector_store_type: str = Field(default="chroma", env="VECTOR_STORE_TYPE")
-    vector_store_path: str = Field(default="./data/chroma_db", env="VECTOR_STORE_PATH")
-    vector_store_host: Optional[str] = Field(default=None, env="VECTOR_STORE_HOST")
-    vector_store_port: Optional[int] = Field(default=None, env="VECTOR_STORE_PORT")
     
     # Embedding model settings
     embedding_model: str = Field(
@@ -79,6 +74,7 @@ class Settings(BaseSettings):
     temp_path: str = Field(default="./temp", env="TEMP_PATH")
     
     # API settings
+    api_v1_str: str = Field(default="/api/v1", env="API_V1_STR")
     api_rate_limit_per_minute: int = Field(default=60, env="API_RATE_LIMIT_PER_MINUTE")
     api_rate_limit_per_hour: int = Field(default=1000, env="API_RATE_LIMIT_PER_HOUR")
     api_timeout_seconds: int = Field(default=30, env="API_TIMEOUT_SECONDS")
@@ -108,21 +104,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-    
-    def get_vector_store_config(self) -> dict:
-        """Get vector store configuration."""
-        config = {
-            "type": self.vector_store_type,
-            "path": self.vector_store_path
-        }
-        
-        if self.vector_store_host:
-            config["host"] = self.vector_store_host
-        
-        if self.vector_store_port:
-            config["port"] = self.vector_store_port
-            
-        return config
     
     def get_embedding_config(self) -> dict:
         """Get embedding model configuration."""

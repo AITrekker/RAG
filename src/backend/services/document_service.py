@@ -3,10 +3,8 @@ Service layer for handling document-related business logic.
 """
 import logging
 from pathlib import Path
-from sqlalchemy.orm import Session
+# from sqlalchemy.orm import Session
 
-from ..core.tenant_manager import TenantManager
-from ..models.tenant import TenantDocument
 from ..utils.vector_store import VectorStoreManager
 
 logger = logging.getLogger(__name__)
@@ -16,106 +14,97 @@ class DocumentService:
 
     def __init__(
         self,
-        db: Session,
         vector_manager: VectorStoreManager,
         tenant_id: str,
     ):
         if not tenant_id:
             raise ValueError("Tenant ID must be provided to DocumentService")
-        self.db = db
         self.vector_manager = vector_manager
         self.tenant_id = tenant_id
-        self.tenant_manager = TenantManager(db)
 
     def delete_document(self, document_id: str) -> None:
         """
         Deletes a single document and its associated data from all storage layers.
+        It now uses Qdrant as the source of truth for metadata.
 
         Args:
-            document_id: The ID of the document to delete.
+            document_id: The ID of the document (which is the point ID of one of its chunks) to delete.
         
         Raises:
             ValueError: If the document is not found.
         """
         logger.info(f"Service: Deleting document {document_id} for tenant {self.tenant_id}")
         
-        document = self.db.query(TenantDocument).filter(
-            TenantDocument.tenant_id == self.tenant_id,
-            TenantDocument.document_id == document_id
-        ).first()
-
-        if not document:
-            raise ValueError("Document not found")
-
-        # 1. Delete from Vector Store
+        # 1. Fetch metadata from Qdrant to find the file path
         try:
-            collection = self.vector_manager.get_collection_for_tenant(self.tenant_id)
-            collection.delete(where={"document_id": document_id})
-            logger.info(f"Removed document {document_id} embeddings from vector store for tenant {self.tenant_id}")
-        except Exception as e:
-            logger.warning(f"Failed to remove embeddings from vector store for {document_id}: {e}")
-            # Decide if this should be a critical failure or just a warning
-            # For now, we'll log and continue
+            points = self.vector_manager.client.retrieve(
+                collection_name=self.vector_manager.get_collection_name_for_tenant(self.tenant_id),
+                ids=[document_id],
+                with_payload=True
+            )
+            if not points:
+                raise ValueError("Document chunk not found in vector store")
 
-        # 2. Delete from Filesystem
-        try:
-            tenant_config = self.tenant_manager.get_tenant_configurations(self.tenant_id)
-            if tenant_config and document.file_path:
-                file_path = Path(document.file_path)
-                if file_path.is_file():
-                    file_path.unlink()
-                    logger.info(f"Removed document file: {document.file_path}")
-        except Exception as e:
-            logger.warning(f"Failed to remove file from filesystem for {document_id}: {e}")
+            file_path_str = points[0].payload.get("metadata", {}).get("file_path")
+            if not file_path_str:
+                 logger.warning(f"No file_path in metadata for point {document_id}, cannot delete from filesystem.")
+                 # Continue to delete from vector store
+            else:
+                # 2. Delete from Filesystem
+                try:
+                    file_path = Path(file_path_str)
+                    if file_path.is_file():
+                        file_path.unlink()
+                        logger.info(f"Removed document file: {file_path_str}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove file from filesystem for {document_id}: {e}")
 
-        # 3. Delete from Database
-        self.db.delete(document)
-        self.db.flush()
-        logger.info(f"Document {document_id} deleted successfully from database for tenant {self.tenant_id}")
+            # 3. Delete all points associated with that file from Vector Store
+            self.vector_manager.delete_documents_by_path(self.tenant_id, file_path_str)
+
+        except Exception as e:
+            logger.error(f"Failed to delete document {document_id} for tenant {self.tenant_id}: {e}", exc_info=True)
+            raise
 
     def clear_all_documents(self) -> int:
         """
         Deletes ALL documents for the tenant from all storage layers.
 
         Returns:
-            The number of documents deleted.
+            The number of documents deleted (approximated by files).
         """
         logger.warning(f"Service: Clearing ALL documents for tenant {self.tenant_id}")
+        collection_name = self.vector_manager.get_collection_name_for_tenant(self.tenant_id)
+        deleted_files = 0
 
-        documents = self.db.query(TenantDocument).filter(
-            TenantDocument.tenant_id == self.tenant_id
-        ).all()
-        
-        doc_count = len(documents)
-        if doc_count == 0:
-            logger.info(f"No documents to clear for tenant {self.tenant_id}")
-            return 0
-
-        # 1. Clear from Vector Store
         try:
-            self.vector_manager.cleanup_tenant_data(self.tenant_id)
-            logger.info(f"Cleared all embeddings from vector store for tenant {self.tenant_id}")
-        except Exception as e:
-            logger.warning(f"Failed to clear embeddings from vector store for tenant {self.tenant_id}: {e}")
+            # 1. Scroll through all documents to get their file paths for deletion
+            all_points, _ = self.vector_manager.client.scroll(
+                collection_name=collection_name, limit=10000, with_payload=True, with_vectors=False
+            )
+            
+            unique_files_to_delete = {p.payload.get("metadata", {}).get("file_path") for p in all_points}
 
-        # 2. Clear from Filesystem
-        try:
-            tenant_config = self.tenant_manager.get_tenant_configurations(self.tenant_id)
-            if tenant_config:
-                for document in documents:
-                    if document.file_path:
-                        file_path = Path(document.file_path)
+            # 2. Clear from Filesystem
+            for file_path_str in unique_files_to_delete:
+                if file_path_str:
+                    try:
+                        file_path = Path(file_path_str)
                         if file_path.is_file():
                             file_path.unlink()
-                logger.info(f"Removed {doc_count} document files from filesystem for tenant {self.tenant_id}")
-        except Exception as e:
-            logger.warning(f"Failed to remove files from filesystem for tenant {self.tenant_id}: {e}")
+                            deleted_files += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to remove file from filesystem: {file_path_str}: {e}")
+            logger.info(f"Removed {deleted_files} document files from filesystem for tenant {self.tenant_id}")
+            
+            # 3. Clear from Vector Store by deleting the whole collection
+            self.vector_manager.delete_tenant_collection(self.tenant_id)
+            logger.info(f"Cleared all embeddings by deleting collection for tenant {self.tenant_id}")
 
-        # 3. Clear from Database
-        deleted_rows = self.db.query(TenantDocument).filter(
-            TenantDocument.tenant_id == self.tenant_id
-        ).delete(synchronize_session=False)
-        self.db.flush()
-        logger.info(f"Cleared {deleted_rows} documents from database for tenant {self.tenant_id}")
-        
-        return deleted_rows 
+        except Exception as e:
+            logger.error(f"Failed to clear documents for tenant {self.tenant_id}: {e}", exc_info=True)
+            # If the collection doesn't exist, that's fine.
+            if "not found" not in str(e).lower():
+                raise
+
+        return deleted_files 

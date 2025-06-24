@@ -23,10 +23,10 @@ from src.backend.middleware.tenant_context import TenantContext
 from src.backend.utils.tenant_filesystem import TenantFileSystemManager
 from src.backend.utils.vector_store import VectorStoreManager
 from unittest.mock import Mock
-from sqlalchemy.orm import Session
+# from sqlalchemy.orm import Session
 
-from src.backend.models.tenant import Tenant
-from src.backend.models.document import Document
+# from src.backend.models.tenant import Tenant
+# from src.backend.models.document import Document
 from src.backend.core.tenant_manager import TenantManager
 
 # --- Fixtures ---
@@ -66,50 +66,25 @@ class TestTenantContext:
         TenantContext.clear_context()
         assert TenantContext.get_current_tenant_id() is None
 
-class TestDatabaseIsolation:
-    """Mocks at the DB query level to test isolation logic."""
-
-    @patch('src.backend.db.session.Session')
-    def test_tenant_scoped_query(self, mock_session):
-        """
-        Test that queries are automatically filtered by the current tenant context.
-        This is a conceptual test, as the actual implementation might be in the ORM layer.
-        """
-        # A full test requires a live DB and ORM setup. Here we simulate the principle.
-        mock_query = MagicMock()
-        mock_session.query.return_value = mock_query
-
-        tenant_id = "tenant-db-iso-test"
-        TenantContext.set_current_tenant(tenant_id)
-        
-        # In a real scenario, a repository or service would call session.query(Model)
-        # and the scoped session would add the .filter(Model.tenant_id == tenant_id)
-        # We can't easily test the internals of a scoped session here, so we assert the concept.
-        # For a true test, we would need to test a repository function.
-        pass # This highlights the need for integration testing with a real DB session.
-
 class TestVectorStoreIsolation:
-    """Tests for data isolation within the ChromaDB vector store."""
+    """Tests for data isolation within the vector store."""
 
-    @patch.object(VectorStoreManager, '__init__', lambda self, path: None)
-    @patch.object(VectorStoreManager, 'client')
-    def test_collection_naming_scheme(self, mock_chroma_client):
+    @patch('src.backend.utils.vector_store.QdrantClient')
+    def test_collection_naming_scheme(self, mock_qdrant_client):
         """Test that collections are named using a tenant-specific prefix."""
-        chroma_manager = VectorStoreManager(path="dummy/path")
-        #...
+        # Instantiate the manager (the mock client will be used)
+        manager = VectorStoreManager()
+        manager.client = mock_qdrant_client
 
-    @patch.object(VectorStoreManager, '__init__', lambda self, path: None)
-    @patch.object(VectorStoreManager, 'client')
-    def test_get_collection_for_tenant(self, mock_chroma_client):
-        """Test that get_collection_for_tenant calls chroma with the correct name."""
-        chroma_manager = VectorStoreManager(path="dummy/path")
-        
         tenant_id = "tenant-vs-get-test"
-        expected_name = f"rag_collection_{tenant_id}"
+        expected_name = f"tenant_{tenant_id}_documents"
         
-        chroma_manager.get_collection_for_tenant(tenant_id)
+        # This will trigger the get_collection call
+        manager.get_collection_for_tenant(tenant_id, embedding_size=384)
         
-        mock_chroma_client.get_or_create_collection.assert_called_once_with(name=expected_name)
+        # Check that get_collection was called, which implies the collection
+        # would be created with the correct name if it didn't exist.
+        mock_qdrant_client.get_collection.assert_called_with(collection_name=expected_name)
 
 class TestFilesystemIsolation:
     """Tests for tenant isolation on the filesystem."""

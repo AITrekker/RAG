@@ -50,8 +50,8 @@ services:
     networks:
       - rag_network
     restart: unless-stopped
-    # The command runs the uvicorn server. Database migrations are no longer needed with Qdrant.
-    command: sh -c "uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload"
+    # The command runs the uvicorn server, watching only the 'src' directory.
+    command: sh -c "uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"
 
   # Frontend Development Server
   frontend:

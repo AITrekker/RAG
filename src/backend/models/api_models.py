@@ -140,7 +140,7 @@ class SyncScheduleUpdateRequest(BaseModel):
 
 # Models from sync.py and audit.py
 class SyncEventResponse(BaseModel):
-    id: int
+    id: str
     sync_run_id: str
     tenant_id: str
     event_type: str

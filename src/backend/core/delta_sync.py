@@ -13,16 +13,20 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple
 from dataclasses import dataclass
 from enum import Enum
+import uuid
 
-from sqlalchemy.orm import Session
-from sqlalchemy import text
+# from sqlalchemy.orm import Session
+# from sqlalchemy import text
 
-from ..models.document import Document, DocumentStatus
-from ..models.audit import SyncEvent
-from ..db.session import get_db
+# from ..models.document import Document, DocumentStatus
+# from ..models.audit import SyncEvent
+# from ..db.session import get_db
 from ..config.settings import get_settings
 from .document_processor import DocumentProcessor
-from .tenant_manager import TenantManager
+# from .tenant_manager import TenantManager # Obsolete
+from .auditing import audit_logger
+from ..utils.vector_store import get_vector_store_manager
+from qdrant_client import models
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -68,9 +72,9 @@ class DeltaSync:
     Delta synchronization manager that efficiently processes document changes.
     """
     
-    def __init__(self, tenant_manager: TenantManager, document_processor: DocumentProcessor):
-        self.tenant_manager = tenant_manager
+    def __init__(self, document_processor: DocumentProcessor):
         self.document_processor = document_processor
+        self.vector_store_manager = get_vector_store_manager()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     def calculate_file_hash(self, file_path: Path) -> str:
@@ -124,33 +128,43 @@ class DeltaSync:
             
         return current_files
     
-    def get_stored_file_state(self, tenant_id: str, db: Session) -> Dict[str, Dict]:
+    def get_stored_file_state(self, tenant_id: str) -> Dict[str, Dict]:
         """
-        Get the current state of files from the database.
+        Get the current state of files from the Qdrant vector store.
         
         Returns:
-            Dict mapping file paths to stored metadata
+            Dict mapping file paths to stored metadata from point payloads.
         """
         stored_files = {}
+        collection_name = self.vector_store_manager.get_collection_name_for_tenant(tenant_id)
         
         try:
-            documents = db.query(Document).filter(
-                Document.tenant_id == tenant_id,
-                Document.status != DocumentStatus.ARCHIVED
-            ).all()
+            # Scroll through all points in the collection to fetch metadata
+            # We only need the payload, not the vectors.
+            all_points, _ = self.vector_store_manager.client.scroll(
+                collection_name=collection_name,
+                limit=10000, # Assuming a large limit to get all points, pagination would be needed for larger sets
+                with_payload=True,
+                with_vectors=False
+            )
             
-            for doc in documents:
-                stored_files[doc.file_path] = {
-                    'id': doc.id,
-                    'hash': doc.file_hash,
-                    'size': doc.file_size,
-                    'version': doc.version,
-                    'status': doc.status,
-                    'updated_at': doc.updated_at
-                }
+            for point in all_points:
+                payload = point.payload
+                # We need a unique identifier for each *file*, but many points belong to one file.
+                # The 'file_path' in the payload is what we group by.
+                file_path = payload.get("metadata", {}).get("file_path")
+                if file_path and file_path not in stored_files:
+                    stored_files[file_path] = {
+                        'hash': payload.get("metadata", {}).get("file_hash"),
+                        'updated_at': datetime.fromtimestamp(payload.get("metadata", {}).get("modified_at", 0), tz=timezone.utc)
+                    }
                 
         except Exception as e:
-            self.logger.error(f"Error retrieving stored file state for tenant {tenant_id}: {e}")
+            # It's not an error if the collection doesn't exist yet
+            if "not found" in str(e).lower():
+                self.logger.info(f"Collection {collection_name} not found for tenant {tenant_id}. Assuming no stored files.")
+            else:
+                self.logger.error(f"Error retrieving stored file state for tenant {tenant_id}: {e}")
             
         return stored_files
     
@@ -205,165 +219,59 @@ class DeltaSync:
         
         return changes
     
-    def process_document_change(
+    def _process_document_change(
         self, 
         change: DocumentChange, 
         tenant_id: str, 
-        tenant_path: Path,
-        db: Session
+        tenant_uploads_path: Path,
+        sync_run_id: str
     ) -> bool:
-        """Process a single document change."""
+        """Process a single document change against Qdrant."""
         try:
-            if change.change_type == ChangeType.ADDED:
-                return self._process_added_document(change, tenant_id, tenant_path, db)
-            elif change.change_type == ChangeType.MODIFIED:
-                return self._process_modified_document(change, tenant_id, tenant_path, db)
+            full_path = tenant_uploads_path / change.file_path
+
+            if change.change_type == ChangeType.ADDED or change.change_type == ChangeType.MODIFIED:
+                self.logger.info(f"Processing {change.change_type.value} file: {full_path}")
+                processed_doc = self.document_processor.process_file(full_path)
+                
+                # Prepare points for upsert
+                points_to_upsert = []
+                for chunk in processed_doc.chunks:
+                    point = models.PointStruct(
+                        id=chunk.id,
+                        payload={
+                            "text": chunk.text,
+                            "metadata": chunk.metadata
+                        },
+                        vector=[] # Vector will be added by the manager
+                    )
+                    points_to_upsert.append(point)
+                
+                # Upsert points into vector store
+                self.vector_store_manager.upsert_points(tenant_id, points_to_upsert)
+                audit_logger.log_sync_event(tenant_id, sync_run_id, change.change_type.value.upper(), "SUCCESS", f"Processed file: {change.file_path}")
+                return True
+
             elif change.change_type == ChangeType.DELETED:
-                return self._process_deleted_document(change, tenant_id, db)
+                self.logger.info(f"Processing deleted file: {change.file_path}")
+                # We need to find all point IDs associated with this file path to delete them.
+                # This requires a way to filter points by file_path in the metadata.
+                self.vector_store_manager.delete_documents_by_path(tenant_id, change.file_path)
+                audit_logger.log_sync_event(tenant_id, sync_run_id, "DELETED", "SUCCESS", f"Deleted file: {change.file_path}")
+                return True
+
             else:
                 self.logger.warning(f"Unsupported change type: {change.change_type}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error processing change {change.file_path}: {e}")
+            self.logger.error(f"Error processing change for {change.file_path}: {e}", exc_info=True)
+            audit_logger.log_sync_event(tenant_id, sync_run_id, change.change_type.value.upper(), "FAILURE", f"Failed to process file {change.file_path}: {e}")
             return False
-    
-    def _process_added_document(
-        self, 
-        change: DocumentChange, 
-        tenant_id: str, 
-        tenant_path: Path,
-        db: Session
-    ) -> bool:
-        """Process a newly added document."""
-        full_path = tenant_path / change.file_path
-        
-        if not change.file_hash:
-            change.file_hash = self.calculate_file_hash(full_path)
-        
-        # Use document processor to ingest the new document
-        success = self.document_processor.process_document(
-            file_path=str(full_path),
-            tenant_id=tenant_id,
-            db=db
-        )
-        
-        if success:
-            self.logger.info(f"Successfully added document: {change.file_path}")
-        else:
-            self.logger.error(f"Failed to add document: {change.file_path}")
-            
-        return success
-    
-    def _process_modified_document(
-        self, 
-        change: DocumentChange, 
-        tenant_id: str, 
-        tenant_path: Path,
-        db: Session
-    ) -> bool:
-        """Process a modified document."""
-        full_path = tenant_path / change.file_path
-        
-        # Archive the old version
-        try:
-            old_doc = db.query(Document).filter(
-                Document.tenant_id == tenant_id,
-                Document.file_path == change.file_path,
-                Document.status != DocumentStatus.ARCHIVED
-            ).first()
-            
-            if old_doc:
-                # Update old document to archived status
-                old_doc.status = DocumentStatus.ARCHIVED
-                old_doc.updated_at = datetime.now(timezone.utc)
-                
-                # Process the updated document as a new version
-                success = self.document_processor.process_document(
-                    file_path=str(full_path),
-                    tenant_id=tenant_id,
-                    db=db,
-                    version=old_doc.version + 1
-                )
-                
-                if success:
-                    self.logger.info(f"Successfully updated document: {change.file_path}")
-                    db.commit()
-                    return True
-                else:
-                    self.logger.error(f"Failed to update document: {change.file_path}")
-                    db.rollback()
-                    return False
-            else:
-                # Document not found in database, treat as new
-                return self._process_added_document(change, tenant_id, tenant_path, db)
-                
-        except Exception as e:
-            self.logger.error(f"Error updating document {change.file_path}: {e}")
-            db.rollback()
-            return False
-    
-    def _process_deleted_document(self, change: DocumentChange, tenant_id: str, db: Session) -> bool:
-        """Process a deleted document."""
-        try:
-            # Mark document as archived instead of deleting
-            docs = db.query(Document).filter(
-                Document.tenant_id == tenant_id,
-                Document.file_path == change.file_path,
-                Document.status != DocumentStatus.ARCHIVED
-            ).all()
-            
-            for doc in docs:
-                doc.status = DocumentStatus.ARCHIVED
-                doc.updated_at = datetime.now(timezone.utc)
-            
-            # TODO: Also clean up associated chunks and embeddings
-            
-            db.commit()
-            self.logger.info(f"Successfully archived deleted document: {change.file_path}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error archiving document {change.file_path}: {e}")
-            db.rollback()
-            return False
-    
-    def log_sync_event(
-        self, 
-        sync_run_id: str, 
-        tenant_id: str, 
-        event_type: str, 
-        status: str, 
-        message: str = None,
-        metadata: Dict = None,
-        db: Session = None
-    ):
-        """Log a synchronization event."""
-        if not db:
-            db = next(get_db())
-        
-        try:
-            event = SyncEvent(
-                sync_run_id=sync_run_id,
-                tenant_id=tenant_id,
-                event_type=event_type,
-                status=status,
-                message=message,
-                event_metadata=metadata or {}
-            )
-            
-            db.add(event)
-            db.commit()
-            
-        except Exception as e:
-            self.logger.error(f"Error logging sync event: {e}")
-            db.rollback()
     
     def synchronize_tenant(self, tenant_id: str) -> SyncResult:
-        """
-        Perform delta synchronization for a specific tenant.
-        """
-        sync_run_id = f"sync_{tenant_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        """Synchronize documents for a single tenant using Qdrant."""
+        sync_run_id = f"sync_{tenant_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         start_time = datetime.now(timezone.utc)
         
         result = SyncResult(
@@ -373,43 +281,31 @@ class DeltaSync:
             files_added=0,
             files_modified=0,
             files_deleted=0,
-            files_moved=0,
+            files_moved=0, # Move detection not implemented yet
             errors=[],
             start_time=start_time
         )
         
-        db = next(get_db())
-        
+        audit_logger.log_sync_event(tenant_id, sync_run_id, "SYNC_START", "IN_PROGRESS")
+
         try:
-            # Log sync start
-            self.log_sync_event(
-                sync_run_id, tenant_id, "SYNC_START", "IN_PROGRESS",
-                f"Starting delta sync for tenant {tenant_id}", db=db
-            )
+            # This needs to be refactored to not get path from tenant manager
+            tenant_uploads_path = Path(f"data/tenants/{tenant_id}/uploads")
             
-            # Get tenant documents directory
-            tenant_config = self.tenant_manager.get_tenant_config(tenant_id)
-            if not tenant_config:
-                raise Exception(f"Tenant {tenant_id} not found")
-            
-            tenant_path = Path(tenant_config.documents_path)
-            
-            # Scan current files
-            current_files = self.scan_directory(tenant_path, tenant_id)
+            # 1. Scan filesystem for current state
+            current_files = self.scan_directory(tenant_uploads_path, tenant_id)
             result.total_files_scanned = len(current_files)
             
-            # Get stored file state
-            stored_files = self.get_stored_file_state(tenant_id, db)
+            # 2. Get stored state from Qdrant
+            stored_files = self.get_stored_file_state(tenant_id)
             
-            # Detect changes
+            # 3. Detect changes
             changes = self.detect_changes(current_files, stored_files)
-            
             self.logger.info(f"Detected {len(changes)} changes for tenant {tenant_id}")
-            
-            # Process each change
+
+            # 4. Process changes
             for change in changes:
-                success = self.process_document_change(change, tenant_id, tenant_path, db)
-                
+                success = self._process_document_change(change, tenant_id, tenant_uploads_path, sync_run_id)
                 if success:
                     if change.change_type == ChangeType.ADDED:
                         result.files_added += 1
@@ -417,72 +313,26 @@ class DeltaSync:
                         result.files_modified += 1
                     elif change.change_type == ChangeType.DELETED:
                         result.files_deleted += 1
-                    elif change.change_type == ChangeType.MOVED:
-                        result.files_moved += 1
                 else:
-                    result.errors.append(f"Failed to process {change.file_path}: {change.change_type}")
+                    result.errors.append(f"Failed to process {change.file_path}")
             
-            result.success = len(result.errors) == 0
+            result.success = not result.errors
             result.end_time = datetime.now(timezone.utc)
+            audit_logger.log_sync_event(tenant_id, sync_run_id, "SYNC_COMPLETE", "SUCCESS" if result.success else "FAILURE", f"Sync finished for tenant {tenant_id}.")
             
-            # Log sync completion
-            self.log_sync_event(
-                sync_run_id, tenant_id, "SYNC_COMPLETE", 
-                "SUCCESS" if result.success else "PARTIAL_SUCCESS",
-                f"Sync completed. Added: {result.files_added}, Modified: {result.files_modified}, "
-                f"Deleted: {result.files_deleted}, Errors: {len(result.errors)}",
-                metadata={
-                    'total_scanned': result.total_files_scanned,
-                    'files_added': result.files_added,
-                    'files_modified': result.files_modified,
-                    'files_deleted': result.files_deleted,
-                    'error_count': len(result.errors)
-                },
-                db=db
-            )
+            return result
             
         except Exception as e:
+            self.logger.error(f"Critical error during tenant synchronization {tenant_id}: {e}", exc_info=True)
             result.errors.append(str(e))
             result.success = False
             result.end_time = datetime.now(timezone.utc)
-            
-            self.logger.error(f"Sync failed for tenant {tenant_id}: {e}")
-            
-            # Log sync failure
-            self.log_sync_event(
-                sync_run_id, tenant_id, "SYNC_FAILED", "FAILURE",
-                f"Sync failed: {str(e)}", db=db
-            )
-            
-        finally:
-            db.close()
-        
-        return result
+            audit_logger.log_sync_event(tenant_id, sync_run_id, "SYNC_FAILED", "FAILURE", message=str(e))
+            return result
     
-    def get_sync_history(self, tenant_id: str, limit: int = 50) -> List[Dict]:
-        """Get synchronization history for a tenant."""
-        db = next(get_db())
-        
-        try:
-            events = db.query(SyncEvent).filter(
-                SyncEvent.tenant_id == tenant_id,
-                SyncEvent.event_type.in_(["SYNC_START", "SYNC_COMPLETE", "SYNC_FAILED"])
-            ).order_by(SyncEvent.timestamp.desc()).limit(limit).all()
-            
-            return [
-                {
-                    'sync_run_id': event.sync_run_id,
-                    'timestamp': event.timestamp.isoformat(),
-                    'event_type': event.event_type,
-                    'status': event.status,
-                    'message': event.message,
-                    'metadata': event.event_metadata
-                }
-                for event in events
-            ]
-            
-        except Exception as e:
-            self.logger.error(f"Error retrieving sync history for tenant {tenant_id}: {e}")
-            return []
-        finally:
-            db.close() 
+    # These methods are no longer needed as they were for the old DB-based history
+    # def get_sync_history(self, tenant_id: str, limit: int = 50) -> List[Dict]:
+    #     return []
+    
+    # def get_sync_status(self, tenant_id: str) -> Dict:
+    #     return {} 

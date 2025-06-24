@@ -24,10 +24,10 @@ The Enterprise RAG Platform has been designed with complete separation between t
 - **No Direct Backend Dependencies**: Zero imports from backend code
 
 ### Backend Layer
-- **Technology**: FastAPI + Python 3.11
+- **Technology**: Python 3.10+, FastAPI
 - **Port**: 8000
-- **Database**: SQLAlchemy with PostgreSQL
-- **Vector Store**: ChromaDB
+- **Vector Store / Database**: Qdrant
+- **Cache**: Redis
 - **Authentication**: API key-based with tenant isolation
 - **Documentation**: Auto-generated OpenAPI/Swagger docs
 
@@ -270,4 +270,42 @@ CORS_ORIGINS=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhos
 
 ✅ **Developer Experience**: Easy to develop, test, and deploy both layers independently
 
-The architecture ensures that the frontend can be completely replaced or multiple frontend clients can be built without any changes to the backend, and vice versa. 
+The architecture ensures that the frontend can be completely replaced or multiple frontend clients can be built without any changes to the backend, and vice versa.
+
+## Core Components
+
+### 1. **Frontend**
+- The backend is built with FastAPI, providing a robust and fast API.
+- It is responsible for all business logic, including:
+  - Document ingestion and processing
+  - RAG pipeline execution
+  - Tenant management and authentication
+  - Data synchronization
+
+### 3. **Vector Store (Qdrant)**
+- Qdrant serves as the primary data layer for the application.
+- It stores not only the vector embeddings for semantic search but also the document chunks and all associated metadata (filenames, hashes, etc.).
+- This removes the need for a separate relational database like PostgreSQL.
+
+### 4. **Cache (Redis)**
+- Redis is used for caching expensive operations and can be used for managing distributed state if needed (e.g., status of sync jobs).
+
+## Data Flow
+
+```
+Frontend Component
+       ↓
+   API Client
+       ↓ (HTTP Request)
+   FastAPI Router
+       ↓
+   Authentication Middleware
+       ↓
+   Business Logic Service
+       ↓
+   Database/Vector Store
+       ↓
+   Response Models
+       ↓ (HTTP Response)
+   Frontend Component
+``` 

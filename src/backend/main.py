@@ -13,11 +13,11 @@ import logging
 from contextlib import asynccontextmanager
 
 from src.backend.config.settings import get_settings
-from src.backend.api.v1.routes import query, sync, health, audit, documents
+from src.backend.api.v1.routes import query, sync, health, documents, audit
 from src.backend.core.embeddings import get_embedding_service, EmbeddingService
-from src.backend.utils.vector_store import get_vector_store_manager
+from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
-from src.backend.middleware.tenant_context import TenantHeaderMiddleware
+# from src.backend.middleware.tenant_context import TenantHeaderMiddleware # Obsolete
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -74,7 +74,7 @@ app = FastAPI(
     openapi_url=f"{settings.api_v1_str}/openapi.json"
 )
 
-app.add_middleware(TenantHeaderMiddleware)
+# app.add_middleware(TenantHeaderMiddleware) # Obsolete
 
 app.add_middleware(
     CORSMiddleware,
