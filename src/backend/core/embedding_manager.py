@@ -2,11 +2,11 @@
 High-performance Embedding Generation for the RAG Platform.
 
 This module provides an `EmbeddingManager` that handles the efficient
-generation of text embeddings using a background worker pool. It supports
-batching, queuing, and prioritization to manage high throughput scenarios.
-The manager interfaces with an underlying `EmbeddingService` (like one based
-on SentenceTransformers) to perform the actual embedding computation, and
-it can automatically persist the generated embeddings into a vector store.
+generation of text embeddings using async patterns. It supports
+batching and prioritization to manage high throughput scenarios.
+The manager interfaces with an underlying `EmbeddingService` to perform
+the actual embedding computation, and it can automatically persist the
+generated embeddings into a vector store.
 """
 
 import logging
@@ -17,9 +17,6 @@ from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import queue
-import threading
 
 # Internal imports
 from .embeddings import get_embedding_service, EmbeddingService
@@ -61,15 +58,12 @@ class EmbeddingResult:
 class EmbeddingManager:
     """
     High-performance embedding generation manager
-    Supports batch processing, queuing, and CUDA acceleration
+    Supports batch processing and async operations
     """
     
     def __init__(
         self,
         max_batch_size: Optional[int] = None,
-        max_queue_size: int = 1000,
-        worker_threads: int = 2,
-        enable_async: bool = True,
         auto_persist: bool = True
     ):
         """
@@ -77,26 +71,14 @@ class EmbeddingManager:
         
         Args:
             max_batch_size: Maximum batch size for processing
-            max_queue_size: Maximum queue size for pending requests
-            worker_threads: Number of worker threads
-            enable_async: Enable async processing
             auto_persist: Automatically persist embeddings to vector store
         """
         self.max_batch_size = max_batch_size or settings.embedding_batch_size
-        self.max_queue_size = max_queue_size
-        self.worker_threads = worker_threads
-        self.enable_async = enable_async
         self.auto_persist = auto_persist
         
         # Initialize components
         self.embedding_service = get_embedding_service()
         self.vector_store_manager = get_vector_store_manager()
-        
-        # Processing queue and workers
-        self.request_queue = queue.PriorityQueue(maxsize=max_queue_size)
-        self.result_queue = queue.Queue()
-        self.executor = ThreadPoolExecutor(max_workers=worker_threads)
-        self.workers_active = False
         
         # Performance tracking
         self.processed_requests = 0
@@ -104,249 +86,9 @@ class EmbeddingManager:
         self.total_processing_time = 0.0
         self.error_count = 0
         
-        # Thread safety
-        self._lock = threading.RLock()
-        
         logger.info(f"Embedding manager initialized:")
         logger.info(f"  Max batch size: {self.max_batch_size}")
-        logger.info(f"  Worker threads: {self.worker_threads}")
         logger.info(f"  Auto persist: {self.auto_persist}")
-    
-    def start_workers(self):
-        """Start background worker threads"""
-        if self.workers_active:
-            return
-        
-        self.workers_active = True
-        
-        for i in range(self.worker_threads):
-            self.executor.submit(self._worker_loop, f"worker-{i}")
-        
-        logger.info(f"Started {self.worker_threads} embedding workers")
-    
-    def stop_workers(self):
-        """Stop background worker threads"""
-        self.workers_active = False
-        
-        # Add poison pills to stop workers
-        for _ in range(self.worker_threads):
-            try:
-                self.request_queue.put((float('inf'), None), timeout=1)
-            except queue.Full:
-                pass
-        
-        self.executor.shutdown(wait=True)
-        logger.info("Stopped embedding workers")
-    
-    def _worker_loop(self, worker_id: str):
-        """Worker thread main loop"""
-        logger.info(f"Worker {worker_id} started")
-        
-        while self.workers_active:
-            try:
-                # Get request from queue (timeout to check if should stop)
-                priority, request = self.request_queue.get(timeout=1.0)
-                
-                if request is None:  # Poison pill
-                    break
-                
-                # Process the request
-                result = self._process_request(request)
-                
-                # Put result in result queue
-                self.result_queue.put(result)
-                
-                # Mark task as done
-                self.request_queue.task_done()
-                
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}")
-        
-        logger.info(f"Worker {worker_id} stopped")
-    
-    def _process_request(self, request: EmbeddingRequest) -> EmbeddingResult:
-        """Process a single embedding request"""
-        start_time = time.time()
-        
-        try:
-            # Split into batches if needed
-            batches = self._create_batches(request.texts, request.metadata, request.doc_ids)
-            
-            all_embeddings = []
-            
-            for batch_texts, batch_metadata, batch_ids in batches:
-                # Generate embeddings for batch
-                batch_embeddings = self.embedding_service.encode_texts(
-                    batch_texts,
-                    normalize_embeddings=True,
-                    show_progress_bar=False
-                )
-                all_embeddings.append(batch_embeddings)
-            
-            # Combine all batches
-            if all_embeddings:
-                embeddings = np.vstack(all_embeddings)
-            else:
-                embeddings = np.array([])
-            
-            processing_time = time.time() - start_time
-            
-            # Update statistics
-            with self._lock:
-                self.processed_requests += 1
-                self.total_texts_processed += len(request.texts)
-                self.total_processing_time += processing_time
-            
-            # Auto-persist if enabled
-            if self.auto_persist and len(embeddings) > 0:
-                self._persist_embeddings(request, embeddings)
-            
-            result = EmbeddingResult(
-                embeddings=embeddings,
-                texts=request.texts,
-                metadata=request.metadata,
-                doc_ids=request.doc_ids,
-                tenant_id=request.tenant_id,
-                processing_time=processing_time,
-                timestamp=time.time(),
-                success=True
-            )
-            
-            logger.info(f"Processed {len(request.texts)} texts in {processing_time:.3f}s")
-            
-            return result
-            
-        except Exception as e:
-            processing_time = time.time() - start_time
-            
-            with self._lock:
-                self.error_count += 1
-            
-            logger.error(f"Failed to process embedding request: {e}")
-            
-            return EmbeddingResult(
-                embeddings=np.array([]),
-                texts=request.texts,
-                metadata=request.metadata,
-                doc_ids=request.doc_ids,
-                tenant_id=request.tenant_id,
-                processing_time=processing_time,
-                timestamp=time.time(),
-                success=False,
-                error=str(e)
-            )
-    
-    def _create_batches(
-        self, 
-        texts: List[str], 
-        metadata: Optional[List[Dict[str, Any]]], 
-        doc_ids: Optional[List[str]]
-    ) -> List[Tuple[List[str], Optional[List[Dict[str, Any]]], Optional[List[str]]]]:
-        """Split texts into processing batches"""
-        batches = []
-        
-        for i in range(0, len(texts), self.max_batch_size):
-            end_index = i + self.max_batch_size
-            
-            batch_texts = texts[i:end_index]
-            batch_metadata = metadata[i:end_index] if metadata else None
-            batch_ids = doc_ids[i:end_index] if doc_ids else None
-            
-            batches.append((batch_texts, batch_metadata, batch_ids))
-        
-        return batches
-    
-    def _persist_embeddings(self, request: EmbeddingRequest, embeddings: np.ndarray):
-        """Persist embeddings to the vector store."""
-        try:
-            collection = self.vector_store_manager.get_collection_for_tenant(request.tenant_id)
-            
-            # Convert numpy array to list of lists for Chroma
-            embeddings_list = embeddings.tolist()
-            
-            collection.add(
-                embeddings=embeddings_list,
-                documents=request.texts,
-                metadatas=request.metadata,
-                ids=request.doc_ids
-            )
-            
-            logger.info(f"Persisted {len(request.texts)} embeddings for tenant {request.tenant_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to persist embeddings for tenant {request.tenant_id}: {e}", exc_info=True)
-    
-    def submit_request(
-        self,
-        texts: List[str],
-        metadata: Optional[List[Dict[str, Any]]] = None,
-        doc_ids: Optional[List[str]] = None,
-        tenant_id: str = "default",
-        priority: int = 0
-    ) -> bool:
-        """
-        Submit request for embedding generation
-        
-        Args:
-            texts: List of texts to embed
-            metadata: Optional metadata for each text
-            doc_ids: Optional document IDs
-            tenant_id: Tenant identifier
-            priority: Request priority (higher = more important)
-            
-        Returns:
-            True if request was queued successfully
-        """
-        if not texts:
-            return False
-        
-        request = EmbeddingRequest(
-            texts=texts,
-            metadata=metadata,
-            doc_ids=doc_ids,
-            tenant_id=tenant_id,
-            priority=priority
-        )
-        
-        try:
-            # Higher priority means lower queue priority number (processed first)
-            self.request_queue.put((-priority, request), timeout=1.0)
-            logger.info(f"Queued request with {len(texts)} texts for tenant {tenant_id}")
-            return True
-            
-        except queue.Full:
-            logger.warning("Request queue is full, dropping request")
-            return False
-    
-    def process_sync(
-        self,
-        texts: List[str],
-        metadata: Optional[List[Dict[str, Any]]] = None,
-        doc_ids: Optional[List[str]] = None,
-        tenant_id: str = "default"
-    ) -> EmbeddingResult:
-        """
-        Process request synchronously (bypass queue)
-        
-        Args:
-            texts: List of texts to embed
-            metadata: Optional metadata for each text
-            doc_ids: Optional document IDs
-            tenant_id: Tenant identifier
-            
-        Returns:
-            EmbeddingResult with generated embeddings
-        """
-        request = EmbeddingRequest(
-            texts=texts,
-            metadata=metadata,
-            doc_ids=doc_ids,
-            tenant_id=tenant_id
-        )
-        
-        return self._process_request(request)
     
     async def process_async(
         self,
@@ -367,78 +109,240 @@ class EmbeddingManager:
         Returns:
             EmbeddingResult with generated embeddings
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            self.process_sync,
-            texts,
-            metadata,
-            doc_ids,
-            tenant_id
-        )
+        start_time = time.time()
+        
+        try:
+            # Create request
+            request = EmbeddingRequest(
+                texts=texts,
+                metadata=metadata,
+                doc_ids=doc_ids,
+                tenant_id=tenant_id
+            )
+            
+            # Process the request asynchronously
+            result = await self._process_request_async(request)
+            
+            # Update statistics
+            self.processed_requests += 1
+            self.total_texts_processed += len(texts)
+            self.total_processing_time += result.processing_time
+            
+            return result
+            
+        except Exception as e:
+            self.error_count += 1
+            logger.error(f"Error processing embedding request: {e}")
+            
+            return EmbeddingResult(
+                embeddings=np.array([]),
+                texts=texts,
+                metadata=metadata,
+                doc_ids=doc_ids,
+                tenant_id=tenant_id,
+                processing_time=time.time() - start_time,
+                timestamp=time.time(),
+                success=False,
+                error=str(e)
+            )
     
-    def get_results(self, timeout: float = 1.0) -> List[EmbeddingResult]:
-        """Get completed results from the result queue"""
-        results = []
+    def process_sync(
+        self,
+        texts: List[str],
+        metadata: Optional[List[Dict[str, Any]]] = None,
+        doc_ids: Optional[List[str]] = None,
+        tenant_id: str = "default"
+    ) -> EmbeddingResult:
+        """
+        Process request synchronously (for backward compatibility)
         
-        while True:
-            try:
-                result = self.result_queue.get(timeout=timeout)
-                results.append(result)
-                self.result_queue.task_done()
-            except queue.Empty:
-                break
+        Args:
+            texts: List of texts to embed
+            metadata: Optional metadata for each text
+            doc_ids: Optional document IDs
+            tenant_id: Tenant identifier
+            
+        Returns:
+            EmbeddingResult with generated embeddings
+        """
+        # Run async method in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(
+                self.process_async(texts, metadata, doc_ids, tenant_id)
+            )
+        finally:
+            loop.close()
+    
+    async def _process_request_async(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """Process a single embedding request asynchronously"""
+        start_time = time.time()
         
-        return results
+        try:
+            # Split into batches if needed
+            batches = self._create_batches(request.texts, request.metadata, request.doc_ids)
+            
+            all_embeddings = []
+            
+            for batch_texts, batch_metadata, batch_ids in batches:
+                # Generate embeddings for batch (run in thread pool for CPU-bound work)
+                loop = asyncio.get_event_loop()
+                batch_embeddings = await loop.run_in_executor(
+                    None,
+                    self.embedding_service.encode_texts,
+                    batch_texts,
+                    True,  # normalize_embeddings
+                    False  # show_progress_bar
+                )
+                all_embeddings.append(batch_embeddings)
+            
+            # Combine all batches
+            if all_embeddings:
+                embeddings = np.vstack(all_embeddings)
+            else:
+                embeddings = np.array([])
+            
+            processing_time = time.time() - start_time
+            
+            # Persist embeddings if enabled
+            if self.auto_persist and len(embeddings) > 0:
+                await self._persist_embeddings_async(request, embeddings)
+            
+            return EmbeddingResult(
+                embeddings=embeddings,
+                texts=request.texts,
+                metadata=request.metadata,
+                doc_ids=request.doc_ids,
+                tenant_id=request.tenant_id,
+                processing_time=processing_time,
+                timestamp=time.time(),
+                success=True
+            )
+            
+        except Exception as e:
+            processing_time = time.time() - start_time
+            logger.error(f"Error in _process_request_async: {e}")
+            
+            return EmbeddingResult(
+                embeddings=np.array([]),
+                texts=request.texts,
+                metadata=request.metadata,
+                doc_ids=request.doc_ids,
+                tenant_id=request.tenant_id,
+                processing_time=processing_time,
+                timestamp=time.time(),
+                success=False,
+                error=str(e)
+            )
+    
+    def _create_batches(
+        self, 
+        texts: List[str], 
+        metadata: Optional[List[Dict[str, Any]]], 
+        doc_ids: Optional[List[str]]
+    ) -> List[Tuple[List[str], Optional[List[Dict[str, Any]]], Optional[List[str]]]]:
+        """Create batches for processing"""
+        if len(texts) <= self.max_batch_size:
+            return [(texts, metadata, doc_ids)]
+        
+        batches = []
+        for i in range(0, len(texts), self.max_batch_size):
+            end_idx = min(i + self.max_batch_size, len(texts))
+            batch_texts = texts[i:end_idx]
+            
+            batch_metadata = None
+            if metadata:
+                batch_metadata = metadata[i:end_idx]
+            
+            batch_ids = None
+            if doc_ids:
+                batch_ids = doc_ids[i:end_idx]
+            
+            batches.append((batch_texts, batch_metadata, batch_ids))
+        
+        return batches
+    
+    async def _persist_embeddings_async(self, request: EmbeddingRequest, embeddings: np.ndarray):
+        """Persist embeddings to vector store asynchronously"""
+        try:
+            # Run vector store operations in thread pool
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self._persist_embeddings_sync,
+                request,
+                embeddings
+            )
+        except Exception as e:
+            logger.error(f"Error persisting embeddings: {e}")
+    
+    def _persist_embeddings_sync(self, request: EmbeddingRequest, embeddings: np.ndarray):
+        """Synchronously persist embeddings to vector store"""
+        try:
+            # Prepare payload for vector store
+            payload = []
+            for i, text in enumerate(request.texts):
+                item = {
+                    "text": text,
+                    "embedding": embeddings[i].tolist(),
+                    "tenant_id": request.tenant_id
+                }
+                
+                if request.metadata and i < len(request.metadata):
+                    item["metadata"] = request.metadata[i]
+                
+                if request.doc_ids and i < len(request.doc_ids):
+                    item["doc_id"] = request.doc_ids[i]
+                
+                payload.append(item)
+            
+            # Store in vector database
+            self.vector_store_manager.add_embeddings(
+                collection_name=f"embeddings_{request.tenant_id}",
+                embeddings=payload
+            )
+            
+            logger.debug(f"Persisted {len(payload)} embeddings for tenant {request.tenant_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in _persist_embeddings_sync: {e}")
+            raise
     
     def get_stats(self) -> Dict[str, Any]:
         """Get pipeline performance statistics"""
-        with self._lock:
-            avg_processing_time = (
-                self.total_processing_time / self.processed_requests 
-                if self.processed_requests > 0 else 0
-            )
-            
-            avg_texts_per_request = (
-                self.total_texts_processed / self.processed_requests
-                if self.processed_requests > 0 else 0
-            )
-            
-            return {
-                "processed_requests": self.processed_requests,
-                "total_texts_processed": self.total_texts_processed,
-                "total_processing_time": self.total_processing_time,
-                "error_count": self.error_count,
-                "average_processing_time": avg_processing_time,
-                "average_texts_per_request": avg_texts_per_request,
-                "queue_size": self.request_queue.qsize(),
-                "workers_active": self.workers_active,
-                "embedding_service_stats": self.embedding_service.get_performance_stats()
-            }
+        avg_processing_time = (
+            self.total_processing_time / self.processed_requests 
+            if self.processed_requests > 0 else 0
+        )
+        
+        avg_texts_per_request = (
+            self.total_texts_processed / self.processed_requests
+            if self.processed_requests > 0 else 0
+        )
+        
+        return {
+            "processed_requests": self.processed_requests,
+            "total_texts_processed": self.total_texts_processed,
+            "total_processing_time": self.total_processing_time,
+            "error_count": self.error_count,
+            "average_processing_time": avg_processing_time,
+            "average_texts_per_request": avg_texts_per_request,
+            "embedding_service_stats": self.embedding_service.get_performance_stats()
+        }
     
     def clear_stats(self):
         """Clear performance statistics"""
-        with self._lock:
-            self.processed_requests = 0
-            self.total_texts_processed = 0
-            self.total_processing_time = 0.0
-            self.error_count = 0
+        self.processed_requests = 0
+        self.total_texts_processed = 0
+        self.total_processing_time = 0.0
+        self.error_count = 0
         
         # Clear embedding service stats too
         self.embedding_service.embedding_times = []
-    
-    def __enter__(self):
-        """Context manager entry"""
-        self.start_workers()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
-        self.stop_workers()
 
 
 _embedding_manager_instance: Optional[EmbeddingManager] = None
-_embedding_manager_lock = threading.Lock()
 
 
 def get_embedding_manager(force_reload: bool = False, **kwargs) -> EmbeddingManager:
@@ -456,10 +360,8 @@ def get_embedding_manager(force_reload: bool = False, **kwargs) -> EmbeddingMana
     global _embedding_manager_instance
     
     if _embedding_manager_instance is None or force_reload:
-        with _embedding_manager_lock:
-            if _embedding_manager_instance is None or force_reload:
-                logger.info("Creating new EmbeddingManager instance.")
-                _embedding_manager_instance = EmbeddingManager(**kwargs)
+        logger.info("Creating new EmbeddingManager instance.")
+        _embedding_manager_instance = EmbeddingManager(**kwargs)
     
     return _embedding_manager_instance
 

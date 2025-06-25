@@ -16,16 +16,20 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY requirements-base.txt .
 COPY requirements.txt .
 
-# Install dependencies from requirements files.
-# We DO NOT reinstall torch, torchvision, or torchaudio, as they are
-# provided by the base nvcr.io image in a pre-compiled, optimized state.
-# This avoids the "undefined symbol" compilation conflicts.
+# Install base requirements (heavyweight packages) first
+# DO NOT reinstall torch, torchvision, or torchaudio - they are pre-installed
 RUN --mount=type=cache,target=/root/.cache/pip \
-#    pip install --no-cache-dir -r requirements-base.txt
-    pip install -r requirements-base.txt
+    pip install --no-cache-dir -r requirements-base.txt
 
+# Install main requirements (lightweight packages)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
+
+# Test that ML libraries can be imported successfully
+RUN python -c "import torch; print(f'PyTorch version: {torch.__version__}'); \
+    import transformers; print(f'Transformers version: {transformers.__version__}'); \
+    import sentence_transformers; print('Sentence transformers imported successfully'); \
+    print('All ML libraries imported successfully!')"
 
 # Copy the application source code
 # We copy the contents of src/backend directly into /app so that

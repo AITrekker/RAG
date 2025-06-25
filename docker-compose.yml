@@ -24,15 +24,23 @@ services:
       - ./documents:/app/documents
       - ./cache:/app/cache
       - ./logs:/app/logs
+      - ./data:/app/data
     env_file:
       - .env
     environment:
+      - QDRANT_URL=http://qdrant:6333
       - RELOAD_ON_CHANGE=True
     networks:
       - rag_network
     depends_on:
       - qdrant
-    command: sh -c "uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    command: sh -c "python scripts/startup.py && uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src"
 
   # Frontend Service
   frontend:
@@ -51,7 +59,8 @@ services:
     networks:
       - rag_network
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 networks:
   rag_network:

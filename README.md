@@ -1,331 +1,302 @@
 # Enterprise RAG Platform
 
-## Quick Start
+A production-ready Retrieval-Augmented Generation (RAG) platform designed for enterprise use cases with multi-tenant support, delta sync, and comprehensive metadata management.
 
-### Prerequisites
-- Python 3.9+
+## 🚀 Features
+
+- **Multi-tenant Architecture**: Isolated data and processing per tenant
+- **Delta Sync**: Efficient document processing with hash-based change detection
+- **Rich Metadata**: Comprehensive document metadata extraction and filtering
+- **RAG Pipeline**: Advanced query processing with confidence scoring
+- **API-First Design**: RESTful API with comprehensive documentation
+- **Production Ready**: Health checks, monitoring, and error handling
+
+## 📁 Architecture
+
+### File Storage Structure
+```
+data/
+├── tenants/
+│   ├── tenant-1/
+│   │   ├── documents/          # Tenant's document folder
+│   │   │   ├── report.pdf
+│   │   │   ├── manual.docx
+│   │   │   └── data.csv
+│   │   └── uploads/           # Temporary upload area
+│   └── tenant-2/
+│       ├── documents/
+│       └── uploads/
+```
+
+### Qdrant Collections
+```
+tenant_{tenant_id}_documents     # Document metadata + file hashes
+tenant_{tenant_id}_embeddings    # Document chunks with embeddings
+tenant_{tenant_id}_sync_state    # Sync state and file hashes
+```
+
+## 🔄 Workflow
+
+1. **File Management**: Manually copy files to tenant document folders
+2. **Delta Sync**: API triggers sync to process new/modified files
+3. **Query Processing**: RAG queries with metadata filtering
+4. **Results**: Rich answers with source citations and metadata
+
+## 🛠️ API Structure
+
+### Core Endpoints
+- **`/api/v1/health`** - System health checks
+- **`/api/v1/query`** - RAG query processing with metadata filtering
+- **`/api/v1/sync`** - Delta sync operations and document processing
+- **`/api/v1/setup`** - System initialization
+- **`/api/v1/admin`** - System administration
+
+### Key Features
+- **Metadata Filtering**: Filter queries by author, date, tags, document type
+- **Delta Sync**: Only process changed files using hash comparison
+- **Document Search**: Search documents by content and metadata
+- **Query History**: Track and analyze query patterns
+- **System Monitoring**: Comprehensive health and performance metrics
+
+## 🚀 Quick Start
+
+### 1. Prerequisites
+- Python 3.11+
 - Docker and Docker Compose
-- 8GB+ RAM (16GB+ recommended for optimal ML performance)
-- CUDA-capable GPU (optional but recommended)
+- Git
 
-### Installation
-
-The project uses a two-stage requirements installation to optimize for development:
-
-1. **Install heavyweight base packages** (PyTorch, Transformers, etc. - ~3GB download):
-   ```bash
-   pip install -r requirements-base.txt
-   ```
-
-2. **Install lightweight application packages** (FastAPI, utilities, etc.):
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-> **Why two files?** 
-> - `requirements-base.txt`: Large ML packages that rarely change (torch, transformers, etc.)
-> - `requirements.txt`: Lightweight packages that update frequently (fastapi, pydantic, etc.)
-> - This allows faster development cycles by only reinstalling lightweight packages
-
-### Development Setup
-
+### 2. Setup (Fresh Clone)
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd RAG
 
-# Set up the development environment
-python scripts/setup_dev.py
-
-# Or manually:
+# Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements-base.txt
-pip install -r requirements.txt
+# On Windows:
+.venv\Scripts\activate
+# On Unix/MacOS:
+source .venv/bin/activate
+
+# Run setup (installs dependencies, creates .env, sets up directories)
+python setup.py
+
+# Start Qdrant
+docker-compose up -d qdrant
+
+# Initialize the database
+python scripts/db-init.py
+
+# Start the backend
+python scripts/run_backend.py
 ```
 
-### Quick Docker Start
+### 3. Alternative Setup Options
 
+#### Development Setup (with additional checks)
 ```bash
-# Start the full stack
+python scripts/setup_dev.py
+```
+
+#### Docker Setup (Recommended)
+```bash
+# Start all services with proper orchestration
 docker-compose up -d
 
-# View logs
-docker-compose logs -f
+# The services will start in this order:
+# 1. Qdrant (waits for health check)
+# 2. Backend (waits for Qdrant, then seeds DB if empty)
+# 3. Frontend (waits for Backend health check)
 ```
 
-## Architecture
+#### Docker Setup (Individual Services)
+```bash
+# Start Qdrant first
+docker-compose up -d qdrant
 
-**Core Components:**
-- **API:** FastAPI with automatic OpenAPI documentation
-- **Port**: 8000
-- **Vector Store / Database**: Qdrant
+# Wait for Qdrant to be healthy, then start backend
+docker-compose up -d backend
 
-- **Authentication**: API key-based with tenant isolation
-- **Documentation**: Auto-generated OpenAPI/Swagger docs
-
-**Tech Stack:**
-- **Backend:** FastAPI, Python 3.9+
-- **Frontend:** React, TypeScript, Vite
-- **RAG & ML:** LlamaIndex, Hugging Face `transformers`, PyTorch
-- **Vector Store & Database:** Qdrant
-
-- **Async Tasking:** Python `asyncio`
-- **Deployment:** Docker, Docker Compose
-
-## 1. Overview
-
-This project is a sophisticated, multi-tenant Retrieval-Augmented Generation (RAG) system designed to power an intelligent enterprise support application. It allows staff to ask natural language questions and receive accurate, context-aware answers based on a private, internal corpus of corporate documents (e.g., policies, handbooks, legal documents).
-
-The system is built with a local-first, self-hosted architecture for maximum data privacy and control, with a clear and easy path to cloud deployment. It ingests documents from specified local folders, processes them into a searchable vector database, and uses a generative LLM to provide answers, all while ensuring strict data isolation between tenants.
-
-## 2. Core Features (MVP)
-
-- **Multi-Tenant Architecture:** Securely supports multiple tenants with complete data isolation at the database, file system, and processing levels.
-- **Automated Document Ingestion:** Monitors tenant-specific folders for new, modified, or deleted documents and automatically syncs them.
-- **Delta Synchronization:** Efficiently processes only the changes in documents rather than re-processing entire files, saving time and computational resources.
-- **Advanced RAG Pipeline:**
-  - Utilizes state-of-the-art embedding models for high-quality semantic search.
-  - Employs a sophisticated reranking step to improve the relevance of retrieved documents.
-  - Generates responses using a locally-hosted Large Language Model (LLM) for privacy.
-- **File Versioning:** Tracks changes to documents and embeddings, allowing for consistency and auditability.
-- **Sync Reporting:** Provides a reporting interface with an interactive calendar to view the status and history of synchronization tasks.
-- **Dockerized Environment:** Fully containerized with Docker for consistent development, testing, and deployment.
-
-## 3. Architecture Overview
-
-The system follows a modular RAG architecture:
-
-1.  **File Ingestion & Sync:** A file system watcher monitors designated folders for each tenant. A sync process detects new, updated, and deleted files.
-2.  **Document Processing Pipeline:** LlamaIndex orchestrates the processing of documents. It loads content, splits it into chunks, and generates vector embeddings using a Hugging Face `transformers` model running on a local GPU.
-3.  **Metadata & Vector Storage:** A PostgreSQL database stores file metadata, versions, and sync status. A vector store (e.g., FAISS, Chroma) stores the embeddings for efficient similarity search. All data is isolated by a `tenant_id`.
-4.  **RAG Query Pipeline:**
-    - An incoming query is processed.
-    - A hybrid search retrieves relevant document chunks by filtering on metadata and performing a vector search.
-    - A reranking model refines the search results for maximum relevance.
-    - The final context is passed to a local generative LLM (via `transformers`) to synthesize an answer.
-5.  **API & UI:** A FastAPI backend exposes the RAG functionality. A simple UI provides a query interface and a reporting dashboard.
-
-## Architecture Deep Dive: Multi-Tenant Strategy
-
-While the system is designed for multi-tenancy, it supports different levels of data isolation based on a customer's service tier. This provides a flexible architecture that can be adapted for different security and performance requirements, from cost-effective shared infrastructure to fully isolated dedicated environments.
-
-This logic is orchestrated by the `TenantIsolationStrategy` in `src/backend/core/tenant_isolation.py`.
-
-### Tenant Tiers (The "What")
-
-The tiering system is a **business-level concept** that defines the service level for a tenant:
-
--   **`BASIC` Tier:** For customers who need core functionality on a cost-effective, shared infrastructure.
--   **`PREMIUM` Tier:** A middle ground, offering a hybrid approach with enhanced performance or security features.
--   **`ENTERPRISE` Tier:** For customers requiring the highest level of security and performance on dedicated, physically separate infrastructure.
-
-### Isolation Levels (The "How")
-
-The business tier maps directly to a **technical implementation strategy**, which determines how a tenant's data is actually stored:
-
--   **`LOGICAL` Isolation:** Used for `BASIC` tenants. Data is co-located on shared infrastructure but separated by a `tenant_id` column in database tables or a prefix in vector store collections.
--   **`PHYSICAL` Isolation:** Used for `ENTERPRISE` tenants. Data is stored in physically separate resources, such as a dedicated database instance, a separate disk volume for files, or a different vector store.
-
-### Current Implementation vs. Production-Ready Design
-
-You are correct that in the current development environment, all resources are shared (one database file, one `/data` directory). The project is currently configured to use only the `LOGICAL` isolation strategy for all tenants.
-
-However, the architecture is designed so that enabling physical isolation for an `ENTERPRISE` tenant requires **no application code changes**. The logic is already in place. To make it fully operational in production, you would only need to:
-
-1.  Provision the dedicated infrastructure (e.g., a new database or a separate mounted disk).
-2.  Update the configuration in `tenant_isolation.py` to point to these new resources for `PHYSICAL`-level tenants.
-
-### Data Flow Diagram
-
-The following diagram illustrates how the `TenantManager` uses the `TenantIsolationStrategy` to provision resources for different tiers:
-
-```mermaid
-sequenceDiagram
-    participant API as "API Route<br/>(e.g., POST /tenants)"
-    participant TM as "TenantManager"
-    participant IS as "TenantIsolationStrategy"
-    participant FSM as "TenantFileSystemManager"
-
-    API->>TM: create_tenant("NewCorp", "ENTERPRISE")
-    
-    TM->>TM: Creates Tenant record in DB
-    
-    TM->>IS: register_tenant("newcorp_id", "ENTERPRISE")
-    Note over IS: Determines IsolationLevel is PHYSICAL
-
-    TM->>IS: get_filesystem_strategy("newcorp_id")
-    IS-->>TM: Returns config:<br/>{ tenant_path: "/data/tenants/newcorp_id", ... }
-
-    TM->>FSM: create_tenant_structure("newcorp_id", config)
-    
-    FSM->>FSM: Path("/data/tenants/newcorp_id").mkdir()
-    Note right of FSM: Creates folders on disk
-
-    FSM-->>TM: Success
-    TM-->>API: TenantResponse
+# Wait for backend to be healthy, then start frontend
+docker-compose up -d frontend
 ```
 
-## 4. Technology Stack
+#### Docker Setup (backend may have ML library issues)
+```bash
+# If you encounter ML library compatibility issues with Docker backend:
+docker-compose up -d qdrant
+python scripts/startup.py  # Run locally to seed DB
+python scripts/run_backend.py  # Run backend locally
+```
 
-- **Backend:** Python, FastAPI
-- **RAG & ML:** LlamaIndex, Hugging Face `transformers`, PyTorch
-- **Vector Store & Database:** Qdrant
+#### Manual Setup
+```bash
+# Install dependencies
+pip install -r requirements.txt
 
-- **Async Tasking:** Python `asyncio`
-- **Deployment:** Docker, Docker Compose
-- **Frontend:** React, TypeScript, Vite
+# Create .env file
+copy .env.example .env
 
-## 5. Backend API Structure
+# Create directories
+mkdir -p data/tenants logs cache/transformers cache/huggingface
+```
 
-The `src/backend/api` directory defines the web server's endpoints, acting as the primary interface between the frontend and the core backend logic.
+### 4. Usage
 
--   **API Versioning:** All endpoints are exposed under `/api/v1/` (e.g., `/api/v1/health`, `/api/v1/admin/audit/events`).
--   **`routes/`**: This subdirectory contains the application's routes, with each file corresponding to a distinct set of functionalities:
-    -   **`query.py`**: Exposes the core RAG functionality by providing endpoints to process user queries, retrieve past results, and manage query history.
-    -   **`health.py`**: Offers a comprehensive health check endpoint for all system components.
-    -   **`sync.py`**: Manages document synchronization, including uploading, deleting, and checking the status of documents.
-    -   **`admin.py`**: Handles all admin operations, including tenant management, API key management, system maintenance (clear/reset), and audit log access (`/admin/audit/events`).
-    -   **`documents.py`**: Document upload, retrieval, and management endpoints.
-    -   **`embeddings.py`**: Embedding generation and statistics endpoints (no clear/reset endpoints; these are now admin-only).
-    -   **`llm.py`**: LLM text generation and statistics endpoints (no clear/reset endpoints; these are now admin-only).
-    -   **`monitoring.py`**: System metrics, error logs, and monitoring endpoints.
+#### Initialize System
+```bash
+curl -X POST "http://localhost:8000/api/v1/setup/initialize" \
+  -H "Content-Type: application/json" \
+  -d '{"admin_tenant_name": "admin", "admin_tenant_description": "System administrator"}'
+```
 
-> **Note:**
-> - All endpoints are versioned under `/api/v1/` for future-proofing and backward compatibility.
-> - Tenant CRUD and clear/reset operations are now admin-only.
-> - Audit logs are accessible only to admins at `/api/v1/admin/audit/events`.
-> - For a full list of endpoints, see `docs/API_ENDPOINTS_OVERVIEW.md` or the live `/docs` (Swagger UI).
+#### Add Documents
+```bash
+# Copy files to tenant folder
+cp document.pdf data/tenants/tenant-1/documents/
 
-## 6. Getting Started (Local Development)
+# Trigger delta sync
+curl -X POST "http://localhost:8000/api/v1/sync/trigger" \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"force_full_sync": false}'
+```
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    ```
+#### Query with Metadata Filtering
+```bash
+curl -X POST "http://localhost:8000/api/v1/query/ask" \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What is machine learning?",
+    "max_sources": 5,
+    "confidence_threshold": 0.7,
+    "metadata_filters": {
+      "author": "John Doe",
+      "date_from": "2023-01-01",
+      "tags": ["AI", "research"]
+    }
+  }'
+```
 
-2.  **Configure Environment:**
-    - Copy the `.env.example` file to `.env`.
-    - Populate the `.env` file with your local configuration details (database paths, folder paths, etc.).
+## 📚 API Documentation
 
-3.  **Build and Run with Docker:**
-    - Ensure you have Docker and Docker Compose installed, along with the NVIDIA Container Toolkit for GPU support.
-    - Run the following command:
-    ```bash
-    docker-compose up --build
-    ```
+### Health Checks
+- `GET /api/v1/health` - Basic health check
+- `GET /api/v1/health/detailed` - Comprehensive system health
 
-4.  **Access the Application:**
-    - The API will be available at `http://localhost:8000`.
-    - The UI will be available at `http://localhost:3000`.
+### Query Processing
+- `POST /api/v1/query/ask` - Single query with metadata filtering
+- `POST /api/v1/query/batch` - Batch queries
+- `GET /api/v1/query/documents` - List documents with metadata
+- `GET /api/v1/query/search` - Search documents
+- `GET /api/v1/query/history` - Query history
 
-### Database Migrations
+### Delta Sync
+- `POST /api/v1/sync/trigger` - Trigger delta sync
+- `GET /api/v1/sync/status/{sync_id}` - Sync status
+- `GET /api/v1/sync/history` - Sync history
+- `GET /api/v1/sync/config` - Sync configuration
+- `POST /api/v1/sync/documents/{file_path}/process` - Process single document
 
-This project uses **Alembic** to manage all database schema changes. The `SQLAlchemy` models in `src/backend/models/` are the single source of truth for the database schema.
+### System Administration
+- `GET /api/v1/admin/system/status` - System status
+- `GET /api/v1/admin/system/metrics` - System metrics
+- `POST /api/v1/admin/tenants` - Create tenant
+- `GET /api/v1/admin/tenants` - List tenants
 
-**The `scripts/init_db.sql` file is deprecated for schema changes.** It is only used by the initial Docker container setup to create the database and user roles. Do not add or modify tables in this file.
+## 🔧 Configuration
 
-To make a change to the database schema, follow this process:
+### Environment Variables
+```bash
+# Database
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
 
-1.  **Modify a Model:** Make your desired changes to the Python models in `src/backend/models/`.
-2.  **Generate a Migration Script:** Run the `alembic revision` command from within the `backend` service container to automatically generate a migration script.
-    ```bash
-    # From your host machine, exec into the running backend container
-    docker-compose exec backend bash
+# API Settings
+API_HOST=0.0.0.0
+API_PORT=8000
+LOG_LEVEL=INFO
 
-    # Inside the container, run the autogenerate command
-    alembic revision --autogenerate -m "Your descriptive migration message"
-    ```
-3.  **Review the Script:** A new file will be created in `src/backend/migrations/versions/`. **Always review this file** to ensure it accurately reflects the changes you intended.
-4.  **Apply the Migration:** The migrations are applied automatically when the `backend` container starts up. To apply them manually for testing, you can run:
-    ```bash
-    # Inside the container
-    alembic upgrade head
-    ```
+# Embedding Model
+EMBEDDING_MODEL_PATH=/path/to/model
+EMBEDDING_DEVICE=cpu
 
-## 7. Project Roadmap
+# LLM Settings
+LLM_MODEL_PATH=/path/to/llm
+LLM_DEVICE=cpu
+```
 
-This `README` outlines the plan for the initial MVP. We have a comprehensive roadmap for future development, including:
+## 🧪 Testing
 
-- **Phase 2:** Enhanced Security and Access Control
-- **Phase 3:** MVP+ Core Feature Enhancements
-- **Phase 4:** Advanced Application Features
-- **Phase 5:** Conversation and Feedback
-- **Phase 6:** Enhanced UI/UX
-- **Phase 7:** Integration and Scaling
+```bash
+# Run unit tests
+pytest tests/
 
-For a detailed breakdown of all current and future tasks, please see the `tasks/tasks-prd-enterprise-rag-pipeline.md` file.
+# Run integration tests
+pytest tests/test_integration_e2e.py
 
-🎯 Usage Examples:
-# Backend (Python)
-python scripts/run_backend.py --debug --port 8080
-python scripts/run_backend.py --host 0.0.0.0
+# Quick API test
+python tests/quick_api_test.py
+```
 
-# Frontend (Bash)
-./scripts/run_frontend.sh --port 4000
-./scripts/run_frontend.sh --host 0.0.0.0 --install
+## 📊 Monitoring
 
-# Frontend (PowerShell)
-.\scripts\run_frontend.ps1 -Port 4000
-.\scripts\run_frontend.ps1 -HostAddress 0.0.0.0 -Install
+### Health Checks
+- System component status
+- Vector store connectivity
+- Embedding service health
+- LLM service health
 
-## 8. Data Synchronization and Embedding Generation
+### Metrics
+- Query performance
+- Sync operations
+- System resource usage
+- Error rates
 
-The platform uses a sophisticated delta synchronization process to keep tenant data up-to-date efficiently. Here's how it works:
+## 🔒 Security
 
-### How it Works (The Workflow)
+- **API Key Authentication**: Secure tenant isolation
+- **Input Validation**: Comprehensive request validation
+- **Error Handling**: Secure error responses
+- **Rate Limiting**: Configurable rate limits
+- **Audit Logging**: Operation tracking (admin only)
 
-1.  **File Arrival**: An external process (e.g., a OneDrive or Dropbox sync client) is responsible for copying files from a customer's network into a tenant-specific staging directory: `/data/tenants/{tenant_id}/uploads/`.
-2.  **Manual Trigger**: The entire sync and embedding process is kicked off **manually** by an API call. It does not run on an automatic schedule.
-3.  **API Request**: An administrator or an automated script makes a `POST` request to the `/api/v1/sync` endpoint, specifying the tenant ID in the `X-Tenant-Id` header.
-4.  **Delta Detection**: This API call activates the `DeltaSyncService`, which compares the files in the `/uploads` directory with the files in the internal source-of-truth `/documents` directory. By comparing file hashes, it identifies exactly which files are new, which have been updated, and which have been deleted.
-5.  **Processing & Embedding Generation**:
-    *   **New/Updated Files**: The service copies the files from `uploads` to `documents`. It then triggers the `DocumentIngestionPipeline`, which reads the content, splits it into chunks, and **generates vector embeddings** for each chunk. The content and embeddings are stored in the database and vector store.
-    *   **Deleted Files**: The service finds the corresponding document record in the database, instructs the pipeline to delete all associated data (including embeddings), and finally removes the file from the `documents` directory.
+## 🚀 Deployment
 
-### How to Trigger a Sync
+### Docker Deployment
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
 
-The sync process must be triggered for each tenant individually. Use a tool like `curl` or any API client to make a `POST` request.
+# Or build individual services
+docker build -f docker/Dockerfile.backend -t rag-backend .
+docker build -f docker/Dockerfile.frontend -t rag-frontend .
+```
 
--   **To sync Tenant 1:**
-    ```bash
-    curl -X POST http://localhost:8000/api/v1/sync -H "X-Tenant-Id: tenant1"
-    ```
--   **To sync Tenant 2:**
-    ```bash
-    curl -X POST http://localhost:8000/api/v1/sync -H "X-Tenant-Id: tenant2"
-    ```
+### Production Considerations
+- Use external Qdrant instance
+- Configure proper logging
+- Set up monitoring and alerting
+- Implement backup strategies
+- Use HTTPS in production
 
-### How Often to Sync (Automation)
+## 🤝 Contributing
 
-For automation, it is recommended to set up a **cron job** (on Linux/macOS) or a **Scheduled Task** (on Windows) to call these API endpoints at a regular interval (e.g., every hour or once per day), depending on your business requirements.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
 
-### 9. Auditing the Sync Process
+## 📄 License
 
-To provide full visibility and traceability, the system includes a comprehensive auditing feature for the document synchronization process. Every sync run and every individual file operation is recorded in a persistent log in the database.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-#### The Benefits of Auditing
+## 🆘 Support
 
-*   **Complete Visibility**: See a step-by-step history of every sync run, including what files were added, updated, or deleted.
-*   **Faster Debugging**: If a document fails to process, the audit log will contain the specific error message, making it easy to diagnose the root cause.
-*   **Historical Record**: Maintain a permanent, verifiable ledger of all document operations for security and compliance purposes.
-*   **Foundation for Monitoring**: The audit data can be used to build monitoring dashboards or automated alerts (e.g., get an email if a sync run fails).
-
-#### How It Works
-
-1.  **`sync_events` Table**: A new table in the database, `sync_events`, stores the audit trail.
-2.  **`AuditLogger` Service**: A dedicated service is responsible for writing events to this table.
-3.  **Automatic Logging**: The `DeltaSyncService` automatically calls the `AuditLogger` to record the following events:
-    *   The start and end of each complete sync run.
-    *   The outcome (`SUCCESS` or `FAILURE`) of every individual file operation (add, update, delete).
-    *   Any error messages associated with a failure.
-
-This creates a detailed and permanent record of all data ingestion activities within the system, turning the previously "black box" sync process into a fully transparent and debuggable one.
-
-## 10. Backend Directory Structure
-
-- **`src/backend/core`**: Core business logic, including services for syncing, auditing, and tenant management.
-- **`src/backend/models`**: Defines Pydantic models for API request/response validation.
-- **`src/backend/api`**: FastAPI routing and endpoints.
-- **`src/backend/services`**: Business logic for interacting with documents, tenants, etc.
-- **`src/backend/utils`**: Core utilities including the `VectorStoreManager` for Qdrant.
+For support and questions:
+- Check the documentation
+- Review the API documentation at `/docs`
+- Open an issue on GitHub
+- Contact the development team

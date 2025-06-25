@@ -183,14 +183,25 @@ class SyncConfigResponse(BaseModel):
 # QUERY PROCESSING MODELS
 # =============================================================================
 
+class MetadataFilters(BaseModel):
+    """Metadata filters for query processing."""
+    author: Optional[str] = Field(None, description="Filter by author")
+    date_from: Optional[str] = Field(None, description="Filter by date from (YYYY-MM-DD)")
+    date_to: Optional[str] = Field(None, description="Filter by date to (YYYY-MM-DD)")
+    tags: Optional[List[str]] = Field(None, description="Filter by tags")
+    document_type: Optional[str] = Field(None, description="Filter by document type")
+    title: Optional[str] = Field(None, description="Filter by document title")
+    category: Optional[str] = Field(None, description="Filter by document category")
+
 class QueryRequest(BaseModel):
-    """RAG query request."""
+    """RAG query request with metadata filtering."""
     query: str = Field(..., min_length=1, max_length=2000, description="User query")
     max_sources: int = Field(5, ge=1, le=20, description="Maximum number of sources")
     confidence_threshold: float = Field(0.5, ge=0.0, le=1.0, description="Confidence threshold")
+    metadata_filters: Optional[MetadataFilters] = Field(None, description="Metadata filters")
 
 class SourceCitation(BaseModel):
-    """Source document citation."""
+    """Source document citation with metadata."""
     id: str = Field(..., description="Source ID")
     text: str = Field(..., description="Source text content")
     score: float = Field(..., description="Relevance score")
@@ -198,7 +209,8 @@ class SourceCitation(BaseModel):
     document_name: str = Field(..., description="Document name")
     page_number: Optional[int] = Field(None, description="Page number")
     chunk_index: Optional[int] = Field(None, description="Chunk index")
-
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Document metadata")
+    
 class QueryResponse(BaseModel):
     """RAG query response."""
     query: str = Field(..., description="Original query")
@@ -210,10 +222,11 @@ class QueryResponse(BaseModel):
     model_used: Optional[str] = Field(None, description="Model used for generation")
 
 class QueryBatchRequest(BaseModel):
-    """Batch query request."""
+    """Batch query request with metadata filtering."""
     queries: List[str] = Field(..., min_items=1, max_items=10, description="List of queries")
     max_sources: int = Field(5, ge=1, le=20, description="Maximum sources per query")
     confidence_threshold: float = Field(0.5, ge=0.0, le=1.0, description="Confidence threshold")
+    metadata_filters: Optional[MetadataFilters] = Field(None, description="Metadata filters")
 
 class QueryBatchResponse(BaseModel):
     """Batch query response."""
@@ -243,8 +256,22 @@ class QueryFeedbackResponse(BaseModel):
 # DOCUMENT MANAGEMENT MODELS
 # =============================================================================
 
+class DocumentMetadata(BaseModel):
+    """Document metadata."""
+    title: Optional[str] = Field(None, description="Document title")
+    author: Optional[str] = Field(None, description="Document author")
+    date_created: Optional[str] = Field(None, description="Creation date")
+    date_modified: Optional[str] = Field(None, description="Last modified date")
+    tags: List[str] = Field(default_factory=list, description="Document tags")
+    category: Optional[str] = Field(None, description="Document category")
+    summary: Optional[str] = Field(None, description="Document summary")
+    language: Optional[str] = Field(None, description="Document language")
+    page_count: Optional[int] = Field(None, description="Number of pages")
+    word_count: Optional[int] = Field(None, description="Word count")
+    file_hash: Optional[str] = Field(None, description="File hash for delta sync")
+
 class DocumentResponse(BaseModel):
-    """Document information."""
+    """Document information with metadata."""
     id: str = Field(..., description="Document ID")
     name: str = Field(..., description="Document name")
     file_path: str = Field(..., description="File path")
@@ -254,6 +281,9 @@ class DocumentResponse(BaseModel):
     last_modified: datetime = Field(..., description="Last modification")
     chunk_count: int = Field(..., description="Number of chunks")
     status: str = Field(..., description="Processing status")
+    metadata: Optional[DocumentMetadata] = Field(None, description="Document metadata")
+    embedding_count: int = Field(0, description="Number of embeddings")
+    processing_time: Optional[float] = Field(None, description="Processing time in seconds")
 
 class DocumentListResponse(BaseModel):
     """Document list response."""

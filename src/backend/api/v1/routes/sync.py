@@ -1,19 +1,23 @@
 """
-Document synchronization API endpoints.
+Delta Sync API endpoints for the Enterprise RAG Platform.
 
-This module provides per-tenant endpoints for:
-- Triggering document sync operations
-- Managing sync configuration
-- Viewing sync history and status
-- Document management
+This module provides endpoints for:
+- Delta sync operations with hash tracking
+- Sync status and history
+- Sync configuration
+- Document processing with metadata extraction
 
 All endpoints are scoped to the authenticated tenant.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Depends, Query
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
+import hashlib
+import os
+from pathlib import Path
+import logging
 
 from ...models.api_models import (
     SyncTriggerRequest,
@@ -21,30 +25,34 @@ from ...models.api_models import (
     SyncHistoryResponse,
     SyncConfigRequest,
     SyncConfigResponse,
-    DocumentResponse,
-    DocumentListResponse,
-    DocumentUploadResponse,
     ErrorResponse
 )
 from ...core.delta_sync import DeltaSync
-from ...core.document_service import DocumentService
-from ...core.embedding_manager import EmbeddingManager
-from ...middleware.auth import get_current_tenant
+from src.backend.middleware.auth import get_current_tenant
 from ...config.settings import get_settings
 
-router = APIRouter(prefix="/sync", tags=["Document Sync"])
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/sync", tags=["Delta Sync"])
 
 # =============================================================================
-# SYNC OPERATIONS
+# DELTA SYNC OPERATIONS
 # =============================================================================
 
 @router.post("/trigger", response_model=SyncResponse)
-async def trigger_sync(
+async def trigger_delta_sync(
     request: SyncTriggerRequest,
     current_tenant: dict = Depends(get_current_tenant)
 ):
     """
-    Trigger a document synchronization operation.
+    Trigger a delta sync operation.
+    
+    Delta sync:
+    1. Scans tenant's document folder
+    2. Calculates file hashes
+    3. Compares with stored hashes
+    4. Only processes changed files (new, modified, deleted)
+    5. Extracts metadata and generates embeddings
+    6. Updates Qdrant collections
     
     Args:
         request: Sync trigger details
@@ -63,12 +71,12 @@ async def trigger_sync(
             tenant_id=tenant_id,
             status="pending",
             started_at=datetime.utcnow(),
-            progress={"message": "Sync queued"}
+            progress={"message": "Delta sync queued"}
         )
         
-        # Start sync operation (async)
+        # Start delta sync operation (async)
         delta_sync = DeltaSync(tenant_id=tenant_id)
-        await delta_sync.start_sync(
+        await delta_sync.start_delta_sync(
             sync_id=sync_id,
             force_full_sync=request.force_full_sync,
             document_paths=request.document_paths
@@ -77,9 +85,10 @@ async def trigger_sync(
         return sync_response
         
     except Exception as e:
+        logger.error(f"Failed to trigger delta sync: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to trigger sync: {str(e)}"
+            detail=f"Failed to trigger delta sync: {str(e)}"
         )
 
 @router.get("/status/{sync_id}", response_model=SyncResponse)
@@ -95,7 +104,7 @@ async def get_sync_status(
         current_tenant: Current tenant (from auth)
         
     Returns:
-        SyncResponse: Sync operation status
+        SyncResponse: Sync operation status with detailed progress
     """
     try:
         tenant_id = current_tenant["tenant_id"]
@@ -112,6 +121,7 @@ async def get_sync_status(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to get sync status: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get sync status: {str(e)}"
@@ -147,6 +157,7 @@ async def get_sync_history(
         )
         
     except Exception as e:
+        logger.error(f"Failed to get sync history: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get sync history: {str(e)}"
@@ -182,6 +193,7 @@ async def cancel_sync(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to cancel sync: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to cancel sync: {str(e)}"
@@ -214,9 +226,10 @@ async def get_sync_config(
         return config
         
     except Exception as e:
+        logger.error(f"Failed to get sync config: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get sync config: {str(e)}"
+            detail=f"Failed to get sync configuration: {str(e)}"
         )
 
 @router.put("/config", response_model=SyncConfigResponse)
@@ -251,160 +264,10 @@ async def update_sync_config(
         return updated_config
         
     except Exception as e:
+        logger.error(f"Failed to update sync config: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update sync config: {str(e)}"
-        )
-
-# =============================================================================
-# DOCUMENT MANAGEMENT
-# =============================================================================
-
-@router.post("/documents/upload", response_model=DocumentUploadResponse)
-async def upload_document(
-    file: UploadFile = File(...),
-    current_tenant: dict = Depends(get_current_tenant)
-):
-    """
-    Upload a document for processing.
-    
-    Args:
-        file: Document file to upload
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        DocumentUploadResponse: Upload result
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Validate file type
-        settings = get_settings()
-        if file.content_type not in settings.supported_file_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {file.content_type}"
-            )
-        
-        # Upload and process document
-        document_service = DocumentService(tenant_id=tenant_id)
-        result = await document_service.upload_document(file)
-        
-        return DocumentUploadResponse(
-            document_id=result["document_id"],
-            name=result["name"],
-            status=result["status"],
-            message=result["message"]
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to upload document: {str(e)}"
-        )
-
-@router.get("/documents", response_model=DocumentListResponse)
-async def list_documents(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_tenant: dict = Depends(get_current_tenant)
-):
-    """
-    List documents for the current tenant.
-    
-    Args:
-        page: Page number for pagination
-        page_size: Number of documents per page
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        DocumentListResponse: List of documents with pagination
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Get documents
-        document_service = DocumentService(tenant_id=tenant_id)
-        documents = await document_service.list_documents(page=page, page_size=page_size)
-        
-        return documents
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list documents: {str(e)}"
-        )
-
-@router.get("/documents/{document_id}", response_model=DocumentResponse)
-async def get_document(
-    document_id: str,
-    current_tenant: dict = Depends(get_current_tenant)
-):
-    """
-    Get document details.
-    
-    Args:
-        document_id: Document ID
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        DocumentResponse: Document information
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Get document
-        document_service = DocumentService(tenant_id=tenant_id)
-        document = await document_service.get_document(document_id)
-        
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
-            
-        return document
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get document: {str(e)}"
-        )
-
-@router.delete("/documents/{document_id}")
-async def delete_document(
-    document_id: str,
-    current_tenant: dict = Depends(get_current_tenant)
-):
-    """
-    Delete a document.
-    
-    Args:
-        document_id: Document ID
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        dict: Deletion confirmation
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Delete document
-        document_service = DocumentService(tenant_id=tenant_id)
-        success = await document_service.delete_document(document_id)
-        
-        if not success:
-            raise HTTPException(status_code=404, detail="Document not found")
-            
-        return {"message": f"Document {document_id} deleted successfully"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete document: {str(e)}"
+            detail=f"Failed to update sync configuration: {str(e)}"
         )
 
 # =============================================================================
@@ -422,7 +285,7 @@ async def get_sync_stats(
         current_tenant: Current tenant (from auth)
         
     Returns:
-        dict: Sync statistics
+        dict: Sync statistics including file counts, processing times, etc.
     """
     try:
         tenant_id = current_tenant["tenant_id"]
@@ -431,10 +294,102 @@ async def get_sync_stats(
         delta_sync = DeltaSync(tenant_id=tenant_id)
         stats = await delta_sync.get_sync_stats()
         
-        return stats
+        return {
+            "tenant_id": tenant_id,
+            "total_files": stats.get("total_files", 0),
+            "processed_files": stats.get("processed_files", 0),
+            "pending_files": stats.get("pending_files", 0),
+            "failed_files": stats.get("failed_files", 0),
+            "last_sync": stats.get("last_sync"),
+            "next_sync": stats.get("next_sync"),
+            "sync_duration_avg": stats.get("sync_duration_avg", 0),
+            "files_processed_avg": stats.get("files_processed_avg", 0),
+            "embedding_count": stats.get("embedding_count", 0),
+            "metadata_count": stats.get("metadata_count", 0)
+        }
         
     except Exception as e:
+        logger.error(f"Failed to get sync stats: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get sync stats: {str(e)}"
+            detail=f"Failed to get sync statistics: {str(e)}"
+        )
+
+# =============================================================================
+# DOCUMENT PROCESSING
+# =============================================================================
+
+@router.post("/documents/{file_path:path}/process")
+async def process_single_document(
+    file_path: str,
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Process a single document manually.
+    
+    Args:
+        file_path: Path to the document relative to tenant's document folder
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        dict: Processing result
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Process single document
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        result = await delta_sync.process_single_document(file_path)
+        
+        return {
+            "file_path": file_path,
+            "success": result.success,
+            "message": result.message,
+            "metadata": result.metadata,
+            "embedding_count": result.embedding_count,
+            "processing_time": result.processing_time
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to process document {file_path}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process document: {str(e)}"
+        )
+
+@router.delete("/documents/{file_path:path}")
+async def remove_document(
+    file_path: str,
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Remove a document from Qdrant (does not delete the file).
+    
+    Args:
+        file_path: Path to the document relative to tenant's document folder
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        dict: Removal result
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Remove document from Qdrant
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        result = await delta_sync.remove_document(file_path)
+        
+        return {
+            "file_path": file_path,
+            "success": result.success,
+            "message": result.message,
+            "removed_embeddings": result.removed_embeddings,
+            "removed_metadata": result.removed_metadata
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to remove document {file_path}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to remove document: {str(e)}"
         ) 

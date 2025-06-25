@@ -70,8 +70,20 @@ class RAGPipeline:
             raise RuntimeError("Failed to retrieve document context.") from e
 
         try:
-            context_str = "\n".join([chunk['text'] for chunk in retrieved_chunks])
-            llm_response = self.llm_service.generate_response(query, context_str)
+            # Convert chunks to sources format for LLM
+            sources = []
+            for chunk in retrieved_chunks:
+                source = {
+                    "content": chunk['text'],
+                    "score": chunk['score'],
+                    "source": chunk.get('source'),
+                    "page_number": chunk.get('page_number'),
+                    "document_id": chunk.get('document_id'),
+                }
+                sources.append(source)
+            
+            # Use async LLM generation
+            llm_response = await self.llm_service.generate_rag_response_async(query, sources)
         except Exception as e:
             logger.error(f"Error during LLM generation for tenant '{tenant_id}': {e}", exc_info=True)
             raise RuntimeError("Failed to generate a response from the language model.") from e
@@ -104,13 +116,16 @@ class RAGPipeline:
             A list of retrieved chunks, each as a dictionary.
         """
         logger.info(f"Generating embedding for query: '{query}'")
-        query_embedding_result = self.embedding_service.encode_texts([query])
         
-        if not query_embedding_result.success or not query_embedding_result.embeddings:
+        # Use async embedding generation
+        from .embedding_manager import embed_texts_async
+        embedding_result = await embed_texts_async([query], tenant_id)
+        
+        if not embedding_result.success or len(embedding_result.embeddings) == 0:
             logger.error("Failed to generate query embedding.")
             return []
             
-        query_embedding = query_embedding_result.embeddings[0]
+        query_embedding = embedding_result.embeddings[0]
 
         logger.info(f"Searching vector store for tenant '{tenant_id}'...")
         

@@ -82,6 +82,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "allow"  # Allow extra environment variables
 
     def get_embedding_config(self) -> dict:
         """Get embedding model configuration."""

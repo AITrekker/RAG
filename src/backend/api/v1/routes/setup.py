@@ -12,16 +12,16 @@ import os
 import json
 from datetime import datetime
 
-from ...models.api_models import (
+from src.backend.models.api_models import (
     SetupCheckResponse,
     SetupInitializeRequest,
     SetupInitializeResponse,
     ErrorResponse
 )
-from ...core.tenant_service import TenantService
-from ...core.embedding_manager import EmbeddingManager
-from ...middleware.auth import get_current_tenant
-from ...config.settings import get_settings
+from src.backend.core.tenant_service import TenantService
+from src.backend.core.embedding_manager import EmbeddingManager
+from src.backend.middleware.auth import get_current_tenant
+from src.backend.config.settings import get_settings
 
 router = APIRouter(prefix="/setup", tags=["Setup & Initialization"])
 

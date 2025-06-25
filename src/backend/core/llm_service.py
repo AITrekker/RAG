@@ -19,6 +19,7 @@ from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 from datetime import datetime
 import gc
+import asyncio
 
 # Hugging Face imports
 from transformers import (
@@ -215,97 +216,92 @@ class LLMService:
         repetition_penalty: float = 1.1
     ) -> LLMResponse:
         """
-        Generate response using the LLM
+        Generate a response from the LLM
         
         Args:
             prompt: Input prompt
             context: Optional context information
-            max_new_tokens: Maximum number of new tokens to generate
-            temperature: Generation temperature (overrides default)
+            max_new_tokens: Maximum tokens to generate
+            temperature: Generation temperature
             do_sample: Whether to use sampling
             top_p: Top-p sampling parameter
             top_k: Top-k sampling parameter
             repetition_penalty: Repetition penalty
             
         Returns:
-            LLMResponse with generated text and metadata
+            LLMResponse object
         """
         if not self.pipeline:
-            self.load_model()
+            return LLMResponse(
+                text="",
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                generation_time=0.0,
+                model_name=self.model_name,
+                temperature=temperature or self.temperature,
+                success=False,
+                error="Model not loaded"
+            )
         
         start_time = time.time()
         
         try:
-            # Use provided parameters or defaults
-            gen_temperature = temperature if temperature is not None else self.temperature
-            max_tokens = max_new_tokens or min(self.max_length, 256)
+            # Prepare the prompt
+            full_prompt = self._prepare_prompt(prompt, context)
             
-            # Prepare full prompt with context using a structured template
-            full_prompt = self._prepare_rag_prompt(prompt, context)
+            # Tokenize to get prompt length
+            prompt_tokens = len(self.tokenizer.encode(full_prompt))
             
-            # Count input tokens
-            input_tokens = len(self.tokenizer.encode(full_prompt))
+            # Set generation parameters
+            max_new_tokens = max_new_tokens or self.max_length
+            temperature = temperature or self.temperature
             
             # Generate response
             generation_kwargs = {
-                "max_new_tokens": max_tokens,
-                "temperature": gen_temperature,
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
                 "do_sample": do_sample,
                 "top_p": top_p,
                 "top_k": top_k,
                 "repetition_penalty": repetition_penalty,
                 "pad_token_id": self.tokenizer.eos_token_id,
+                "eos_token_id": self.tokenizer.eos_token_id,
             }
-
-            # The 'text2text-generation' pipeline does not support 'return_full_text'
-            if self.pipeline.task == "text-generation":
-                generation_kwargs["return_full_text"] = False
-
-            response = self.pipeline(
-                full_prompt,
-                **generation_kwargs
-            )
             
-            # Extract generated text
-            if response and len(response) > 0:
-                generated_text = response[0]["generated_text"]
-            else:
-                generated_text = ""
+            # Generate
+            outputs = self.pipeline(full_prompt, **generation_kwargs)
+            generated_text = outputs[0]["generated_text"]
             
-            # Clean up the response to remove the prompt
-            if full_prompt in generated_text:
-                generated_text = generated_text.replace(full_prompt, "").strip()
+            # Extract only the new content (remove the prompt)
+            response_text = generated_text[len(full_prompt):].strip()
 
-            # Count output tokens
-            output_tokens = len(self.tokenizer.encode(generated_text))
-            total_tokens = input_tokens + output_tokens
+            # Calculate token counts
+            completion_tokens = len(self.tokenizer.encode(response_text))
+            total_tokens = prompt_tokens + completion_tokens
             
             generation_time = time.time() - start_time
             
             # Update statistics
             self.generation_times.append(generation_time)
-            self.total_tokens_generated += output_tokens
+            self.total_tokens_generated += completion_tokens
             
-            # Create response
-            response = LLMResponse(
-                text=generated_text,
-                prompt_tokens=input_tokens,
-                completion_tokens=output_tokens,
+            logger.debug(f"Generated {completion_tokens} tokens in {generation_time:.3f}s")
+            
+            return LLMResponse(
+                text=response_text,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 generation_time=generation_time,
                 model_name=self.model_name,
-                temperature=gen_temperature,
+                temperature=temperature,
                 success=True
             )
             
-            logger.info(f"Generated response in {generation_time:.3f}s")
-            logger.info(f"Tokens: {input_tokens} input + {output_tokens} output = {total_tokens} total")
-            
-            return response
-            
         except Exception as e:
             generation_time = time.time() - start_time
-            logger.error(f"Failed to generate response: {e}")
+            logger.error(f"Error generating response: {e}")
             
             return LLMResponse(
                 text="",
@@ -314,38 +310,73 @@ class LLMService:
                 total_tokens=0,
                 generation_time=generation_time,
                 model_name=self.model_name,
-                temperature=gen_temperature,
+                temperature=temperature or self.temperature,
                 success=False,
                 error=str(e)
             )
     
+    async def generate_response_async(
+        self,
+        prompt: str,
+        context: Optional[List[str]] = None,
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        do_sample: bool = True,
+        top_p: float = 0.9,
+        top_k: int = 50,
+        repetition_penalty: float = 1.1
+    ) -> LLMResponse:
+        """
+        Generate a response from the LLM asynchronously
+        
+        Args:
+            prompt: Input prompt
+            context: Optional context information
+            max_new_tokens: Maximum tokens to generate
+            temperature: Generation temperature
+            do_sample: Whether to use sampling
+            top_p: Top-p sampling parameter
+            top_k: Top-k sampling parameter
+            repetition_penalty: Repetition penalty
+            
+        Returns:
+            LLMResponse object
+        """
+        # Run the sync method in a thread pool for CPU/GPU-bound work
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self.generate_response,
+            prompt,
+            context,
+            max_new_tokens,
+            temperature,
+            do_sample,
+            top_p,
+            top_k,
+            repetition_penalty
+            )
+    
     def _prepare_rag_prompt(self, query: str, context: Optional[List[str]] = None) -> str:
-        """Prepares a structured prompt for RAG."""
+        """Prepare a RAG-style prompt with context"""
         if not context:
-            # For Falcon-Instruct, a simple user/assistant format works well without context.
-            return f"User: {query}\nAssistant:"
+            return query
 
-        context_str = "\n\n".join(context)
-        prompt = f"""Answer the following question based on the provided context. If the context does not contain the answer, say "I cannot answer this question based on the provided context."
-
-Context:
----
-{context_str}
----
+        context_text = "\n\n".join(context)
+        return f"""Context information:
+{context_text}
 
 Question: {query}
 
 Answer:"""
-        return prompt
 
     def _prepare_prompt(self, prompt: str, context: Optional[List[str]] = None) -> str:
-        """Prepares a full prompt by combining a query and optional context.
-        DEPRECATED: Use _prepare_rag_prompt for clearer RAG structure.
-        """
-        if context:
-            context_str = "\n\n".join(context)
-            return f"Context:\n{context_str}\n\nQuestion: {prompt}\nAnswer:"
+        """Prepare the full prompt with optional context"""
+        if not context:
         return prompt
+        
+        context_text = "\n\n".join(context)
+        return f"Context: {context_text}\n\nQuestion: {prompt}\n\nAnswer:"
 
     def generate_rag_response(
         self,
@@ -355,24 +386,62 @@ Answer:"""
         temperature: Optional[float] = None
     ) -> LLMResponse:
         """
-        Generate RAG response using provided sources
+        Generate a RAG response using provided sources
         
         Args:
             query: User query
-            sources: List of source documents with text and metadata
+            sources: List of source documents
             max_new_tokens: Maximum tokens to generate
             temperature: Generation temperature
             
         Returns:
-            LLMResponse with generated answer
+            LLMResponse object
         """
-        full_prompt = self._prepare_rag_prompt(query, [source['text'] for source in sources])
+        # Extract context from sources
+        context = []
+        for source in sources:
+            if "content" in source:
+                context.append(source["content"])
+            elif "text" in source:
+                context.append(source["text"])
+        
+        # Use RAG prompt format
+        prompt = self._prepare_rag_prompt(query, context)
         
         return self.generate_response(
-            prompt=full_prompt,  # The prompt is now the full structured text
-            context=None, # Context is already in the prompt
+            prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature
+        )
+    
+    async def generate_rag_response_async(
+        self,
+        query: str,
+        sources: List[Dict[str, Any]],
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None
+    ) -> LLMResponse:
+        """
+        Generate a RAG response using provided sources asynchronously
+        
+        Args:
+            query: User query
+            sources: List of source documents
+            max_new_tokens: Maximum tokens to generate
+            temperature: Generation temperature
+            
+        Returns:
+            LLMResponse object
+        """
+        # Run the sync method in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self.generate_rag_response,
+            query,
+            sources,
+            max_new_tokens,
+            temperature
         )
     
     def batch_generate(
@@ -382,7 +451,7 @@ Answer:"""
         temperature: Optional[float] = None
     ) -> List[LLMResponse]:
         """
-        Generate responses for multiple prompts
+        Generate responses for multiple prompts (synchronous)
         
         Args:
             prompts: List of prompts
@@ -407,6 +476,64 @@ Answer:"""
         
         logger.info(f"Batch generation completed: {len(responses)} responses")
         return responses
+    
+    async def batch_generate_async(
+        self,
+        prompts: List[str],
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        max_concurrent: int = 3
+    ) -> List[LLMResponse]:
+        """
+        Generate responses for multiple prompts asynchronously with concurrency control
+        
+        Args:
+            prompts: List of prompts
+            max_new_tokens: Maximum tokens per response
+            temperature: Generation temperature
+            max_concurrent: Maximum concurrent generations
+            
+        Returns:
+            List of LLMResponse objects
+        """
+        logger.info(f"Generating async batch of {len(prompts)} responses (max {max_concurrent} concurrent)")
+        
+        # Create semaphore to limit concurrent operations
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def generate_single(prompt: str) -> LLMResponse:
+            async with semaphore:
+                return await self.generate_response_async(
+                    prompt,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature
+                )
+        
+        # Generate all responses concurrently
+        tasks = [generate_single(prompt) for prompt in prompts]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Handle any exceptions
+        final_responses = []
+        for i, response in enumerate(responses):
+            if isinstance(response, Exception):
+                logger.error(f"Error generating response {i+1}: {response}")
+                final_responses.append(LLMResponse(
+                    text="",
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    generation_time=0.0,
+                    model_name=self.model_name,
+                    temperature=temperature or self.temperature,
+                    success=False,
+                    error=str(response)
+                ))
+            else:
+                final_responses.append(response)
+        
+        logger.info(f"Async batch generation completed: {len(final_responses)} responses")
+        return final_responses
     
     def get_stats(self) -> Dict[str, Any]:
         """Get LLM service performance statistics"""
@@ -556,6 +683,27 @@ def generate_answer(
     return response.text if response.success else "Sorry, I couldn't generate a response."
 
 
+async def generate_answer_async(
+    question: str,
+    context: Optional[List[str]] = None,
+    model_name: Optional[str] = None
+) -> str:
+    """
+    Simple async function to generate an answer to a question
+    
+    Args:
+        question: Question to answer
+        context: Optional context information
+        model_name: Optional model to use
+        
+    Returns:
+        Generated answer text
+    """
+    llm_service = get_llm_service(model_name)
+    response = await llm_service.generate_response_async(question, context)
+    return response.text if response.success else "Sorry, I couldn't generate a response."
+
+
 def generate_rag_answer(
     query: str,
     sources: List[Dict[str, Any]],
@@ -577,7 +725,33 @@ def generate_rag_answer(
     return response.text if response.success else "Sorry, I couldn't generate a response."
 
 
+async def generate_rag_answer_async(
+    query: str,
+    sources: List[Dict[str, Any]],
+    model_name: Optional[str] = None
+) -> str:
+    """
+    Generate RAG answer using provided sources asynchronously
+    
+    Args:
+        query: User query
+        sources: List of source documents
+        model_name: Optional model to use
+        
+    Returns:
+        Generated answer text
+    """
+    llm_service = get_llm_service(model_name)
+    response = await llm_service.generate_rag_response_async(query, sources)
+    return response.text if response.success else "Sorry, I couldn't generate a response."
+
+
 def get_llm_stats() -> Dict[str, Any]:
-    """Get stats from the global LLM service"""
+    """
+    Get performance statistics from the global LLM service.
+    
+    Returns:
+        A dictionary of performance stats.
+    """
     llm_service = get_llm_service()
     return llm_service.get_stats() 

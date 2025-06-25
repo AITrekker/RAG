@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import shutil
 from setuptools import setup, find_packages
 from pathlib import Path
 
@@ -24,6 +25,57 @@ def install_requirements():
         print("Error: 'pip' command not found. Is pip installed and in your PATH?")
         sys.exit(1)
 
+def setup_environment_file():
+    """Create .env file from .env.example if it doesn't exist."""
+    env_example = Path(".env.example")
+    env_file = Path(".env")
+    
+    if env_example.exists() and not env_file.exists():
+        try:
+            shutil.copy(env_example, env_file)
+            print("Created .env file from .env.example")
+        except Exception as e:
+            print(f"Warning: Could not create .env file: {e}")
+            print("   You may need to create it manually: copy .env.example .env")
+    elif env_file.exists():
+        print(".env file already exists")
+    else:
+        print("Warning: .env.example not found")
+        print("   You may need to create .env file manually")
+
+def create_directories():
+    """Create essential directories if they don't exist."""
+    directories = [
+        "data/tenants",
+        "logs",
+        "cache/transformers",
+        "cache/huggingface"
+    ]
+    
+    for directory in directories:
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            try:
+                dir_path.mkdir(parents=True, exist_ok=True)
+                print(f"Created directory: {directory}")
+            except Exception as e:
+                print(f"Warning: Could not create {directory}: {e}")
+
+def print_setup_summary():
+    """Print setup completion summary."""
+    print("\n" + "="*50)
+    print("SETUP COMPLETE!")
+    print("="*50)
+    print("\nNext steps:")
+    print("1. Start Qdrant: docker-compose up -d qdrant")
+    print("2. Initialize database: python scripts/db-init.py")
+    print("3. Start backend: python scripts/run_backend.py")
+    print("\nOr run everything with Docker (backend may have ML library issues):")
+    print("   docker-compose up -d")
+    print("\nFor development setup with additional checks:")
+    print("   python scripts/setup_dev.py")
+    print("="*50)
+
 # --- Main Setup Logic ---
 # Check if running in a virtual environment
 if not is_in_virtual_env():
@@ -39,8 +91,20 @@ if not is_in_virtual_env():
 
 print("Running in a virtual environment. Proceeding with installation...")
 
-# When setup.py is run for installation, install dependencies first.
+# Step 1: Create essential directories
+print("\nCreating directories...")
+create_directories()
+
+# Step 2: Setup environment file
+print("\nSetting up environment...")
+setup_environment_file()
+
+# Step 3: Install requirements
+print("\nInstalling dependencies...")
 install_requirements()
+
+# Step 4: Print summary
+print_setup_summary()
 
 setup(
     name="enterprise-rag-platform",

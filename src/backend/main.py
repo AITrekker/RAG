@@ -14,22 +14,17 @@ from contextlib import asynccontextmanager
 
 from src.backend.config.settings import get_settings
 from src.backend.api.v1.routes import (
-    documents as documents_routes,
     query as query_routes,
     health as health_routes,
     sync as sync_routes,
-    audit as audit_routes,
-    tenants as tenants_routes,
     admin as admin_routes,
-    embeddings as embeddings_routes,
-    llm as llm_routes,
-    monitoring as monitoring_routes,
+    setup as setup_routes,
 )
 from src.backend.core.embeddings import get_embedding_service, EmbeddingService
 from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
 from src.backend.core.tenant_service import get_tenant_service, TenantService
-# from src.backend.middleware.tenant_context import TenantHeaderMiddleware # Obsolete
+from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -86,8 +81,10 @@ app = FastAPI(
     openapi_url=f"{settings.api_v1_str}/openapi.json"
 )
 
-# app.add_middleware(TenantHeaderMiddleware) # Obsolete
+# Setup comprehensive error handling
+setup_exception_handlers(app)
 
+# Add middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -97,14 +94,7 @@ app.add_middleware(
 )
 
 app.middleware("http")(monitoring_middleware)
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "An internal server error occurred."},
-    )
+app.middleware("http")(error_tracking_middleware)
 
 def custom_openapi():
     if app.openapi_schema:
@@ -125,14 +115,9 @@ app.openapi = custom_openapi
 
 app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])
 app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
-app.include_router(documents_routes.router, prefix=f"{settings.api_v1_str}/documents", tags=["Documents"])
 app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
-app.include_router(audit_routes.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])
-app.include_router(tenants_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
+app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
-app.include_router(embeddings_routes.router, prefix=f"{settings.api_v1_str}/embeddings", tags=["Embeddings"])
-app.include_router(llm_routes.router, prefix=f"{settings.api_v1_str}/llm", tags=["LLM"])
-app.include_router(monitoring_routes.router, prefix=f"{settings.api_v1_str}/monitoring", tags=["Monitoring"])
 
 @app.get("/", include_in_schema=False)
 async def root():

@@ -3,19 +3,17 @@
 # =============================================================================
 # These are large, stable packages that don't change often and take time to install.
 # Install these once and reuse across environments.
+# NOTE: PyTorch (torch, torchvision, torchaudio) is pre-installed in the NVIDIA container
+# DO NOT install them via pip to avoid compatibility issues.
 
 # ===== CORE ML/AI FRAMEWORKS =====
-# PyTorch ecosystem (heavyweight - ~2GB+)
-torch>=2.1.0,<2.5.0
-torchvision>=0.16.0,<0.20.0
-torchaudio>=2.1.0,<2.5.0
-
 # Transformers ecosystem (heavyweight - ~500MB+)
-transformers==4.43.3
-sentence-transformers==3.0.1
-accelerate==0.33.0
-tokenizers>=0.15.0
-huggingface-hub>=0.20.0
+# Using versions compatible with PyTorch 2.4+ (NVIDIA container)
+transformers>=4.45.0,<5.0.0
+sentence-transformers>=3.0.1,<4.0.0
+accelerate>=0.33.0,<1.0.0
+tokenizers>=0.15.0,<1.0.0
+huggingface-hub>=0.20.0,<1.0.0
 
 # ===== RAG & VECTOR DATABASES =====
 # Qdrant (our primary vector DB)
