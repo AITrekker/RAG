@@ -281,3 +281,10 @@ The following redundant/debugging scripts were removed for clarity:
 - ~~`simple_migrate.py`~~ - Redundant with full migration script
 - ~~`manual_setup.py`~~ - Redundant with other setup scripts  
 - ~~`validate_layer2.py`~~ - Development validation script 
+
+## 🔗 API Usage Notes
+
+- All API endpoints are now versioned under `/api/v1/` (e.g., `/api/v1/health`, `/api/v1/admin/audit/events`).
+- Tenant CRUD and clear/reset operations are now admin-only.
+- Audit logs are accessible only to admins at `/api/v1/admin/audit/events`.
+- For a full list of endpoints, see `docs/API_ENDPOINTS_OVERVIEW.md` or the live `/docs` (Swagger UI). 

@@ -42,10 +42,10 @@ python tests/quick_api_test.py
 - **Endpoints Tested**:
   - Document Management (upload, list, get, delete)
   - Query Processing (RAG queries, history)
-  - Health Checks (basic, detailed, readiness, liveness)
-  - Tenant Management (CRUD operations)
+  - Health Checks (liveness, comprehensive)
+  - Admin Operations (tenant management, API key management, system maintenance, audit logs)
   - Sync Operations (trigger, status)
-  - Audit Logs (events, history)
+  - Audit Logs (admin-only, `/admin/audit/events`)
 
 ### **🧪 Unit Tests**
 - **Files**: `test_core_components.py`, `test_embedding_config.py`

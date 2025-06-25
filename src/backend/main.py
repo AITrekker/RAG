@@ -20,6 +20,10 @@ from src.backend.api.v1.routes import (
     sync as sync_routes,
     audit as audit_routes,
     tenants as tenants_routes,
+    admin as admin_routes,
+    embeddings as embeddings_routes,
+    llm as llm_routes,
+    monitoring as monitoring_routes,
 )
 from src.backend.core.embeddings import get_embedding_service, EmbeddingService
 from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
@@ -125,6 +129,10 @@ app.include_router(documents_routes.router, prefix=f"{settings.api_v1_str}/docum
 app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
 app.include_router(audit_routes.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])
 app.include_router(tenants_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
+app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
+app.include_router(embeddings_routes.router, prefix=f"{settings.api_v1_str}/embeddings", tags=["Embeddings"])
+app.include_router(llm_routes.router, prefix=f"{settings.api_v1_str}/llm", tags=["LLM"])
+app.include_router(monitoring_routes.router, prefix=f"{settings.api_v1_str}/monitoring", tags=["Monitoring"])
 
 @app.get("/", include_in_schema=False)
 async def root():

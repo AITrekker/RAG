@@ -180,11 +180,22 @@ sequenceDiagram
 
 The `src/backend/api` directory defines the web server's endpoints, acting as the primary interface between the frontend and the core backend logic.
 
+-   **API Versioning:** All endpoints are exposed under `/api/v1/` (e.g., `/api/v1/health`, `/api/v1/admin/audit/events`).
 -   **`routes/`**: This subdirectory contains the application's routes, with each file corresponding to a distinct set of functionalities:
     -   **`query.py`**: Exposes the core RAG functionality by providing endpoints to process user queries, retrieve past results, and manage query history.
-    -   **`health.py`**: Offers endpoints to monitor the application's health and the status of its connected services.
+    -   **`health.py`**: Offers a comprehensive health check endpoint for all system components.
     -   **`sync.py`**: Manages document synchronization, including uploading, deleting, and checking the status of documents.
-    -   **`tenants.py`**: Handles tenant management, allowing for the creation, deletion, and configuration of different tenants.
+    -   **`admin.py`**: Handles all admin operations, including tenant management, API key management, system maintenance (clear/reset), and audit log access (`/admin/audit/events`).
+    -   **`documents.py`**: Document upload, retrieval, and management endpoints.
+    -   **`embeddings.py`**: Embedding generation and statistics endpoints (no clear/reset endpoints; these are now admin-only).
+    -   **`llm.py`**: LLM text generation and statistics endpoints (no clear/reset endpoints; these are now admin-only).
+    -   **`monitoring.py`**: System metrics, error logs, and monitoring endpoints.
+
+> **Note:**
+> - All endpoints are versioned under `/api/v1/` for future-proofing and backward compatibility.
+> - Tenant CRUD and clear/reset operations are now admin-only.
+> - Audit logs are accessible only to admins at `/api/v1/admin/audit/events`.
+> - For a full list of endpoints, see `docs/API_ENDPOINTS_OVERVIEW.md` or the live `/docs` (Swagger UI).
 
 ## 6. Getting Started (Local Development)
 

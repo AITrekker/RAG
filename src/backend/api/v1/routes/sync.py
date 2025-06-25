@@ -1,110 +1,440 @@
 """
-Sync API endpoints for document synchronization operations.
+Document synchronization API endpoints.
 
-Provides an endpoint for triggering a manual sync operation for a tenant.
+This module provides per-tenant endpoints for:
+- Triggering document sync operations
+- Managing sync configuration
+- Viewing sync history and status
+- Document management
+
+All endpoints are scoped to the authenticated tenant.
 """
 
-import logging
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
+from typing import List, Optional
+from datetime import datetime
 import uuid
-from datetime import datetime, timezone
-from typing import Dict
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-
-from src.backend.api.v1.providers import get_delta_sync
-from src.backend.core.delta_sync import DeltaSync
-from src.backend.middleware.auth import require_authentication
-from src.backend.models.api_models import (
-    SyncTriggerRequest, SyncResponse, SyncStatus, SyncType
+from ...models.api_models import (
+    SyncTriggerRequest,
+    SyncResponse,
+    SyncHistoryResponse,
+    SyncConfigRequest,
+    SyncConfigResponse,
+    DocumentResponse,
+    DocumentListResponse,
+    DocumentUploadResponse,
+    ErrorResponse
 )
+from ...core.delta_sync import DeltaSync
+from ...core.document_service import DocumentService
+from ...core.embedding_manager import EmbeddingManager
+from ...middleware.auth import get_current_tenant
+from ...config.settings import get_settings
 
-router = APIRouter(tags=["synchronization"])
+router = APIRouter(prefix="/sync", tags=["Document Sync"])
 
-logger = logging.getLogger(__name__)
+# =============================================================================
+# SYNC OPERATIONS
+# =============================================================================
 
-# This is a simplified in-memory store for sync status.
-# In a real-world scenario, you would use a persistent job queue or database
-# to track the status of background tasks.
-_active_syncs: Dict[str, SyncResponse] = {}
-
-
-@router.post("/trigger", response_model=SyncResponse, status_code=status.HTTP_202_ACCEPTED)
-async def trigger_manual_sync(
+@router.post("/trigger", response_model=SyncResponse)
+async def trigger_sync(
     request: SyncTriggerRequest,
-    background_tasks: BackgroundTasks,
-    tenant: str = Depends(require_authentication),
-    delta_sync: DeltaSync = Depends(get_delta_sync),
+    current_tenant: dict = Depends(get_current_tenant)
 ):
     """
-    Manually triggers a delta synchronization for the current tenant.
-
-    This process will run in the background and perform the following steps:
-    1. Scan the tenant's data source.
-    2. Compare the current state with the last known state from Qdrant.
-    3. Process new, modified, and deleted files.
+    Trigger a document synchronization operation.
+    
+    Args:
+        request: Sync trigger details
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        SyncResponse: Sync operation details
     """
-    # Note: The original logic to prevent concurrent syncs has been removed
-    # for simplicity. A robust implementation would use a distributed lock
-    # or a similar mechanism based on the tenant_id.
-
-    sync_id = str(uuid.uuid4())
-    sync_response = SyncResponse(
-        sync_id=sync_id,
-        tenant_id=tenant,
-        status=SyncStatus.RUNNING,
-        sync_type=SyncType.MANUAL,
-        started_at=datetime.now(timezone.utc),
-    )
-    _active_syncs[sync_id] = sync_response
-
-    # The actual sync logic runs in the background.
-    background_tasks.add_task(
-        _run_and_update_sync_status, sync_id, tenant, delta_sync
-    )
-
-    return sync_response
-
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        sync_id = str(uuid.uuid4())
+        
+        # Create sync response
+        sync_response = SyncResponse(
+            sync_id=sync_id,
+            tenant_id=tenant_id,
+            status="pending",
+            started_at=datetime.utcnow(),
+            progress={"message": "Sync queued"}
+        )
+        
+        # Start sync operation (async)
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        await delta_sync.start_sync(
+            sync_id=sync_id,
+            force_full_sync=request.force_full_sync,
+            document_paths=request.document_paths
+        )
+        
+        return sync_response
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger sync: {str(e)}"
+        )
 
 @router.get("/status/{sync_id}", response_model=SyncResponse)
-async def get_sync_status(sync_id: str, tenant: str = Depends(require_authentication)):
+async def get_sync_status(
+    sync_id: str,
+    current_tenant: dict = Depends(get_current_tenant)
+):
     """
-    Retrieves the status of a specific synchronization operation.
+    Get the status of a specific sync operation.
+    
+    Args:
+        sync_id: Sync operation ID
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        SyncResponse: Sync operation status
     """
-    sync_operation = _active_syncs.get(sync_id)
-    if not sync_operation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Sync operation not found."
-        )
-
-    # Ensure the user can only access syncs for their own tenant.
-    if sync_operation.tenant_id != tenant:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied."
-        )
-
-    return sync_operation
-
-
-async def _run_and_update_sync_status(sync_id: str, tenant_id: str, delta_sync: DeltaSync):
-    """
-    Wrapper task to run the sync and update its final status.
-    """
-    sync_op = _active_syncs[sync_id]
-    logger.info(f"Background task started for sync {sync_id}, tenant '{tenant_id}'.")
     try:
-        sync_results = await delta_sync.run_sync(tenant_id)
-        # Note: The detailed results from the sync (new, updated, deleted files)
-        # are now logged via the AuditLogger within DeltaSync. They are not
-        # attached to this response object anymore to simplify the API.
-        sync_op.status = SyncStatus.COMPLETED
-        sync_op.total_files = (
-            sync_results["new"] + sync_results["updated"] + sync_results["deleted"]
-        )
-        logger.info(f"Sync {sync_id} completed successfully.")
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Get sync status from delta sync
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        sync_status = await delta_sync.get_sync_status(sync_id)
+        
+        if not sync_status:
+            raise HTTPException(status_code=404, detail="Sync operation not found")
+            
+        return sync_status
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Sync {sync_id} failed: {e}", exc_info=True)
-        sync_op.status = SyncStatus.FAILED
-        sync_op.error_message = str(e)
-    finally:
-        sync_op.finished_at = datetime.now(timezone.utc)
-        logger.info(f"Background task finished for sync {sync_id}.") 
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get sync status: {str(e)}"
+        )
+
+@router.get("/history", response_model=SyncHistoryResponse)
+async def get_sync_history(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Get sync operation history for the current tenant.
+    
+    Args:
+        page: Page number for pagination
+        page_size: Number of syncs per page
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        SyncHistoryResponse: Sync history with pagination
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Get sync history
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        syncs = await delta_sync.get_sync_history(page=page, page_size=page_size)
+        
+        return SyncHistoryResponse(
+            syncs=syncs,
+            total_count=len(syncs)  # This should be total count, not page count
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get sync history: {str(e)}"
+        )
+
+@router.post("/cancel/{sync_id}")
+async def cancel_sync(
+    sync_id: str,
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Cancel a running sync operation.
+    
+    Args:
+        sync_id: Sync operation ID
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        dict: Cancellation confirmation
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Cancel sync operation
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        success = await delta_sync.cancel_sync(sync_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Sync operation not found or not cancellable")
+            
+        return {"message": f"Sync {sync_id} cancelled successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cancel sync: {str(e)}"
+        )
+
+# =============================================================================
+# SYNC CONFIGURATION
+# =============================================================================
+
+@router.get("/config", response_model=SyncConfigResponse)
+async def get_sync_config(
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Get current sync configuration for the tenant.
+    
+    Args:
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        SyncConfigResponse: Current sync configuration
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Get sync configuration
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        config = await delta_sync.get_sync_config()
+        
+        return config
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get sync config: {str(e)}"
+        )
+
+@router.put("/config", response_model=SyncConfigResponse)
+async def update_sync_config(
+    request: SyncConfigRequest,
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Update sync configuration for the tenant.
+    
+    Args:
+        request: New sync configuration
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        SyncConfigResponse: Updated sync configuration
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Update sync configuration
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        updated_config = await delta_sync.update_sync_config(
+            auto_sync=request.auto_sync,
+            sync_interval=request.sync_interval,
+            document_paths=request.document_paths,
+            file_types=request.file_types,
+            chunk_size=request.chunk_size,
+            chunk_overlap=request.chunk_overlap
+        )
+        
+        return updated_config
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update sync config: {str(e)}"
+        )
+
+# =============================================================================
+# DOCUMENT MANAGEMENT
+# =============================================================================
+
+@router.post("/documents/upload", response_model=DocumentUploadResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Upload a document for processing.
+    
+    Args:
+        file: Document file to upload
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        DocumentUploadResponse: Upload result
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Validate file type
+        settings = get_settings()
+        if file.content_type not in settings.supported_file_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file.content_type}"
+            )
+        
+        # Upload and process document
+        document_service = DocumentService(tenant_id=tenant_id)
+        result = await document_service.upload_document(file)
+        
+        return DocumentUploadResponse(
+            document_id=result["document_id"],
+            name=result["name"],
+            status=result["status"],
+            message=result["message"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload document: {str(e)}"
+        )
+
+@router.get("/documents", response_model=DocumentListResponse)
+async def list_documents(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    List documents for the current tenant.
+    
+    Args:
+        page: Page number for pagination
+        page_size: Number of documents per page
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        DocumentListResponse: List of documents with pagination
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Get documents
+        document_service = DocumentService(tenant_id=tenant_id)
+        documents = await document_service.list_documents(page=page, page_size=page_size)
+        
+        return documents
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list documents: {str(e)}"
+        )
+
+@router.get("/documents/{document_id}", response_model=DocumentResponse)
+async def get_document(
+    document_id: str,
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Get document details.
+    
+    Args:
+        document_id: Document ID
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        DocumentResponse: Document information
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Get document
+        document_service = DocumentService(tenant_id=tenant_id)
+        document = await document_service.get_document(document_id)
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        return document
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get document: {str(e)}"
+        )
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Delete a document.
+    
+    Args:
+        document_id: Document ID
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        dict: Deletion confirmation
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Delete document
+        document_service = DocumentService(tenant_id=tenant_id)
+        success = await document_service.delete_document(document_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        return {"message": f"Document {document_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete document: {str(e)}"
+        )
+
+# =============================================================================
+# SYNC STATISTICS
+# =============================================================================
+
+@router.get("/stats")
+async def get_sync_stats(
+    current_tenant: dict = Depends(get_current_tenant)
+):
+    """
+    Get sync statistics for the current tenant.
+    
+    Args:
+        current_tenant: Current tenant (from auth)
+        
+    Returns:
+        dict: Sync statistics
+    """
+    try:
+        tenant_id = current_tenant["tenant_id"]
+        
+        # Get sync statistics
+        delta_sync = DeltaSync(tenant_id=tenant_id)
+        stats = await delta_sync.get_sync_stats()
+        
+        return stats
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get sync stats: {str(e)}"
+        ) 

@@ -1,5 +1,11 @@
 """
-Pydantic models for API request and response validation.
+Pydantic models for the redesigned RAG Platform API.
+
+This module defines all request and response models for the new API structure:
+- Setup & Initialization
+- Admin Operations (Admin-only)
+- Document Sync (Per-tenant)
+- Query Processing (Per-tenant)
 """
 
 from pydantic import BaseModel, Field
@@ -8,267 +14,409 @@ from datetime import datetime
 from uuid import UUID
 from enum import Enum
 
+# =============================================================================
+# SETUP & INITIALIZATION MODELS
+# =============================================================================
+
+class SetupStatus(str, Enum):
+    """System initialization status."""
+    UNINITIALIZED = "uninitialized"
+    INITIALIZING = "initializing"
+    INITIALIZED = "initialized"
+    ERROR = "error"
+
+class SetupCheckResponse(BaseModel):
+    """Response for system initialization check."""
+    initialized: bool = Field(..., description="Whether system is initialized")
+    message: str = Field(..., description="Status message")
+    admin_tenant_exists: bool = Field(False, description="Whether admin tenant exists")
+    total_tenants: int = Field(0, description="Total number of tenants")
+
+class SetupInitializeRequest(BaseModel):
+    """Request to initialize the system."""
+    admin_tenant_name: str = Field(..., description="Name for the admin tenant")
+    admin_tenant_description: Optional[str] = Field(None, description="Admin tenant description")
+
+class SetupInitializeResponse(BaseModel):
+    """Response after system initialization."""
+    success: bool = Field(..., description="Whether initialization was successful")
+    admin_tenant_id: str = Field(..., description="Admin tenant ID")
+    admin_api_key: str = Field(..., description="Admin API key (save this securely)")
+    message: str = Field(..., description="Initialization message")
+    config_written: bool = Field(..., description="Whether config was written to .env")
+
+# =============================================================================
+# ADMIN OPERATIONS MODELS
+# =============================================================================
+
+class TenantStatus(str, Enum):
+    """Tenant status enumeration."""
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    DELETED = "deleted"
+
+class TenantCreateRequest(BaseModel):
+    """Request to create a new tenant."""
+    name: str = Field(..., min_length=1, max_length=100, description="Tenant name")
+    description: Optional[str] = Field(None, max_length=500, description="Tenant description")
+    auto_sync: bool = Field(True, description="Enable automatic document sync")
+    sync_interval: int = Field(60, ge=1, le=1440, description="Sync interval in minutes")
+
+class TenantUpdateRequest(BaseModel):
+    """Request to update tenant details."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="Tenant name")
+    description: Optional[str] = Field(None, max_length=500, description="Tenant description")
+    status: Optional[TenantStatus] = Field(None, description="Tenant status")
+    auto_sync: Optional[bool] = Field(None, description="Enable automatic document sync")
+    sync_interval: Optional[int] = Field(None, ge=1, le=1440, description="Sync interval in minutes")
+
+class ApiKeyCreateRequest(BaseModel):
+    """Request to create a new API key."""
+    name: str = Field(..., min_length=1, max_length=100, description="API key name")
+    expires_at: Optional[datetime] = Field(None, description="Expiration date")
+
+class ApiKeyResponse(BaseModel):
+    """API key information (without the actual key)."""
+    id: str = Field(..., description="API key ID")
+    name: str = Field(..., description="API key name")
+    key_prefix: str = Field(..., description="Key prefix for identification")
+    is_active: bool = Field(..., description="Whether key is active")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp")
+
+class ApiKeyCreateResponse(BaseModel):
+    """Response when creating a new API key."""
+    api_key: str = Field(..., description="The full API key (save this securely)")
+    key_info: ApiKeyResponse = Field(..., description="Key metadata")
+
+class TenantResponse(BaseModel):
+    """Tenant information."""
+    id: str = Field(..., description="Tenant ID")
+    name: str = Field(..., description="Tenant name")
+    description: Optional[str] = Field(None, description="Tenant description")
+    status: TenantStatus = Field(..., description="Tenant status")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    auto_sync: bool = Field(..., description="Automatic sync enabled")
+    sync_interval: int = Field(..., description="Sync interval in minutes")
+    api_keys: List[ApiKeyResponse] = Field(default_factory=list, description="API keys")
+    document_count: int = Field(0, description="Number of documents")
+    storage_used_mb: float = Field(0.0, description="Storage used in MB")
+
+class TenantListResponse(BaseModel):
+    """Response for listing tenants."""
+    tenants: List[TenantResponse] = Field(..., description="List of tenants")
+    total_count: int = Field(..., description="Total number of tenants")
+
+class SystemStatusResponse(BaseModel):
+    """System status information."""
+    status: str = Field(..., description="Overall system status")
+    version: str = Field(..., description="System version")
+    uptime_seconds: float = Field(..., description="System uptime")
+    total_tenants: int = Field(..., description="Total number of tenants")
+    total_documents: int = Field(..., description="Total documents across all tenants")
+    components: Dict[str, Dict[str, Any]] = Field(..., description="Component statuses")
+
+class SystemMetricsResponse(BaseModel):
+    """System performance metrics."""
+    timestamp: datetime = Field(..., description="Metrics timestamp")
+    cpu_usage_percent: float = Field(..., description="CPU usage")
+    memory_usage_percent: float = Field(..., description="Memory usage")
+    disk_usage_percent: float = Field(..., description="Disk usage")
+    active_connections: int = Field(..., description="Active connections")
+    queries_per_minute: float = Field(..., description="Queries per minute")
+    sync_operations: int = Field(..., description="Active sync operations")
+
+# =============================================================================
+# DOCUMENT SYNC MODELS
+# =============================================================================
+
 class SyncStatus(str, Enum):
     """Sync operation status."""
-    IDLE = "idle"
+    PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
-
-class SyncType(str, Enum):
-    """Type of sync operation."""
-    MANUAL = "manual"
-    SCHEDULED = "scheduled"
-    AUTO = "auto"
-
-
-class DocumentSyncInfo(BaseModel):
-    """Information about a synchronized document."""
-    filename: str = Field(..., description="Document filename")
-    file_path: str = Field(..., description="Full file path")
-    file_size: int = Field(..., description="File size in bytes")
-    last_modified: datetime = Field(..., description="Last modification timestamp")
-    status: str = Field(..., description="Processing status")
-    chunks_created: Optional[int] = Field(None, description="Number of chunks created")
-    processing_time: Optional[float] = Field(None, description="Processing time in seconds")
-    error_message: Optional[str] = Field(None, description="Error message if failed")
-
-class RAGSource(BaseModel):
-    """Represents a single source document chunk used for an answer."""
-    id: str = Field(..., description="The unique ID of the document chunk.")
-    text: str = Field(..., description="The text content of the chunk.")
-    score: float = Field(..., description="The relevance score of the chunk.")
-    filename: Optional[str] = Field(None, description="The name of the source document.")
-    page_number: Optional[int] = Field(None, description="The page number in the source document.")
-    chunk_index: Optional[int] = Field(None, description="The index of the chunk within the document.")
-
-class RAGResponse(BaseModel):
-    """The response model for a RAG query."""
-    query: str = Field(..., description="The original query text.")
-    answer: str = Field(..., description="The generated answer from the LLM.")
-    sources: List[RAGSource] = Field(..., description="A list of source chunks that informed the answer.")
-    confidence: float = Field(..., description="The calculated confidence score for the answer.")
-    processing_time: Optional[float] = Field(None, description="The total time taken to process the query in seconds.")
-    llm_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata from the LLM, such as model name and token counts.")
-
-class QueryRequest(BaseModel):
-    """The request model for submitting a query."""
-    query: str = Field(..., min_length=3, max_length=500, description="The user's query.")
-    tenant_id: Optional[str] = Field(None, description="The tenant ID to scope the query to. If not provided, a default may be used based on context.")
-
-class SourceCitation(BaseModel):
-    """Represents a single source document chunk used for an answer."""
-    id: str = Field(..., description="The unique ID of the document chunk.")
-    text: str = Field(..., description="The text content of the chunk.")
-    score: float = Field(..., description="The relevance score of the chunk.")
-    filename: Optional[str] = Field(None, description="The name of the source document.")
-    page_number: Optional[int] = Field(None, description="The page number in the source document.")
-    chunk_index: Optional[int] = Field(None, description="The index of the chunk within the document.")
-    
-class QueryResponse(BaseModel):
-    """The response model for a RAG query."""
-    query: str = Field(..., description="The original query text.")
-    answer: str = Field(..., description="The generated answer from the LLM.")
-    sources: List[SourceCitation] = Field(..., description="A list of source chunks that informed the answer.")
-    confidence: float = Field(..., description="The calculated confidence score for the answer.")
-    processing_time: Optional[float] = Field(None, description="The total time taken to process the query in seconds.")
-    llm_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata from the LLM, such as model name and token counts.")
-
-class QueryHistory(BaseModel):
-    """Represents a single entry in the query history."""
-    id: UUID
-    query: str
-    response: QueryResponse
-    timestamp: datetime
-    tenant_id: str
-
-# Models from tenants.py
-class TenantCreateRequest(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-class TenantUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-
-class ApiKeyInfo(BaseModel):
-    key_prefix: str
-    name: str
-    is_active: bool
-    created_at: datetime
-    expires_at: Optional[datetime] = None
-
-class TenantResponse(BaseModel):
-    tenant_id: str
-    name: str
-    description: Optional[str] = None
-    status: str
-    created_at: datetime
-    api_keys: List[ApiKeyInfo]
-
-class TenantListResponse(BaseModel):
-    tenants: List[TenantResponse]
-
-class TenantStatsResponse(BaseModel):
-    document_count: int
-    storage_used_mb: float
-
-class SyncRequest(BaseModel):
-    force_full_resync: Optional[bool] = False
+class SyncTriggerRequest(BaseModel):
+    """Request to trigger document sync."""
+    force_full_sync: bool = Field(False, description="Force full resync")
+    document_paths: Optional[List[str]] = Field(None, description="Specific paths to sync")
 
 class SyncResponse(BaseModel):
-    """Response model for sync operations."""
-    sync_id: str = Field(..., description="Unique sync operation identifier")
-    tenant_id: str = Field(..., description="Tenant identifier")
-    status: SyncStatus = Field(..., description="Current sync status")
-    sync_type: SyncType = Field(..., description="Type of sync operation")
-    started_at: datetime = Field(..., description="Sync start timestamp")
-    completed_at: Optional[datetime] = Field(None, description="Sync completion timestamp")
-    total_files: int = Field(default=0, description="Total number of files to process")
-    processed_files: int = Field(default=0, description="Number of files processed")
-    successful_files: int = Field(default=0, description="Number of successfully processed files")
-    failed_files: int = Field(default=0, description="Number of failed files")
-    total_chunks: int = Field(default=0, description="Total number of chunks created")
-    processing_time: Optional[float] = Field(None, description="Total processing time")
+    """Sync operation response."""
+    sync_id: str = Field(..., description="Unique sync operation ID")
+    tenant_id: str = Field(..., description="Tenant ID")
+    status: SyncStatus = Field(..., description="Sync status")
+    started_at: datetime = Field(..., description="Start timestamp")
+    completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
+    progress: Dict[str, Any] = Field(default_factory=dict, description="Progress information")
     error_message: Optional[str] = Field(None, description="Error message if failed")
-    documents: List[DocumentSyncInfo] = Field(default_factory=list, description="Processed documents")
-
-class SyncScheduleResponse(BaseModel):
-    schedule_id: str
-    tenant_id: str
-    cron_expression: str
-    next_run_time: Optional[datetime]
-    is_active: bool
-
-class SyncScheduleUpdateRequest(BaseModel):
-    cron_expression: Optional[str] = None
-    is_active: Optional[bool] = None
-
-# Models from sync.py and audit.py
-class SyncEventResponse(BaseModel):
-    id: str
-    sync_run_id: str
-    tenant_id: str
-    event_type: str
-    status: str
-    message: str
-    created_at: datetime
-    metadata: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 class SyncHistoryResponse(BaseModel):
-    """Response model for sync history."""
-    syncs: List[SyncResponse] = Field(default_factory=list, description="List of sync operations")
-    total_count: int = Field(..., description="Total number of sync operations")
-    page: int = Field(..., description="Current page number")
-    page_size: int = Field(..., description="Number of syncs per page")
-
-
-# Document Management Models
-class DocumentMetadata(BaseModel):
-    """Document metadata model."""
-    title: Optional[str] = Field(None, description="Document title")
-    author: Optional[str] = Field(None, description="Document author")
-    description: Optional[str] = Field(None, description="Document description")
-    tags: List[str] = Field(default_factory=list, description="Document tags")
-    custom_fields: Dict[str, Any] = Field(default_factory=dict, description="Custom metadata fields")
-
-
-class DocumentResponse(BaseModel):
-    """Response model for document information."""
-    document_id: str = Field(..., description="Unique document identifier")
-    filename: str = Field(..., description="Original filename")
-    upload_timestamp: datetime = Field(..., description="Upload timestamp")
-    file_size: int = Field(..., description="File size in bytes")
-    status: str = Field(..., description="Processing status (uploaded, processing, processed, failed)")
-    chunks_count: int = Field(default=0, description="Number of chunks created")
-    content_type: Optional[str] = Field(None, description="MIME content type")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Document metadata")
-
-
-class DocumentUploadResponse(BaseModel):
-    """Response model for document upload."""
-    document_id: str = Field(..., description="Unique document identifier")
-    filename: str = Field(..., description="Original filename")
-    status: str = Field(..., description="Processing status")
-    chunks_created: int = Field(default=0, description="Number of chunks created")
-    processing_time: Optional[float] = Field(None, description="Processing time in seconds")
-    file_size: int = Field(..., description="File size in bytes")
-    upload_timestamp: datetime = Field(..., description="Upload timestamp")
-
-
-class DocumentListResponse(BaseModel):
-    """Response model for document listing."""
-    documents: List[DocumentResponse] = Field(default_factory=list, description="List of documents")
-    total_count: int = Field(..., description="Total number of documents")
-    page: int = Field(..., description="Current page number")
-    page_size: int = Field(..., description="Number of documents per page")
-
-
-class DocumentUpdateRequest(BaseModel):
-    """Request model for updating document metadata."""
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Updated metadata")
-    tags: Optional[List[str]] = Field(None, description="Updated tags")
-
-
-# Sync-related models needed by sync.py
-class SyncStatusResponse(BaseModel):
-    """Response model for sync status."""
-    tenant_id: str = Field(..., description="Tenant identifier")
-    sync_enabled: bool = Field(..., description="Whether sync is enabled")
-    last_sync_time: Optional[datetime] = Field(None, description="Last sync timestamp")
-    last_sync_success: Optional[bool] = Field(None, description="Whether last sync was successful")
-    sync_interval_minutes: int = Field(..., description="Sync interval in minutes")
-    file_watcher_active: bool = Field(..., description="Whether file watcher is active")
-    pending_changes: int = Field(default=0, description="Number of pending changes")
-    current_status: str = Field(..., description="Current sync status")
-    active_sync_id: Optional[str] = Field(None, description="The ID of the currently active sync, if any")
-
-
-class SyncTriggerRequest(BaseModel):
-    """Request model for triggering sync."""
-    force_full_sync: bool = Field(default=False, description="Whether to force full sync")
-
+    """Sync history response."""
+    syncs: List[SyncResponse] = Field(..., description="List of sync operations")
+    total_count: int = Field(..., description="Total number of syncs")
 
 class SyncConfigRequest(BaseModel):
-    """Request model for sync configuration."""
-    sync_interval_minutes: int = Field(..., ge=1, description="Sync interval in minutes")
-    auto_sync_enabled: bool = Field(..., description="Whether auto sync is enabled")
-    ignore_patterns: Optional[List[str]] = Field(None, description="File patterns to ignore")
-    webhooks: Optional[List['WebhookConfigRequest']] = Field(None, description="Webhook configurations")
+    """Sync configuration request."""
+    auto_sync: bool = Field(..., description="Enable automatic sync")
+    sync_interval: int = Field(..., ge=1, le=1440, description="Sync interval in minutes")
+    document_paths: List[str] = Field(default_factory=list, description="Document paths to monitor")
+    file_types: List[str] = Field(default_factory=list, description="File types to process")
+    chunk_size: int = Field(512, ge=100, le=2000, description="Document chunk size")
+    chunk_overlap: int = Field(50, ge=0, le=500, description="Chunk overlap")
 
+class SyncConfigResponse(BaseModel):
+    """Sync configuration response."""
+    tenant_id: str = Field(..., description="Tenant ID")
+    auto_sync: bool = Field(..., description="Automatic sync enabled")
+    sync_interval: int = Field(..., description="Sync interval in minutes")
+    document_paths: List[str] = Field(..., description="Document paths")
+    file_types: List[str] = Field(..., description="File types")
+    chunk_size: int = Field(..., description="Chunk size")
+    chunk_overlap: int = Field(..., description="Chunk overlap")
+    last_sync: Optional[datetime] = Field(None, description="Last sync timestamp")
+    next_sync: Optional[datetime] = Field(None, description="Next scheduled sync")
 
-class WebhookConfigRequest(BaseModel):
-    """Request model for webhook configuration."""
-    url: str = Field(..., description="Webhook URL")
-    secret: Optional[str] = Field(None, description="Webhook secret")
-    events: List[str] = Field(..., description="Events to subscribe to")
-    timeout: int = Field(default=30, description="Timeout in seconds")
-    retry_count: int = Field(default=3, description="Number of retries")
+# =============================================================================
+# QUERY PROCESSING MODELS
+# =============================================================================
 
+class QueryRequest(BaseModel):
+    """RAG query request."""
+    query: str = Field(..., min_length=1, max_length=2000, description="User query")
+    max_sources: int = Field(5, ge=1, le=20, description="Maximum number of sources")
+    confidence_threshold: float = Field(0.5, ge=0.0, le=1.0, description="Confidence threshold")
 
-class SyncMetricsResponse(BaseModel):
-    """Response model for sync metrics."""
-    tenant_id: str = Field(..., description="Tenant identifier")
-    total_syncs: int = Field(..., description="Total number of syncs")
-    successful_syncs: int = Field(..., description="Number of successful syncs")
-    failed_syncs: int = Field(..., description="Number of failed syncs")
-    average_duration: float = Field(..., description="Average sync duration in seconds")
-    total_files_processed: int = Field(..., description="Total files processed")
-    total_errors: int = Field(..., description="Total number of errors")
-    last_sync_time: Optional[datetime] = Field(None, description="Last sync timestamp")
-    success_rate: float = Field(..., description="Success rate percentage")
+class SourceCitation(BaseModel):
+    """Source document citation."""
+    id: str = Field(..., description="Source ID")
+    text: str = Field(..., description="Source text content")
+    score: float = Field(..., description="Relevance score")
+    document_id: str = Field(..., description="Document ID")
+    document_name: str = Field(..., description="Document name")
+    page_number: Optional[int] = Field(None, description="Page number")
+    chunk_index: Optional[int] = Field(None, description="Chunk index")
 
+class QueryResponse(BaseModel):
+    """RAG query response."""
+    query: str = Field(..., description="Original query")
+    answer: str = Field(..., description="Generated answer")
+    sources: List[SourceCitation] = Field(..., description="Source citations")
+    confidence: float = Field(..., description="Confidence score")
+    processing_time: float = Field(..., description="Processing time in seconds")
+    tokens_used: Optional[int] = Field(None, description="Tokens used")
+    model_used: Optional[str] = Field(None, description="Model used for generation")
 
-# Update forward references
-SyncConfigRequest.model_rebuild()
+class QueryBatchRequest(BaseModel):
+    """Batch query request."""
+    queries: List[str] = Field(..., min_items=1, max_items=10, description="List of queries")
+    max_sources: int = Field(5, ge=1, le=20, description="Maximum sources per query")
+    confidence_threshold: float = Field(0.5, ge=0.0, le=1.0, description="Confidence threshold")
 
-class CreateApiKeyRequest(BaseModel):
-    tenant_id: str
+class QueryBatchResponse(BaseModel):
+    """Batch query response."""
+    results: List[QueryResponse] = Field(..., description="Query results")
+    total_processing_time: float = Field(..., description="Total processing time")
+    successful_queries: int = Field(..., description="Number of successful queries")
+    failed_queries: int = Field(..., description="Number of failed queries")
 
-class CreateApiKeyResponse(BaseModel):
-    api_key: str 
+class QueryHistoryResponse(BaseModel):
+    """Query history response."""
+    queries: List[Dict[str, Any]] = Field(..., description="Query history")
+    total_count: int = Field(..., description="Total number of queries")
+
+class QueryFeedbackRequest(BaseModel):
+    """Query feedback request."""
+    query_id: str = Field(..., description="Query ID")
+    rating: int = Field(..., ge=1, le=5, description="Rating (1-5)")
+    feedback: Optional[str] = Field(None, description="Feedback text")
+    helpful: bool = Field(..., description="Whether answer was helpful")
+
+class QueryFeedbackResponse(BaseModel):
+    """Query feedback response."""
+    success: bool = Field(..., description="Whether feedback was saved")
+    message: str = Field(..., description="Feedback message")
+
+# =============================================================================
+# DOCUMENT MANAGEMENT MODELS
+# =============================================================================
+
+class DocumentResponse(BaseModel):
+    """Document information."""
+    id: str = Field(..., description="Document ID")
+    name: str = Field(..., description="Document name")
+    file_path: str = Field(..., description="File path")
+    file_size: int = Field(..., description="File size in bytes")
+    content_type: str = Field(..., description="Content type")
+    upload_timestamp: datetime = Field(..., description="Upload timestamp")
+    last_modified: datetime = Field(..., description="Last modification")
+    chunk_count: int = Field(..., description="Number of chunks")
+    status: str = Field(..., description="Processing status")
+
+class DocumentListResponse(BaseModel):
+    """Document list response."""
+    documents: List[DocumentResponse] = Field(..., description="List of documents")
+    total_count: int = Field(..., description="Total number of documents")
+    page: int = Field(..., description="Current page")
+    page_size: int = Field(..., description="Page size")
+
+class DocumentUploadResponse(BaseModel):
+    """Document upload response."""
+    document_id: str = Field(..., description="Document ID")
+    name: str = Field(..., description="Document name")
+    status: str = Field(..., description="Upload status")
+    message: str = Field(..., description="Status message")
+
+# =============================================================================
+# EMBEDDING MANAGEMENT MODELS
+# =============================================================================
+
+class EmbeddingRequest(BaseModel):
+    """Request to generate embeddings for a single text."""
+    text: str = Field(..., min_length=1, max_length=10000, description="Text to embed")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional metadata")
+    doc_id: Optional[str] = Field(None, description="Document ID")
+
+class BatchEmbeddingRequest(BaseModel):
+    """Request to generate embeddings for multiple texts."""
+    texts: List[str] = Field(..., min_items=1, max_items=100, description="Texts to embed")
+    metadata: Optional[List[Dict[str, Any]]] = Field(None, description="Optional metadata for each text")
+    doc_ids: Optional[List[str]] = Field(None, description="Document IDs for each text")
+    priority: int = Field(0, ge=0, le=10, description="Processing priority (0-10)")
+
+class EmbeddingResponse(BaseModel):
+    """Response for single embedding generation."""
+    embeddings: List[List[float]] = Field(..., description="Generated embeddings")
+    text: str = Field(..., description="Original text")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata")
+    doc_id: Optional[str] = Field(None, description="Document ID")
+    processing_time: float = Field(..., description="Processing time in seconds")
+    embedding_dimension: int = Field(..., description="Embedding dimension")
+
+class BatchEmbeddingResponse(BaseModel):
+    """Response for batch embedding generation."""
+    embeddings: List[List[float]] = Field(..., description="Generated embeddings")
+    texts: List[str] = Field(..., description="Original texts")
+    metadata: Optional[List[Dict[str, Any]]] = Field(None, description="Metadata")
+    doc_ids: Optional[List[str]] = Field(None, description="Document IDs")
+    processing_time: float = Field(..., description="Processing time in seconds")
+    embedding_dimension: int = Field(..., description="Embedding dimension")
+    batch_size: int = Field(..., description="Number of texts processed")
+
+class EmbeddingServiceInfo(BaseModel):
+    """Information about the embedding service."""
+    model_name: str = Field(..., description="Model name")
+    model_path: str = Field(..., description="Model path")
+    embedding_dimension: int = Field(..., description="Embedding dimension")
+    max_sequence_length: int = Field(..., description="Maximum sequence length")
+    device: str = Field(..., description="Computing device")
+    is_loaded: bool = Field(..., description="Whether model is loaded")
+    supports_normalization: bool = Field(..., description="Supports embedding normalization")
+
+class EmbeddingStatsResponse(BaseModel):
+    """Embedding generation statistics."""
+    processed_requests: int = Field(..., description="Total processed requests")
+    total_texts_processed: int = Field(..., description="Total texts processed")
+    total_processing_time: float = Field(..., description="Total processing time")
+    error_count: int = Field(..., description="Number of errors")
+    average_processing_time: float = Field(..., description="Average processing time")
+    requests_per_second: float = Field(..., description="Requests per second")
+    worker_threads: int = Field(..., description="Number of worker threads")
+    queue_size: int = Field(..., description="Current queue size")
+    pipeline_stats: Dict[str, Any] = Field(default_factory=dict, description="Pipeline statistics")
+
+# =============================================================================
+# LLM SERVICE MODELS
+# =============================================================================
+
+class LLMGenerateRequest(BaseModel):
+    """Request to generate text using LLM."""
+    prompt: str = Field(..., min_length=1, max_length=10000, description="Input prompt")
+    context: Optional[List[str]] = Field(None, description="Additional context")
+    max_new_tokens: Optional[int] = Field(None, ge=1, le=2048, description="Maximum new tokens")
+    temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Generation temperature")
+    do_sample: bool = Field(True, description="Enable sampling")
+    top_p: float = Field(0.9, ge=0.0, le=1.0, description="Top-p sampling")
+    top_k: int = Field(50, ge=1, le=1000, description="Top-k sampling")
+    repetition_penalty: float = Field(1.1, ge=1.0, le=2.0, description="Repetition penalty")
+
+class LLMGenerateResponse(BaseModel):
+    """Response from LLM text generation."""
+    text: str = Field(..., description="Generated text")
+    prompt_tokens: int = Field(..., description="Number of prompt tokens")
+    completion_tokens: int = Field(..., description="Number of completion tokens")
+    total_tokens: int = Field(..., description="Total tokens")
+    generation_time: float = Field(..., description="Generation time in seconds")
+    model_name: str = Field(..., description="Model used")
+    temperature: float = Field(..., description="Temperature used")
+
+class LLMServiceInfo(BaseModel):
+    """Information about the LLM service."""
+    model_name: str = Field(..., description="Model name")
+    max_length: int = Field(..., description="Maximum length")
+    temperature: float = Field(..., description="Default temperature")
+    device: str = Field(..., description="Computing device")
+    is_loaded: bool = Field(..., description="Whether model is loaded")
+    quantization_enabled: bool = Field(..., description="Whether quantization is enabled")
+
+class LLMStatsResponse(BaseModel):
+    """LLM service statistics."""
+    generation_times: List[float] = Field(..., description="Recent generation times")
+    total_tokens_generated: int = Field(..., description="Total tokens generated")
+    average_generation_time: float = Field(..., description="Average generation time")
+    model_name: str = Field(..., description="Model name")
+    device: str = Field(..., description="Device used")
+
+# =============================================================================
+# SYSTEM MONITORING MODELS
+# =============================================================================
+
+class SystemMetricsDetailResponse(BaseModel):
+    """Detailed system metrics."""
+    timestamp: datetime = Field(..., description="Metrics timestamp")
+    cpu_percent: float = Field(..., description="CPU usage percentage")
+    memory_percent: float = Field(..., description="Memory usage percentage")
+    disk_usage_percent: float = Field(..., description="Disk usage percentage")
+    gpu_utilization: Optional[float] = Field(None, description="GPU utilization")
+    gpu_memory_percent: Optional[float] = Field(None, description="GPU memory usage")
+    active_connections: int = Field(..., description="Active connections")
+    network_io: Dict[str, float] = Field(..., description="Network I/O statistics")
+    disk_io: Dict[str, float] = Field(..., description="Disk I/O statistics")
+
+class PerformanceMetricsResponse(BaseModel):
+    """Performance metrics for the system."""
+    timestamp: datetime = Field(..., description="Metrics timestamp")
+    queries_per_minute: float = Field(..., description="Queries per minute")
+    average_query_time: float = Field(..., description="Average query time")
+    embedding_requests_per_minute: float = Field(..., description="Embedding requests per minute")
+    sync_operations_per_minute: float = Field(..., description="Sync operations per minute")
+    error_rate: float = Field(..., description="Error rate percentage")
+    active_tenants: int = Field(..., description="Number of active tenants")
+
+class ErrorLogResponse(BaseModel):
+    """Error log entry."""
+    timestamp: datetime = Field(..., description="Error timestamp")
+    error_type: str = Field(..., description="Error type")
+    error_message: str = Field(..., description="Error message")
+    severity: str = Field(..., description="Error severity")
+    tenant_id: Optional[str] = Field(None, description="Tenant ID")
+    endpoint: Optional[str] = Field(None, description="API endpoint")
+
+class ErrorLogListResponse(BaseModel):
+    """List of error log entries."""
+    errors: List[ErrorLogResponse] = Field(..., description="Error log entries")
+    total_count: int = Field(..., description="Total number of errors")
+    error_types: Dict[str, int] = Field(..., description="Error type counts")
+
+# =============================================================================
+# ERROR RESPONSE
+# =============================================================================
+
+class ErrorResponse(BaseModel):
+    """Standard error response."""
+    error: str = Field(..., description="Error message")
+    code: str = Field(..., description="Error code")
+    details: Optional[Dict[str, Any]] = Field(None, description="Error details")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp") 
