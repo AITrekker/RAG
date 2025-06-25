@@ -33,7 +33,47 @@ class TenantService:
         return full_key, key_hash, key_prefix
 
     def create_tenant(self, name: str, description: Optional[str] = "") -> Dict:
-        """Creates a new tenant and a default API key."""
+        """Creates a new tenant and a default API key, or returns existing if name exists."""
+        # Check if tenant with this name already exists
+        points, _ = self.client.scroll(
+            collection_name=TENANTS_COLLECTION_NAME,
+            scroll_filter=models.Filter(
+                must=[models.FieldCondition(
+                    key="name",
+                    match=models.MatchValue(value=name)
+                )]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if points:
+            # Tenant exists, return its info and first API key
+            tenant_point = points[0]
+            tenant_id = tenant_point.id
+            payload = tenant_point.payload
+            api_keys = payload.get("api_keys", [])
+            if api_keys:
+                # Return the first active API key
+                for key_info in api_keys:
+                    if key_info.get("is_active"):
+                        # We cannot return the raw API key, only the hash is stored
+                        # So, we should generate a new API key for the admin if needed
+                        break
+                else:
+                    # No active key, generate a new one
+                    api_key = self.create_api_key(tenant_id, name="Default Key")
+                    return {"tenant_id": tenant_id, "api_key": api_key}
+                # If we want to always generate a new key, uncomment below
+                # api_key = self.create_api_key(tenant_id, name="Default Key")
+                # return {"tenant_id": tenant_id, "api_key": api_key}
+                # Otherwise, just return the prefix and warn
+                return {"tenant_id": tenant_id, "api_key": "EXISTS"}
+            else:
+                # No API keys, generate one
+                api_key = self.create_api_key(tenant_id, name="Default Key")
+                return {"tenant_id": tenant_id, "api_key": api_key}
+        # If not found, create new tenant
         tenant_id = str(uuid.uuid4())
         api_key, api_key_hash, api_key_prefix = self._generate_api_key()
 
