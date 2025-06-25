@@ -6,8 +6,8 @@ from fastapi import Depends
 
 from src.backend.core.delta_sync import DeltaSync
 from src.backend.core.document_processor import DocumentProcessor
+from src.backend.core.document_service import DocumentService
 from src.backend.middleware.auth import require_authentication
-from src.backend.services.document_service import DocumentService
 from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 
 

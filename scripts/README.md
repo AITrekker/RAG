@@ -10,6 +10,7 @@ Essential development and setup tools for the RAG platform. This directory conta
 - **`run_frontend.ps1`** - Start the React frontend development server
 
 ### 🗄️ Database Management
+- **`init_qdrant_db.py`** - **NEW**: Initialize Qdrant database with admin tenant
 - **`migrate_db.py`** - Run database migrations and updates
 - **`direct_setup.py`** - Direct database setup for production
 - **`simple_api_key_setup.py`** - Quick API key generation
@@ -70,16 +71,19 @@ python scripts/health_check.py
 # 1. Set up development environment
 python scripts/setup_dev.py
 
-# 2. Run database migrations  
+# 2. Initialize Qdrant database with admin tenant
+python scripts/init_qdrant_db.py
+
+# 3. Run database migrations  
 python scripts/migrate_db.py migrate
 
-# 3. Create default tenant and API key
+# 4. Create default tenant and API key
 python scripts/direct_setup.py
 
-# 4. Start the backend
+# 5. Start the backend
 python scripts/run_backend.py
 
-# 5. Start the frontend (in new terminal)
+# 6. Start the frontend (in new terminal)
 .\scripts\run_frontend.ps1
 ```
 
@@ -144,6 +148,50 @@ yarn dev
 
 ### **🗄️ Database Management**
 
+#### **`init_qdrant_db.py`** (NEW - 8.2KB)
+**Purpose**: Initialize Qdrant vector database with admin tenant
+- Creates system collections (tenants_metadata)
+- Creates admin tenant with default API key
+- Creates tenant-specific document collections
+- Verifies all collections are properly configured
+- Provides clear next steps for setup
+
+**Usage**: `python scripts/init_qdrant_db.py`
+
+**Output Example:**
+```
+🚀 Qdrant Database Initialization
+==================================================
+Qdrant URL: http://localhost:6333
+Embedding Model: sentence-transformers/all-MiniLM-L6-v2
+Vector Dimensions: 384
+
+✅ Successfully connected to Qdrant
+✅ Created collection: tenants_metadata
+✅ Successfully created admin tenant
+   Tenant ID: 12345678-1234-1234-1234-123456789abc
+   API Key: abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+
+🎉 QDRANT DATABASE INITIALIZATION COMPLETE
+==================================================
+Admin Tenant ID: 12345678-1234-1234-1234-123456789abc
+Admin Tenant Name: Admin Tenant
+Admin API Key: abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+
+⚠️  IMPORTANT: Save this API key securely!
+   You'll need it to access the admin tenant.
+
+Collections Created:
+  - tenants_metadata (system)
+  - tenant_12345678-1234-1234-1234-123456789abc_documents (admin tenant)
+
+Next Steps:
+  1. Use the admin API key in your frontend configuration
+  2. Start the backend server: python scripts/run_backend.py
+  3. Start the frontend: .\scripts\run_frontend.ps1
+  4. Upload documents and start querying!
+```
+
 #### **`migrate_db.py`** (7.5KB)
 **Purpose**: Comprehensive database migration management
 - Runs Alembic migrations with backup support
@@ -201,9 +249,10 @@ See `tests/README.md` for complete testing documentation.
 
 ### **New Development Environment:**
 1. **`setup_dev.py`** - Sets up entire environment
-2. **`migrate_db.py migrate`** - Initialize database schema
-3. **`direct_setup.py`** - Create tenant and API key
-4. **`run_backend.py`** + **`run_frontend.ps1`** - Start servers
+2. **`init_qdrant_db.py`** - Initialize Qdrant with admin tenant
+3. **`migrate_db.py migrate`** - Initialize database schema
+4. **`direct_setup.py`** - Create tenant and API key
+5. **`run_backend.py`** + **`run_frontend.ps1`** - Start servers
 
 ### **Daily Development:**
 - **`run_backend.py`** - Start backend 

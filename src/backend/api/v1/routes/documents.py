@@ -13,7 +13,7 @@ from pathlib import Path
 import shutil
 
 from src.backend.middleware.auth import require_authentication
-from src.backend.services.document_service import DocumentService
+from src.backend.core.document_service import DocumentService
 from src.backend.models.api_models import (
     DocumentListResponse, DocumentUploadResponse, DocumentResponse
 )
