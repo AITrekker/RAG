@@ -83,6 +83,7 @@ def create_tenant(name: str, description: str = "", auto_sync: bool = True, sync
     result = make_request("POST", "/tenants", data=data)
     print("Created tenant:")
     print(json.dumps(result, indent=2))
+    return result
 
 def get_tenant(tenant_id: str):
     """Get tenant details."""
@@ -168,9 +169,7 @@ def main():
     
     args = parser.parse_args()
     
-    if ADMIN_API_KEY == "YOUR_ADMIN_API_KEY_HERE":
-        print("ERROR: Please update ADMIN_API_KEY in the script with your actual admin API key")
-        sys.exit(1)
+    # API key validation is handled by config.py
     
     if args.list:
         list_tenants(args.page, args.page_size, args.include_api_keys, args.demo_only)
@@ -178,7 +177,9 @@ def main():
         if not args.name:
             print("ERROR: --name is required for creating a tenant")
             sys.exit(1)
-        create_tenant(args.name, args.description or "", args.auto_sync, args.sync_interval)
+        create_tenant(args.name, args.description or "", 
+                     True if args.auto_sync is None else args.auto_sync, 
+                     60 if args.sync_interval is None else args.sync_interval)
     elif args.get:
         if not args.tenant_id:
             print("ERROR: --tenant-id is required for getting tenant details")

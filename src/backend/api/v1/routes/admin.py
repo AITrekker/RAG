@@ -11,8 +11,8 @@ All endpoints require admin authentication.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Optional
-from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
 import psutil
 import os
 import logging
@@ -28,17 +28,26 @@ from src.backend.models.api_models import (
     SystemStatusResponse,
     SystemMetricsResponse,
     ErrorResponse,
+    SuccessResponse,
     DemoSetupRequest,
     DemoSetupResponse,
     DemoTenantInfo,
-    DemoCleanupResponse
+    DemoCleanupResponse,
+    SyncEventResponse
 )
-from src.backend.models.api_models import SyncEventResponse  # Add this if not present, or stub if missing
 from src.backend.core.tenant_service import TenantService
 from src.backend.core.embedding_manager import EmbeddingManager
 from src.backend.middleware.auth import get_current_tenant, require_admin
 from src.backend.config.settings import get_settings
 from src.backend.core.auditing import AuditLogger, get_audit_logger
+from src.backend.utils.error_handling import (
+    handle_exception,
+    not_found_error,
+    validation_error,
+    internal_error,
+    ResourceNotFoundError,
+    ValidationError as RAGValidationError
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Admin Operations"])
@@ -66,7 +75,7 @@ async def create_tenant(
         tenant_service = TenantService()
         
         # Create tenant
-        tenant_id = await tenant_service.create_tenant(
+        result = tenant_service.create_tenant(
             name=request.name,
             description=request.description,
             auto_sync=request.auto_sync,
@@ -74,14 +83,11 @@ async def create_tenant(
         )
         
         # Get created tenant details
-        tenant = await tenant_service.get_tenant(tenant_id)
+        tenant = tenant_service.get_tenant(result["tenant_id"])
         return tenant
         
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create tenant: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="create_tenant")
 
 @router.get("/tenants", response_model=TenantListResponse)
 async def list_tenants(
@@ -140,10 +146,7 @@ async def list_tenants(
         )
         
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list tenants: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="list_tenants")
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse)
 async def get_tenant(
@@ -165,17 +168,14 @@ async def get_tenant(
         tenant = tenant_service.get_tenant(tenant_id)
         
         if not tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
+            raise not_found_error("Tenant", tenant_id)
             
         return tenant
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get tenant: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="get_tenant")
 
 @router.put("/tenants/{tenant_id}", response_model=TenantResponse)
 async def update_tenant(
@@ -200,7 +200,7 @@ async def update_tenant(
         # Check if tenant exists
         existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
+            raise not_found_error("Tenant", tenant_id)
         
         # Update tenant
         updated_tenant = tenant_service.update_tenant(
@@ -217,12 +217,9 @@ async def update_tenant(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update tenant: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="update_tenant")
 
-@router.delete("/tenants/{tenant_id}")
+@router.delete("/tenants/{tenant_id}", response_model=SuccessResponse)
 async def delete_tenant(
     tenant_id: str,
     current_tenant: dict = Depends(require_admin)
@@ -243,27 +240,24 @@ async def delete_tenant(
         # Check if tenant exists
         existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
+            raise not_found_error("Tenant", tenant_id)
         
         # Prevent admin tenant deletion
         if existing_tenant["name"] == "admin":
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot delete admin tenant"
+            raise validation_error(
+                "Cannot delete admin tenant",
+                {"tenant_id": tenant_id, "tenant_name": "admin"}
             )
         
         # Delete tenant
         tenant_service.delete_tenant(tenant_id)
         
-        return {"message": f"Tenant {tenant_id} deleted successfully"}
+        return SuccessResponse(message=f"Tenant {tenant_id} deleted successfully")
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete tenant: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="delete_tenant")
 
 # =============================================================================
 # API KEY MANAGEMENT
@@ -292,7 +286,7 @@ async def create_api_key(
         # Check if tenant exists
         existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
+            raise not_found_error("Tenant", tenant_id)
         
         # Create API key
         api_key = tenant_service.create_api_key(tenant_id, request.name)
@@ -306,10 +300,7 @@ async def create_api_key(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create API key: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="create_api_key")
 
 @router.get("/tenants/{tenant_id}/api-keys", response_model=List[ApiKeyResponse])
 async def list_api_keys(
@@ -332,7 +323,7 @@ async def list_api_keys(
         # Check if tenant exists
         existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
+            raise not_found_error("Tenant", tenant_id)
         
         # Get API keys
         api_keys = tenant_service.list_api_keys(tenant_id)
@@ -341,12 +332,9 @@ async def list_api_keys(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list API keys: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="list_api_keys")
 
-@router.delete("/tenants/{tenant_id}/api-keys/{key_id}")
+@router.delete("/tenants/{tenant_id}/api-keys/{key_id}", response_model=SuccessResponse)
 async def delete_api_key(
     tenant_id: str,
     key_id: str,
@@ -369,20 +357,17 @@ async def delete_api_key(
         # Check if tenant exists
         existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
+            raise not_found_error("Tenant", tenant_id)
         
         # Delete API key
         tenant_service.delete_api_key(tenant_id, key_id)
         
-        return {"message": f"API key {key_id} deleted successfully"}
+        return SuccessResponse(message=f"API key {key_id} deleted successfully")
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete API key: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="delete_api_key")
 
 # =============================================================================
 # SYSTEM MONITORING
@@ -443,10 +428,7 @@ async def get_system_status(
         )
         
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get system status: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="get_system_status")
 
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
 async def get_system_metrics(
@@ -481,16 +463,13 @@ async def get_system_metrics(
         )
         
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get system metrics: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="get_system_metrics")
 
 # =============================================================================
 # SYSTEM MAINTENANCE
 # =============================================================================
 
-@router.delete("/system/embeddings/stats")
+@router.delete("/system/embeddings/stats", response_model=SuccessResponse)
 async def delete_embedding_statistics(
     current_tenant: dict = Depends(require_admin)
 ):
@@ -508,14 +487,11 @@ async def delete_embedding_statistics(
         embedding_manager = get_embedding_manager()
         embedding_manager.clear_stats()
         
-        return {"message": "Embedding statistics cleared successfully"}
+        return SuccessResponse(message="Embedding statistics cleared successfully")
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to clear embedding statistics: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="delete_embedding_statistics")
 
-@router.delete("/system/llm/stats")
+@router.delete("/system/llm/stats", response_model=SuccessResponse)
 async def delete_llm_statistics(
     current_tenant: dict = Depends(require_admin)
 ):
@@ -533,14 +509,11 @@ async def delete_llm_statistics(
         llm_service = get_llm_service()
         llm_service.clear_stats()
         
-        return {"message": "LLM statistics cleared successfully"}
+        return SuccessResponse(message="LLM statistics cleared successfully")
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to clear LLM statistics: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="delete_llm_statistics")
 
-@router.delete("/system/llm/cache")
+@router.delete("/system/llm/cache", response_model=SuccessResponse)
 async def delete_llm_cache(
     current_tenant: dict = Depends(require_admin)
 ):
@@ -558,14 +531,11 @@ async def delete_llm_cache(
         llm_service = get_llm_service()
         llm_service.clear_cache()
         
-        return {"message": "LLM cache cleared successfully"}
+        return SuccessResponse(message="LLM cache cleared successfully")
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to clear LLM cache: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="delete_llm_cache")
 
-@router.put("/system/maintenance")
+@router.put("/system/maintenance", response_model=Dict[str, Any])
 async def update_maintenance_mode(
     maintenance_request: dict,
     current_tenant: dict = Depends(require_admin)
@@ -592,10 +562,7 @@ async def update_maintenance_mode(
             "timestamp": datetime.utcnow()
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to trigger maintenance mode: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="update_maintenance_mode")
 
 @router.get("/audit/events", response_model=List[SyncEventResponse])
 async def get_audit_events(
@@ -643,11 +610,11 @@ async def setup_demo_environment(
         demo_tenants = []
         
         # Calculate demo expiration
-        demo_expires_at = datetime.utcnow() + timedelta(hours=request.demo_duration_hours)
+        demo_expires_at = datetime.now(timezone.utc) + timedelta(hours=request.demo_duration_hours)
         
         for tenant_id in request.demo_tenants:
             # Verify tenant exists
-            tenant = await tenant_service.get_tenant(tenant_id)
+            tenant = tenant_service.get_tenant(tenant_id)
             if not tenant:
                 logger.warning(f"Tenant {tenant_id} not found, skipping")
                 continue
@@ -655,7 +622,7 @@ async def setup_demo_environment(
             api_keys = []
             if request.generate_api_keys:
                 # Generate demo API key for tenant
-                demo_key = await tenant_service.create_api_key(
+                demo_api_key = tenant_service.create_api_key(
                     tenant_id=tenant_id,
                     name="Demo API Key",
                     description="Auto-generated for demo purposes",
@@ -663,13 +630,13 @@ async def setup_demo_environment(
                 )
                 
                 api_keys.append(ApiKeyCreateResponse(
-                    api_key=demo_key["api_key"],
+                    api_key=demo_api_key,
                     key_info=ApiKeyResponse(
-                        id=demo_key["key_id"],
-                        name=demo_key["key_name"],
-                        key_prefix=demo_key["api_key"][:8] + "...",
+                        id=f"demo_{tenant_id}",
+                        name="Demo API Key",
+                        key_prefix=demo_api_key[:8],
                         is_active=True,
-                        created_at=demo_key["created_at"],
+                        created_at=datetime.utcnow(),
                         expires_at=demo_expires_at
                     )
                 ))
@@ -693,10 +660,7 @@ async def setup_demo_environment(
         
     except Exception as e:
         logger.error(f"Failed to setup demo environment: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to setup demo environment: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="setup_demo_environment")
 
 @router.get("/demo/tenants", response_model=List[DemoTenantInfo])
 async def list_demo_tenants(
@@ -749,10 +713,7 @@ async def list_demo_tenants(
         
     except Exception as e:
         logger.error(f"Failed to list demo tenants: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list demo tenants: {str(e)}"
-        )
+        raise handle_exception(e, endpoint="list_demo_tenants")
 
 @router.delete("/demo/cleanup", response_model=DemoCleanupResponse)
 async def cleanup_demo_environment(
@@ -787,7 +748,7 @@ async def cleanup_demo_environment(
             for key in api_keys:
                 if "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower():
                     try:
-                        await tenant_service.delete_api_key(tenant.get("id"), key.get("id"))
+                        tenant_service.delete_api_key(tenant.get("id"), key.get("id"))
                         expired_keys += 1
                     except Exception as e:
                         logger.warning(f"Failed to delete demo key {key.get('id')}: {e}")
@@ -806,7 +767,4 @@ async def cleanup_demo_environment(
         
     except Exception as e:
         logger.error(f"Failed to cleanup demo environment: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to cleanup demo environment: {str(e)}"
-        ) 
+        raise handle_exception(e, endpoint="cleanup_demo_environment") 

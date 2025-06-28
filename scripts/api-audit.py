@@ -78,9 +78,7 @@ def main():
     
     args = parser.parse_args()
     
-    if ADMIN_API_KEY == "YOUR_ADMIN_API_KEY_HERE":
-        print("ERROR: Please update ADMIN_API_KEY in the script with your actual admin API key")
-        sys.exit(1)
+    # API key validation is handled by config.py
     
     if args.list:
         list_audit_events(args.tenant_id, args.limit, args.offset)

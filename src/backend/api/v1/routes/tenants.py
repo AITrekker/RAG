@@ -58,12 +58,12 @@ async def get_tenant_context_info(
         logger.info(f"Getting tenant context for: {current_tenant.get('id')}")
         
         # Get tenant details
-        tenant = await tenant_service.get_tenant(current_tenant.get('id'))
+        tenant = tenant_service.get_tenant(current_tenant.get('id'))
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         # Get tenant's API keys
-        api_keys = await tenant_service.list_api_keys(current_tenant.get('id'))
+        api_keys = tenant_service.list_api_keys(current_tenant.get('id'))
         
         return TenantContextResponse(
             tenant_id=tenant.get('id'),
@@ -113,12 +113,12 @@ async def switch_tenant_context(
             )
         
         # Get target tenant details
-        tenant = await tenant_service.get_tenant(request.tenant_id)
+        tenant = tenant_service.get_tenant(request.tenant_id)
         if not tenant:
             raise HTTPException(status_code=404, detail="Target tenant not found")
         
         # Get target tenant's API keys
-        api_keys = await tenant_service.list_api_keys(request.tenant_id)
+        api_keys = tenant_service.list_api_keys(request.tenant_id)
         
         # Determine permissions for target tenant
         permissions = []
@@ -292,7 +292,7 @@ async def create_tenant_api_key(
         logger.info(f"Creating API key for tenant: {verified_tenant_id}")
         
         # Verify tenant exists
-        tenant = await tenant_service.get_tenant(verified_tenant_id)
+        tenant = tenant_service.get_tenant(verified_tenant_id)
         if not tenant:
             raise HTTPException(
                 status_code=404,
@@ -300,22 +300,21 @@ async def create_tenant_api_key(
             )
         
         # Create API key
-        api_key = await tenant_service.create_api_key(
+        api_key_string = tenant_service.create_api_key(
             tenant_id=verified_tenant_id,
             name=request.key_name,
-            description=request.description,
-            expires_at=request.expires_at,
-            permissions=request.permissions
+            description=request.description or "",
+            expires_at=request.expires_at
         )
         
         return ApiKeyCreateResponse(
-            api_key=api_key["api_key"],
+            api_key=api_key_string,
             key_info=ApiKeyResponse(
-                id=api_key["key_id"],
-                name=api_key["key_name"],
-                key_prefix=api_key["api_key"][:8] + "...",
+                id=f"{api_key_string[:8]}_new",
+                name=request.key_name,
+                key_prefix=api_key_string[:8],
                 is_active=True,
-                created_at=api_key["created_at"],
+                created_at=datetime.utcnow(),
                 expires_at=request.expires_at
             )
         )
@@ -357,7 +356,7 @@ async def list_tenants(
     """
     try:
         logger.info(f"Listing tenants (page {page}, size {page_size})")
-        tenants = await tenant_service.list_tenants()
+        tenants = tenant_service.list_tenants()
         
         # Apply pagination
         start_idx = (page - 1) * page_size
@@ -398,7 +397,7 @@ async def get_tenant(
     """
     try:
         logger.info(f"Getting tenant details: {tenant_id}")
-        tenant = await tenant_service.get_tenant(tenant_id)
+        tenant = tenant_service.get_tenant(tenant_id)
         
         if not tenant:
             raise HTTPException(
@@ -441,14 +440,14 @@ async def list_api_keys(
         logger.info(f"Listing API keys for tenant: {tenant_id}")
         
         # Verify tenant exists
-        tenant = await tenant_service.get_tenant(tenant_id)
+        tenant = tenant_service.get_tenant(tenant_id)
         if not tenant:
             raise HTTPException(
                 status_code=404,
                 detail=f"Tenant {tenant_id} not found"
             )
         
-        api_keys = await tenant_service.list_api_keys(tenant_id)
+        api_keys = tenant_service.list_api_keys(tenant_id)
         return [ApiKeyResponse(**key) for key in api_keys]
         
     except HTTPException:
@@ -486,27 +485,28 @@ async def create_api_key(
         logger.info(f"Creating API key for tenant: {tenant_id}")
         
         # Verify tenant exists
-        tenant = await tenant_service.get_tenant(tenant_id)
+        tenant = tenant_service.get_tenant(tenant_id)
         if not tenant:
             raise HTTPException(
                 status_code=404,
                 detail=f"Tenant {tenant_id} not found"
             )
         
-        api_key = await tenant_service.create_api_key(
+        api_key_string = tenant_service.create_api_key(
             tenant_id=tenant_id,
-            key_name=request.name,
-            permissions=[]  # Default empty permissions
+            name=request.name,
+            description="",
+            expires_at=request.expires_at
         )
         
         return ApiKeyCreateResponse(
-            api_key=api_key["api_key"],
+            api_key=api_key_string,
             key_info=ApiKeyResponse(
-                id=api_key["key_id"],
-                name=api_key["key_name"],
-                key_prefix=api_key["api_key"][:8] + "...",
+                id=f"{api_key_string[:8]}_new",
+                name=request.name,
+                key_prefix=api_key_string[:8],
                 is_active=True,
-                created_at=api_key["created_at"],
+                created_at=datetime.utcnow(),
                 expires_at=request.expires_at
             )
         )
@@ -546,14 +546,14 @@ async def delete_api_key(
         logger.info(f"Deleting API key {key_id} for tenant: {tenant_id}")
         
         # Verify tenant exists
-        tenant = await tenant_service.get_tenant(tenant_id)
+        tenant = tenant_service.get_tenant(tenant_id)
         if not tenant:
             raise HTTPException(
                 status_code=404,
                 detail=f"Tenant {tenant_id} not found"
             )
         
-        success = await tenant_service.delete_api_key(tenant_id, key_id)
+        success = tenant_service.delete_api_key(tenant_id, key_id)
         
         if not success:
             raise HTTPException(

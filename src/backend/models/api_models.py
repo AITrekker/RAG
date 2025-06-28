@@ -444,6 +444,12 @@ class ErrorLogListResponse(BaseModel):
 # ERROR RESPONSE
 # =============================================================================
 
+class SuccessResponse(BaseModel):
+    """Standard success response."""
+    success: bool = Field(True, description="Operation success status")
+    message: str = Field(..., description="Success message")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
     error: str = Field(..., description="Error message")

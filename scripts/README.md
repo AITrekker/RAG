@@ -19,6 +19,11 @@ Essential development and setup tools for the RAG platform. This directory conta
 ### 🔍 Data & System Exploration
 - **`explore_data.py`** - Explore documents, embeddings, and vector data
 
+### 🏢 Demo Tenant Management
+- **`api-demo.py`** - **RECOMMENDED**: Complete demo tenant setup and management
+- **`api-tenant.py`** - Individual tenant creation and API key management
+- **`db-create-tenant.py`** - Direct database tenant creation
+
 ### 🧪 Quality Assurance & Development Workflow
 - **`health_check.py`** - **NEW**: Comprehensive system health validation
 - **`dev_workflow.py`** - **NEW**: Enforces safe development practices
@@ -253,6 +258,12 @@ See `tests/README.md` for complete testing documentation.
 3. **`migrate_db.py migrate`** - Initialize database schema
 4. **`direct_setup.py`** - Create tenant and API key
 5. **`run_backend.py`** + **`run_frontend.ps1`** - Start servers
+
+### **Demo Tenant Setup:**
+- **`api-demo.py --setup-default`** - **RECOMMENDED**: Create demo tenants (tenant1, tenant2, tenant3) with API keys
+- **`api-demo.py --list`** - List all demo tenants
+- **`api-demo.py --cleanup`** - Remove demo environment
+- See **[/docs/DEMO_TENANT_SETUP.md](../docs/DEMO_TENANT_SETUP.md)** for complete guide
 
 ### **Daily Development:**
 - **`run_backend.py`** - Start backend 

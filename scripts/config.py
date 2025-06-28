@@ -18,6 +18,7 @@ Usage:
 import os
 import subprocess
 import sys
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -90,6 +91,39 @@ def get_admin_base_url() -> str:
     """Get the admin base URL for API requests."""
     return f"{get_base_url()}/admin"
 
+def get_demo_api_keys() -> dict:
+    """
+    Load demo tenant API keys from the demo_tenant_keys.json file.
+    
+    Returns:
+        dict: Dictionary mapping tenant names to API keys
+    """
+    project_root = Path(__file__).parent.parent
+    keys_file = project_root / 'demo_tenant_keys.json'
+    
+    if not keys_file.exists():
+        print("❌ Demo tenant keys file not found!")
+        print("💡 Run: python scripts/api-demo.py --setup-default")
+        return {}
+    
+    try:
+        with open(keys_file, 'r') as f:
+            keys = json.load(f)
+        return keys
+    except Exception as e:
+        print(f"❌ Error loading demo keys: {e}")
+        return {}
+
+def print_demo_keys():
+    """Print available demo tenant API keys."""
+    keys = get_demo_api_keys()
+    if keys:
+        print("🔑 Available Demo Tenant API Keys:")
+        for tenant_name, api_key in keys.items():
+            print(f"  {tenant_name}: {api_key[:8]}...{api_key[-8:]}")
+    else:
+        print("❌ No demo tenant keys available")
+
 def print_config_info():
     """Print current configuration for debugging."""
     try:
@@ -97,6 +131,8 @@ def print_config_info():
         print("✅ Configuration loaded successfully:")
         print(f"   Admin API Key: {api_key[:8]}...{api_key[-8:] if len(api_key) > 16 else api_key}")
         print(f"   Base URL: {get_base_url()}")
+        print()
+        print_demo_keys()
     except SystemExit:
         print("❌ Configuration failed to load")
 

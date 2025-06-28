@@ -23,6 +23,7 @@ test_env/
 .vscode/
 .idea/
 .cursor/
+.claude/
 .DS_Store
 Thumbs.db
 ehthumbs.db
@@ -161,3 +162,4 @@ docker-compose.override.yaml
 *.pfx
 secrets/
 .secrets/
+demo_tenant_keys.json

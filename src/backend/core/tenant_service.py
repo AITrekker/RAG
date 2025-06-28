@@ -32,7 +32,7 @@ class TenantService:
         key_hash = hashlib.sha256(full_key.encode()).hexdigest()
         return full_key, key_hash, key_prefix
 
-    def create_tenant(self, name: str, description: Optional[str] = "") -> Dict:
+    def create_tenant(self, name: str, description: Optional[str] = "", auto_sync: bool = True, sync_interval: int = 60) -> Dict:
         """Creates a new tenant and a default API key, or returns existing if name exists."""
         # Check if tenant with this name already exists
         points, _ = self.client.scroll(
@@ -82,6 +82,8 @@ class TenantService:
             "description": description,
             "status": "active",
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "auto_sync": auto_sync,
+            "sync_interval": sync_interval,
             "api_keys": [
                 {
                     "key_hash": api_key_hash,
@@ -124,7 +126,7 @@ class TenantService:
             })
         return tenants
 
-    def create_api_key(self, tenant_id: str, name: str = "New Key") -> str:
+    def create_api_key(self, tenant_id: str, name: str = "New Key", description: str = "", expires_at: Optional[datetime] = None) -> str:
         """Generates and adds a new API key for a specified tenant."""
         tenant_point = self.client.retrieve(collection_name=TENANTS_COLLECTION_NAME, ids=[tenant_id])
         if not tenant_point:
@@ -137,9 +139,10 @@ class TenantService:
             "key_hash": api_key_hash,
             "key_prefix": api_key_prefix,
             "name": name,
+            "description": description,
             "is_active": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": None,
+            "expires_at": expires_at.isoformat() if expires_at else None,
         }
         
         if "api_keys" not in tenant_payload or not tenant_payload["api_keys"]:
