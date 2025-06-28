@@ -1,5 +1,5 @@
-# Use the official NVIDIA PyTorch container as requested for GPU compatibility
-FROM nvcr.io/nvidia/pytorch:24.04-py3
+# Use the latest NVIDIA PyTorch container for RTX 5070 compatibility
+FROM nvcr.io/nvidia/pytorch:24.12-py3
 
 # Set up the working directory
 WORKDIR /app
@@ -15,38 +15,53 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy requirements files
 COPY requirements-base.txt .
 COPY requirements.txt .
+COPY constraints.txt .
 
-# Install base requirements (heavyweight packages) first
-# DO NOT reinstall torch, torchvision, or torchaudio - they are pre-installed
+# Install PyTorch with CUDA 12.8 support for RTX 5070 (sm_120)
+# CRITICAL: This specific PyTorch version supports sm_120 (RTX 5070)
+# DO NOT change this installation method or PyTorch will downgrade!
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements-base.txt
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Install main requirements (lightweight packages)
+# Install base requirements (heavyweight packages) 
+# Use constraints file to prevent PyTorch downgrades
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --upgrade-strategy only-if-needed -c constraints.txt -r requirements-base.txt
 
-# Test that ML libraries can be imported successfully
+# Install main requirements (lightweight packages)  
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir --upgrade-strategy only-if-needed -c constraints.txt -r requirements.txt
+
+# Test that ML libraries can be imported successfully and verify CUDA support
 RUN python -c "import torch; print(f'PyTorch version: {torch.__version__}'); \
+    print(f'CUDA available: {torch.cuda.is_available()}'); \
+    print(f'CUDA version: {torch.version.cuda}'); \
     import transformers; print(f'Transformers version: {transformers.__version__}'); \
-    import sentence_transformers; print('Sentence transformers imported successfully'); \
-    print('All ML libraries imported successfully!')"
+    print('Core ML libraries imported successfully!')"
 
 # Copy the application source code
-# We copy the contents of src/backend directly into /app so that
-# uvicorn can find main.py at the top level.
-COPY ./src/backend/ /app
+# Maintain the src/ structure for proper imports
+COPY ./src /app/src
 COPY ./scripts/ /app/scripts
 
 # Create a non-root user for security.
 # Note: In some GPU environments, root may be required.
 # If issues arise, this may need to be commented out.
 RUN addgroup --system app && adduser --system --group app
-RUN chown -R app:app /app
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /app/data /app/cache \
+    /home/app/.cache/huggingface \
+    /home/app/.cache/transformers && \
+    chown -R app:app /app /home/app/.cache
+
 USER app
 
 # Set environment variables for Python
-# We no longer need a deep PYTHONPATH as main.py is at the root.
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV HF_HOME=/home/app/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/home/app/.cache/transformers
 
 # Expose the application port
 EXPOSE 8000

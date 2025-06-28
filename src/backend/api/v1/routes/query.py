@@ -17,7 +17,7 @@ from datetime import datetime
 import time
 import logging
 
-from ...models.api_models import (
+from src.backend.models.api_models import (
     QueryRequest,
     QueryResponse,
     QueryBatchRequest,
@@ -27,15 +27,15 @@ from ...models.api_models import (
     QueryFeedbackResponse,
     SourceCitation,
     ErrorResponse,
-    DocumentResponse,
-    DocumentListResponse
+    DocumentListResponse,
+    DocumentResponse
 )
-from ...core.rag_pipeline import get_rag_pipeline
-from ...core.llm_service import LLMService
-from ...core.embedding_manager import EmbeddingManager
+from src.backend.core.rag_pipeline import get_rag_pipeline
+from src.backend.core.llm_service import LLMService
+from src.backend.core.embedding_manager import EmbeddingManager
 from src.backend.middleware.auth import get_current_tenant
-from ...config.settings import get_settings
-from ...utils.error_handling import (
+from src.backend.config.settings import get_settings
+from src.backend.utils.error_handling import (
     RAGPipelineError,
     LLMError,
     EmbeddingError,
@@ -46,14 +46,14 @@ from ...utils.error_handling import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/query", tags=["RAG Query Processing"])
+router = APIRouter(prefix="/queries", tags=["RAG Query Processing"])
 
 # =============================================================================
 # QUERY PROCESSING
 # =============================================================================
 
-@router.post("/ask", response_model=QueryResponse)
-async def process_query(
+@router.post("/", response_model=QueryResponse)
+async def create_query(
     request: QueryRequest,
     current_tenant: dict = Depends(get_current_tenant)
 ):
@@ -570,16 +570,16 @@ async def get_query_stats(
         logger.error(f"Failed to get query stats: {e}", exc_info=True)
         raise internal_error(f"Failed to get query statistics: {str(e)}")
 
-@router.post("/validate")
+@router.post("/validate", response_model=dict)
 async def validate_query(
-    query: str,
+    request: dict,
     current_tenant: dict = Depends(get_current_tenant)
 ):
     """
     Validate a query without processing it.
     
     Args:
-        query: Query to validate
+        request: Query validation request with 'query' field
         current_tenant: Current tenant (from auth)
         
     Returns:
@@ -587,6 +587,10 @@ async def validate_query(
     """
     try:
         tenant_id = current_tenant["tenant_id"]
+        query = request.get("query", "")
+        
+        if not query:
+            raise ValidationErrorCustom("Query is required")
         
         # Validate query using RAG pipeline
         rag_pipeline = get_rag_pipeline()

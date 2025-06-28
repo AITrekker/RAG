@@ -19,6 +19,7 @@ from src.backend.api.v1.routes import (
     sync as sync_routes,
     admin as admin_routes,
     setup as setup_routes,
+    tenants as tenant_routes,
 )
 from src.backend.core.embeddings import get_embedding_service, EmbeddingService
 from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
@@ -114,10 +115,11 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])
-app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
-app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
+app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}", tags=["Query"])
+app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}", tags=["Sync"])
 app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
+app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
 
 @app.get("/", include_in_schema=False)
 async def root():

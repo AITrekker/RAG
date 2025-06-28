@@ -288,3 +288,282 @@ The following redundant/debugging scripts were removed for clarity:
 - Tenant CRUD and clear/reset operations are now admin-only.
 - Audit logs are accessible only to admins at `/api/v1/admin/audit/events`.
 - For a full list of endpoints, see `docs/API_ENDPOINTS_OVERVIEW.md` or the live `/docs` (Swagger UI). 
+
+# API Scripts for Enterprise RAG Platform
+
+This directory contains Python scripts for interacting with the Enterprise RAG Platform admin API endpoints. All scripts require admin API key authentication.
+
+## Prerequisites
+
+1. **Python 3.7+** with `requests` library installed
+2. **Admin API Key** - Update the `ADMIN_API_KEY` variable in each script
+3. **Backend running** on `http://localhost:8000`
+
+## Installation
+
+```bash
+# Install required dependencies
+pip install requests
+
+# Make scripts executable (Linux/Mac)
+chmod +x api-*.py
+```
+
+## Configuration
+
+Before using any script, update the `ADMIN_API_KEY` variable at the top of each script:
+
+```python
+# Configuration - Update this with your admin API key
+ADMIN_API_KEY = "YOUR_ADMIN_API_KEY_HERE"
+```
+
+## Available Scripts
+
+### 1. `api-tenant.py` - Tenant Management
+
+**Operations:**
+- List tenants
+- Create tenants
+- Get tenant details
+- Update tenants
+- Delete tenants
+- Manage API keys per tenant
+
+**Usage Examples:**
+```bash
+# List all tenants
+python api-tenant.py --list
+
+# List tenants with API keys included
+python api-tenant.py --list --include-api-keys
+
+# List only demo tenants
+python api-tenant.py --list --demo-only
+
+# Create a new tenant
+python api-tenant.py --create --name "New Company" --description "New tenant"
+
+# Get tenant details
+python api-tenant.py --get --tenant-id "tenant_123"
+
+# Update tenant
+python api-tenant.py --update --tenant-id "tenant_123" --name "Updated Name"
+
+# Delete tenant
+python api-tenant.py --delete --tenant-id "tenant_123"
+
+# Create API key for tenant
+python api-tenant.py --create-key --tenant-id "tenant_123" --key-name "Production Key"
+
+# List API keys for tenant
+python api-tenant.py --list-keys --tenant-id "tenant_123"
+
+# Delete API key
+python api-tenant.py --delete-key --tenant-id "tenant_123" --key-id "key_456"
+```
+
+### 2. `api-audit.py` - Audit Events
+
+**Operations:**
+- List audit events with filtering
+
+**Usage Examples:**
+```bash
+# List all audit events
+python api-audit.py --list
+
+# List audit events for specific tenant
+python api-audit.py --list --tenant-id "tenant_123"
+
+# List audit events with pagination
+python api-audit.py --list --limit 50 --offset 10
+```
+
+### 3. `api-demo.py` - Demo Management
+
+**Operations:**
+- Setup demo environment
+- List demo tenants
+- Cleanup demo environment
+
+**Usage Examples:**
+```bash
+# Setup demo environment
+python api-demo.py --setup --demo-tenants "tenant_1,tenant_2" --duration 24
+
+# Setup demo environment without API keys
+python api-demo.py --setup --demo-tenants "tenant_1,tenant_2" --no-api-keys
+
+# List demo tenants
+python api-demo.py --list
+
+# Cleanup demo environment
+python api-demo.py --cleanup
+```
+
+### 4. `api-system.py` - System Monitoring & Maintenance
+
+**Operations:**
+- Get system status
+- Get system metrics
+- Clear statistics and caches
+- Trigger maintenance mode
+
+**Usage Examples:**
+```bash
+# Get system status
+python api-system.py --status
+
+# Get system metrics
+python api-system.py --metrics
+
+# Clear embedding statistics
+python api-system.py --clear-embeddings-stats
+
+# Clear LLM statistics
+python api-system.py --clear-llm-stats
+
+# Clear LLM cache
+python api-system.py --clear-llm-cache
+
+# Trigger maintenance mode
+python api-system.py --maintenance
+```
+
+## Common Parameters
+
+### Pagination Parameters
+- `--page`: Page number (default: 1)
+- `--page-size`: Number of items per page (default: 20)
+
+### Tenant Parameters
+- `--tenant-id`: Tenant identifier
+- `--name`: Tenant name
+- `--description`: Tenant description
+- `--auto-sync`: Enable/disable auto sync
+- `--sync-interval`: Sync interval in seconds
+
+### API Key Parameters
+- `--key-name`: API key name
+- `--key-id`: API key identifier
+
+### Demo Parameters
+- `--demo-tenants`: Comma-separated list of demo tenant IDs
+- `--duration`: Demo duration in hours (default: 24)
+- `--generate-api-keys`: Generate API keys for demo tenants
+- `--no-api-keys`: Don't generate API keys
+
+## Error Handling
+
+All scripts include comprehensive error handling:
+
+- **API Key Validation**: Scripts check if the API key has been updated
+- **Required Parameters**: Scripts validate required parameters are provided
+- **HTTP Errors**: Scripts display detailed error messages for API failures
+- **JSON Parsing**: Scripts handle malformed JSON responses gracefully
+
+## Output Format
+
+All scripts output JSON responses in a readable format:
+
+```json
+{
+  "data": {
+    "id": "tenant_123",
+    "name": "Example Company",
+    "description": "Example tenant"
+  },
+  "message": "Success",
+  "timestamp": "2024-01-01T00:00:00Z"
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"Please update ADMIN_API_KEY"**
+   - Update the `ADMIN_API_KEY` variable in the script
+
+2. **"Connection refused"**
+   - Ensure the backend is running on `http://localhost:8000`
+
+3. **"401 Unauthorized"**
+   - Verify the admin API key is correct
+   - Ensure the API key has admin privileges
+
+4. **"404 Not Found"**
+   - Check that the endpoint exists in the current API version
+   - Verify the tenant ID or resource ID is correct
+
+### Debug Mode
+
+To see detailed request/response information, you can modify the `make_request` function in any script to include debug output:
+
+```python
+def make_request(method: str, endpoint: str, data: Optional[dict] = None, params: Optional[dict] = None) -> dict:
+    url = f"{BASE_URL}{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {ADMIN_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    print(f"DEBUG: {method} {url}")
+    print(f"DEBUG: Headers: {headers}")
+    if data:
+        print(f"DEBUG: Data: {json.dumps(data, indent=2)}")
+    if params:
+        print(f"DEBUG: Params: {params}")
+    
+    # ... rest of function
+```
+
+## Security Notes
+
+- **Never commit API keys** to version control
+- **Use environment variables** for production deployments
+- **Rotate API keys** regularly
+- **Limit API key permissions** to minimum required access
+
+## Integration Examples
+
+### Batch Operations
+
+```bash
+#!/bin/bash
+# Create multiple tenants
+python api-tenant.py --create --name "Company A" --description "First company"
+python api-tenant.py --create --name "Company B" --description "Second company"
+python api-tenant.py --create --name "Company C" --description "Third company"
+
+# List all tenants
+python api-tenant.py --list --include-api-keys
+```
+
+### Automated Setup
+
+```bash
+#!/bin/bash
+# Setup demo environment
+python api-demo.py --setup --demo-tenants "demo1,demo2,demo3" --duration 48
+
+# Wait for setup to complete
+sleep 5
+
+# List demo tenants
+python api-demo.py --list
+
+# Get system status
+python api-system.py --status
+```
+
+## Contributing
+
+When adding new scripts or modifying existing ones:
+
+1. Follow the existing code structure
+2. Include comprehensive error handling
+3. Add proper documentation and usage examples
+4. Test with various parameter combinations
+5. Update this README with new functionality 

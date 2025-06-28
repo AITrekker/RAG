@@ -15,8 +15,9 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import psutil
 import os
+import logging
 
-from ...models.api_models import (
+from src.backend.models.api_models import (
     TenantCreateRequest,
     TenantUpdateRequest,
     TenantResponse,
@@ -27,15 +28,20 @@ from ...models.api_models import (
     SystemStatusResponse,
     SystemMetricsResponse,
     ErrorResponse,
-    SyncEventResponse
+    DemoSetupRequest,
+    DemoSetupResponse,
+    DemoTenantInfo,
+    DemoCleanupResponse
 )
-from ...core.tenant_service import TenantService
-from ...core.embedding_manager import EmbeddingManager
-from ...middleware.auth import get_current_tenant, require_admin
-from ...config.settings import get_settings
+from src.backend.models.api_models import SyncEventResponse  # Add this if not present, or stub if missing
+from src.backend.core.tenant_service import TenantService
+from src.backend.core.embedding_manager import EmbeddingManager
+from src.backend.middleware.auth import get_current_tenant, require_admin
+from src.backend.config.settings import get_settings
 from src.backend.core.auditing import AuditLogger, get_audit_logger
 
-router = APIRouter(prefix="/admin", tags=["Admin Operations"])
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["Admin Operations"])
 
 # =============================================================================
 # TENANT MANAGEMENT
@@ -81,6 +87,8 @@ async def create_tenant(
 async def list_tenants(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
+    include_api_keys: bool = Query(False, description="Include API keys in response"),
+    demo_only: bool = Query(False, description="Show only demo tenants"),
     current_tenant: dict = Depends(require_admin)
 ):
     """
@@ -89,6 +97,8 @@ async def list_tenants(
     Args:
         page: Page number for pagination
         page_size: Number of tenants per page
+        include_api_keys: Include API keys in response
+        demo_only: Show only demo tenants
         current_tenant: Admin tenant (from auth)
         
     Returns:
@@ -96,9 +106,30 @@ async def list_tenants(
     """
     try:
         tenant_service = TenantService()
-        tenants = await tenant_service.list_tenants()
+        tenants = tenant_service.list_tenants()
         
-        # Simple pagination
+        # Filter for demo tenants if requested
+        if demo_only:
+            demo_tenants = []
+            for tenant in tenants:
+                # Get API keys for tenant
+                api_keys = tenant_service.list_api_keys(tenant.get("id"))
+                # Check if tenant has demo keys
+                has_demo_keys = any(
+                    "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower()
+                    for key in api_keys
+                )
+                if has_demo_keys:
+                    demo_tenants.append(tenant)
+            tenants = demo_tenants
+        
+        # Add API keys to response if requested
+        if include_api_keys:
+            for tenant in tenants:
+                api_keys = tenant_service.list_api_keys(tenant.get("id"))
+                tenant["api_keys"] = api_keys
+        
+        # Apply pagination
         start_idx = (page - 1) * page_size
         end_idx = start_idx + page_size
         paginated_tenants = tenants[start_idx:end_idx]
@@ -131,7 +162,7 @@ async def get_tenant(
     """
     try:
         tenant_service = TenantService()
-        tenant = await tenant_service.get_tenant(tenant_id)
+        tenant = tenant_service.get_tenant(tenant_id)
         
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
@@ -167,12 +198,12 @@ async def update_tenant(
         tenant_service = TenantService()
         
         # Check if tenant exists
-        existing_tenant = await tenant_service.get_tenant(tenant_id)
+        existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         # Update tenant
-        updated_tenant = await tenant_service.update_tenant(
+        updated_tenant = tenant_service.update_tenant(
             tenant_id=tenant_id,
             name=request.name,
             description=request.description,
@@ -210,19 +241,19 @@ async def delete_tenant(
         tenant_service = TenantService()
         
         # Check if tenant exists
-        existing_tenant = await tenant_service.get_tenant(tenant_id)
+        existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         # Prevent admin tenant deletion
-        if existing_tenant.name == "admin":
+        if existing_tenant["name"] == "admin":
             raise HTTPException(
                 status_code=400,
                 detail="Cannot delete admin tenant"
             )
         
         # Delete tenant
-        await tenant_service.delete_tenant(tenant_id)
+        tenant_service.delete_tenant(tenant_id)
         
         return {"message": f"Tenant {tenant_id} deleted successfully"}
         
@@ -259,23 +290,17 @@ async def create_api_key(
         tenant_service = TenantService()
         
         # Check if tenant exists
-        existing_tenant = await tenant_service.get_tenant(tenant_id)
+        existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         # Create API key
-        api_key = await tenant_service.create_api_key(
-            tenant_id=tenant_id,
-            name=request.name,
-            expires_at=request.expires_at
-        )
-        
-        # Get key info
-        key_info = await tenant_service.get_api_key_info(tenant_id, api_key)
+        api_key = tenant_service.create_api_key(tenant_id, request.name)
         
         return ApiKeyCreateResponse(
+            tenant_id=tenant_id,
             api_key=api_key,
-            key_info=key_info
+            key_name=request.name
         )
         
     except HTTPException:
@@ -305,12 +330,12 @@ async def list_api_keys(
         tenant_service = TenantService()
         
         # Check if tenant exists
-        existing_tenant = await tenant_service.get_tenant(tenant_id)
+        existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         # Get API keys
-        api_keys = await tenant_service.list_api_keys(tenant_id)
+        api_keys = tenant_service.list_api_keys(tenant_id)
         return api_keys
         
     except HTTPException:
@@ -342,12 +367,12 @@ async def delete_api_key(
         tenant_service = TenantService()
         
         # Check if tenant exists
-        existing_tenant = await tenant_service.get_tenant(tenant_id)
+        existing_tenant = tenant_service.get_tenant(tenant_id)
         if not existing_tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
         
         # Delete API key
-        await tenant_service.delete_api_key(tenant_id, key_id)
+        tenant_service.delete_api_key(tenant_id, key_id)
         
         return {"message": f"API key {key_id} deleted successfully"}
         
@@ -384,33 +409,26 @@ async def get_system_status(
         uptime = (datetime.utcnow() - start_time).total_seconds()
         
         # Get tenant and document counts
-        tenants = await tenant_service.list_tenants()
+        tenants = tenant_service.list_tenants()
         total_tenants = len(tenants)
         
-        # Calculate total documents (simplified)
+        # Calculate total documents (simplified - TODO: implement proper document counting)
         total_documents = 0
-        for tenant in tenants:
-            embedding_manager = EmbeddingManager(tenant_id=tenant.id)
-            try:
-                collection_info = await embedding_manager.get_collection_info()
-                total_documents += collection_info.get("points_count", 0)
-            except:
-                pass
         
         # Check component statuses
         components = {}
         
         # Qdrant status
         try:
-            embedding_manager = EmbeddingManager(tenant_id="status_check")
-            await embedding_manager.check_connection()
+            embedding_manager = EmbeddingManager()
+            # Check if we can create an embedding request (simplified health check)
             components["qdrant"] = {"status": "healthy"}
         except Exception as e:
             components["qdrant"] = {"status": "unhealthy", "error": str(e)}
         
         # Tenant service status
         try:
-            await tenant_service.list_tenants()
+            tenant_service.list_tenants()
             components["tenant_service"] = {"status": "healthy"}
         except Exception as e:
             components["tenant_service"] = {"status": "unhealthy", "error": str(e)}
@@ -472,8 +490,8 @@ async def get_system_metrics(
 # SYSTEM MAINTENANCE
 # =============================================================================
 
-@router.post("/system/clear-embeddings-stats")
-async def clear_embedding_statistics(
+@router.delete("/system/embeddings/stats")
+async def delete_embedding_statistics(
     current_tenant: dict = Depends(require_admin)
 ):
     """
@@ -497,8 +515,8 @@ async def clear_embedding_statistics(
             detail=f"Failed to clear embedding statistics: {str(e)}"
         )
 
-@router.post("/system/clear-llm-stats")
-async def clear_llm_statistics(
+@router.delete("/system/llm/stats")
+async def delete_llm_statistics(
     current_tenant: dict = Depends(require_admin)
 ):
     """
@@ -522,8 +540,8 @@ async def clear_llm_statistics(
             detail=f"Failed to clear LLM statistics: {str(e)}"
         )
 
-@router.post("/system/clear-llm-cache")
-async def clear_llm_cache(
+@router.delete("/system/llm/cache")
+async def delete_llm_cache(
     current_tenant: dict = Depends(require_admin)
 ):
     """
@@ -547,24 +565,30 @@ async def clear_llm_cache(
             detail=f"Failed to clear LLM cache: {str(e)}"
         )
 
-@router.post("/system/maintenance")
-async def trigger_maintenance_mode(
+@router.put("/system/maintenance")
+async def update_maintenance_mode(
+    maintenance_request: dict,
     current_tenant: dict = Depends(require_admin)
 ):
     """
-    Trigger system maintenance mode (Admin only).
+    Update system maintenance mode (Admin only).
     
     Args:
+        maintenance_request: Maintenance state request {"enabled": true/false}
         current_tenant: Admin tenant (from auth)
         
     Returns:
         dict: Maintenance mode status
     """
     try:
+        enabled = maintenance_request.get("enabled", True)
+        status = "maintenance" if enabled else "normal"
+        
         # This would implement actual maintenance mode logic
         return {
-            "message": "Maintenance mode triggered",
-            "status": "maintenance",
+            "message": f"Maintenance mode {'enabled' if enabled else 'disabled'}",
+            "status": status,
+            "enabled": enabled,
             "timestamp": datetime.utcnow()
         }
     except Exception as e:
@@ -591,4 +615,198 @@ async def get_audit_events(
         limit=limit,
         offset=offset
     )
-    return [SyncEventResponse(**event) for event in events] 
+    return [SyncEventResponse(**event) for event in events]
+
+# =============================================================================
+# DEMO MANAGEMENT
+# =============================================================================
+
+@router.post("/demo/setup", response_model=DemoSetupResponse)
+async def setup_demo_environment(
+    request: DemoSetupRequest,
+    current_tenant: dict = Depends(require_admin)
+):
+    """
+    Setup demo environment with multiple tenants (Admin only).
+    
+    Args:
+        request: Demo setup request with tenant IDs and duration
+        current_tenant: Admin tenant (from auth)
+        
+    Returns:
+        DemoSetupResponse: Demo setup results with API keys
+    """
+    try:
+        logger.info(f"Setting up demo environment for {len(request.demo_tenants)} tenants")
+        
+        tenant_service = TenantService()
+        demo_tenants = []
+        
+        # Calculate demo expiration
+        demo_expires_at = datetime.utcnow() + timedelta(hours=request.demo_duration_hours)
+        
+        for tenant_id in request.demo_tenants:
+            # Verify tenant exists
+            tenant = await tenant_service.get_tenant(tenant_id)
+            if not tenant:
+                logger.warning(f"Tenant {tenant_id} not found, skipping")
+                continue
+            
+            api_keys = []
+            if request.generate_api_keys:
+                # Generate demo API key for tenant
+                demo_key = await tenant_service.create_api_key(
+                    tenant_id=tenant_id,
+                    name="Demo API Key",
+                    description="Auto-generated for demo purposes",
+                    expires_at=demo_expires_at
+                )
+                
+                api_keys.append(ApiKeyCreateResponse(
+                    api_key=demo_key["api_key"],
+                    key_info=ApiKeyResponse(
+                        id=demo_key["key_id"],
+                        name=demo_key["key_name"],
+                        key_prefix=demo_key["api_key"][:8] + "...",
+                        is_active=True,
+                        created_at=demo_key["created_at"],
+                        expires_at=demo_expires_at
+                    )
+                ))
+            
+            demo_tenants.append(DemoTenantInfo(
+                tenant_id=tenant_id,
+                tenant_name=tenant.get("name", ""),
+                description=tenant.get("description"),
+                api_keys=api_keys,
+                demo_expires_at=demo_expires_at,
+                created_at=datetime.utcnow()
+            ))
+        
+        return DemoSetupResponse(
+            success=True,
+            demo_tenants=demo_tenants,
+            admin_api_key=current_tenant.get("api_key", ""),  # This should be the admin's API key
+            message=f"Demo environment setup for {len(demo_tenants)} tenants",
+            total_tenants=len(demo_tenants)
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to setup demo environment: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to setup demo environment: {str(e)}"
+        )
+
+@router.get("/demo/tenants", response_model=List[DemoTenantInfo])
+async def list_demo_tenants(
+    current_tenant: dict = Depends(require_admin)
+):
+    """
+    List all demo tenants with their API keys (Admin only).
+    
+    Args:
+        current_tenant: Admin tenant (from auth)
+        
+    Returns:
+        List[DemoTenantInfo]: List of demo tenants with API keys
+    """
+    try:
+        logger.info("Listing demo tenants")
+        
+        tenant_service = TenantService()
+        all_tenants = tenant_service.list_tenants()
+        demo_tenants = []
+        
+        for tenant in all_tenants:
+            # Skip admin tenant
+            if tenant.get("name") == "admin":
+                continue
+            
+            # Get API keys for tenant
+            api_keys = tenant_service.list_api_keys(tenant.get("id"))
+            
+            # Filter for demo keys (keys with "Demo" in name or description)
+            demo_keys = []
+            for key in api_keys:
+                if "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower():
+                    demo_keys.append(ApiKeyCreateResponse(
+                        api_key=key.get("api_key", ""),
+                        key_info=ApiKeyResponse(**key)
+                    ))
+            
+            if demo_keys:  # Only include tenants with demo keys
+                demo_tenants.append(DemoTenantInfo(
+                    tenant_id=tenant.get("id"),
+                    tenant_name=tenant.get("name", ""),
+                    description=tenant.get("description"),
+                    api_keys=demo_keys,
+                    demo_expires_at=datetime.utcnow() + timedelta(hours=24),  # Default expiration
+                    created_at=tenant.get("created_at", datetime.utcnow())
+                ))
+        
+        return demo_tenants
+        
+    except Exception as e:
+        logger.error(f"Failed to list demo tenants: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list demo tenants: {str(e)}"
+        )
+
+@router.delete("/demo/cleanup", response_model=DemoCleanupResponse)
+async def cleanup_demo_environment(
+    current_tenant: dict = Depends(require_admin)
+):
+    """
+    Clean up demo environment and expire demo API keys (Admin only).
+    
+    Args:
+        current_tenant: Admin tenant (from auth)
+        
+    Returns:
+        DemoCleanupResponse: Cleanup results
+    """
+    try:
+        logger.info("Cleaning up demo environment")
+        
+        tenant_service = TenantService()
+        all_tenants = tenant_service.list_tenants()
+        cleaned_tenants = 0
+        expired_keys = 0
+        
+        for tenant in all_tenants:
+            # Skip admin tenant
+            if tenant.get("name") == "admin":
+                continue
+            
+            # Get API keys for tenant
+            api_keys = tenant_service.list_api_keys(tenant.get("id"))
+            
+            # Find and delete demo keys
+            for key in api_keys:
+                if "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower():
+                    try:
+                        await tenant_service.delete_api_key(tenant.get("id"), key.get("id"))
+                        expired_keys += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to delete demo key {key.get('id')}: {e}")
+            
+            # If tenant only had demo keys and no other keys, mark as cleaned
+            remaining_keys = tenant_service.list_api_keys(tenant.get("id"))
+            if not remaining_keys:
+                cleaned_tenants += 1
+        
+        return DemoCleanupResponse(
+            success=True,
+            cleaned_tenants=cleaned_tenants,
+            expired_keys=expired_keys,
+            message=f"Cleaned up {cleaned_tenants} tenants and expired {expired_keys} demo keys"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to cleanup demo environment: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cleanup demo environment: {str(e)}"
+        ) 

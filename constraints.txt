@@ -1,0 +1,9 @@
+# PyTorch version constraints to prevent downgrades
+# CRITICAL: These versions are from CUDA 12.8 index for RTX 5070 (sm_120) support
+# DO NOT modify these constraints or PyTorch will downgrade!
+
+# The exact versions will be determined by the CUDA 12.8 index installation
+# This file prevents other packages from forcing downgrades
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0

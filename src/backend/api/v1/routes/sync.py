@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 import logging
 
-from ...models.api_models import (
+from src.backend.models.api_models import (
     SyncTriggerRequest,
     SyncResponse,
     SyncHistoryResponse,
@@ -27,19 +27,19 @@ from ...models.api_models import (
     SyncConfigResponse,
     ErrorResponse
 )
-from ...core.delta_sync import DeltaSync
+from src.backend.core.delta_sync import DeltaSync
 from src.backend.middleware.auth import get_current_tenant
-from ...config.settings import get_settings
+from src.backend.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/sync", tags=["Delta Sync"])
+router = APIRouter(prefix="/syncs", tags=["Delta Sync"])
 
 # =============================================================================
 # DELTA SYNC OPERATIONS
 # =============================================================================
 
-@router.post("/trigger", response_model=SyncResponse)
-async def trigger_delta_sync(
+@router.post("/", response_model=SyncResponse)
+async def create_sync(
     request: SyncTriggerRequest,
     current_tenant: dict = Depends(get_current_tenant)
 ):
@@ -91,8 +91,8 @@ async def trigger_delta_sync(
             detail=f"Failed to trigger delta sync: {str(e)}"
         )
 
-@router.get("/status/{sync_id}", response_model=SyncResponse)
-async def get_sync_status(
+@router.get("/{sync_id}", response_model=SyncResponse)
+async def get_sync(
     sync_id: str,
     current_tenant: dict = Depends(get_current_tenant)
 ):
@@ -163,8 +163,8 @@ async def get_sync_history(
             detail=f"Failed to get sync history: {str(e)}"
         )
 
-@router.post("/cancel/{sync_id}")
-async def cancel_sync(
+@router.delete("/{sync_id}")
+async def delete_sync(
     sync_id: str,
     current_tenant: dict = Depends(get_current_tenant)
 ):
@@ -319,16 +319,16 @@ async def get_sync_stats(
 # DOCUMENT PROCESSING
 # =============================================================================
 
-@router.post("/documents/{file_path:path}/process")
-async def process_single_document(
-    file_path: str,
+@router.post("/documents", response_model=dict)
+async def create_document_processing(
+    request: dict,
     current_tenant: dict = Depends(get_current_tenant)
 ):
     """
     Process a single document manually.
     
     Args:
-        file_path: Path to the document relative to tenant's document folder
+        request: Document processing request with 'file_path' field
         current_tenant: Current tenant (from auth)
         
     Returns:
@@ -336,6 +336,10 @@ async def process_single_document(
     """
     try:
         tenant_id = current_tenant["tenant_id"]
+        file_path = request.get("file_path")
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
         
         # Process single document
         delta_sync = DeltaSync(tenant_id=tenant_id)
@@ -357,16 +361,16 @@ async def process_single_document(
             detail=f"Failed to process document: {str(e)}"
         )
 
-@router.delete("/documents/{file_path:path}")
-async def remove_document(
-    file_path: str,
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str,
     current_tenant: dict = Depends(get_current_tenant)
 ):
     """
     Remove a document from Qdrant (does not delete the file).
     
     Args:
-        file_path: Path to the document relative to tenant's document folder
+        document_id: Document ID to remove
         current_tenant: Current tenant (from auth)
         
     Returns:
@@ -377,10 +381,10 @@ async def remove_document(
         
         # Remove document from Qdrant
         delta_sync = DeltaSync(tenant_id=tenant_id)
-        result = await delta_sync.remove_document(file_path)
+        result = await delta_sync.remove_document_by_id(document_id)
         
         return {
-            "file_path": file_path,
+            "document_id": document_id,
             "success": result.success,
             "message": result.message,
             "removed_embeddings": result.removed_embeddings,
@@ -388,7 +392,7 @@ async def remove_document(
         }
         
     except Exception as e:
-        logger.error(f"Failed to remove document {file_path}: {e}", exc_info=True)
+        logger.error(f"Failed to remove document {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to remove document: {str(e)}"

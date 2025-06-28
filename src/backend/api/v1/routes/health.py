@@ -137,7 +137,7 @@ async def check_monitoring_health() -> ComponentStatus:
 
 # --- API Endpoints ---
 
-@router.get("", summary="Comprehensive Health Check", response_model=ComprehensiveHealthResponse)
+@router.get("/", summary="Comprehensive Health Check", response_model=ComprehensiveHealthResponse)
 async def comprehensive_health_check(
     vector_store_status: ComponentStatus = Depends(check_vector_store_health),
     embedding_service_status: ComponentStatus = Depends(check_embedding_service_health),

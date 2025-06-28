@@ -3,17 +3,19 @@
 # =============================================================================
 # These are large, stable packages that don't change often and take time to install.
 # Install these once and reuse across environments.
-# NOTE: PyTorch (torch, torchvision, torchaudio) is pre-installed in the NVIDIA container
-# DO NOT install them via pip to avoid compatibility issues.
+# 
+# CRITICAL: PyTorch is installed via specific CUDA 12.8 index in Dockerfile
+# DO NOT add torch, torchvision, or torchaudio to this file - they will downgrade!
+# Use: pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # ===== CORE ML/AI FRAMEWORKS =====
 # Transformers ecosystem (heavyweight - ~500MB+)
-# Using versions compatible with PyTorch 2.4+ (NVIDIA container)
-transformers>=4.45.0,<5.0.0
-sentence-transformers>=3.0.1,<4.0.0
-accelerate>=0.33.0,<1.0.0
-tokenizers>=0.15.0,<1.0.0
-huggingface-hub>=0.20.0,<1.0.0
+# Using latest versions compatible with RTX 5070 and PyTorch 2.5+
+transformers>=4.40.0,<4.47.0
+sentence-transformers>=3.3.0
+accelerate>=1.2.0
+tokenizers>=0.19.0,<0.21.0
+huggingface-hub>=0.26.0
 
 # ===== RAG & VECTOR DATABASES =====
 # Qdrant (our primary vector DB)

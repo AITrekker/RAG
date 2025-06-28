@@ -156,7 +156,7 @@ curl -X POST "http://localhost:8000/api/v1/setup/initialize" \
 cp document.pdf data/tenants/tenant-1/documents/
 
 # Trigger delta sync
-curl -X POST "http://localhost:8000/api/v1/sync/trigger" \
+curl -X POST "http://localhost:8000/api/v1/syncs" \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"force_full_sync": false}'
@@ -164,7 +164,7 @@ curl -X POST "http://localhost:8000/api/v1/sync/trigger" \
 
 #### Query with Metadata Filtering
 ```bash
-curl -X POST "http://localhost:8000/api/v1/query/ask" \
+curl -X POST "http://localhost:8000/api/v1/queries" \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -185,25 +185,56 @@ curl -X POST "http://localhost:8000/api/v1/query/ask" \
 - `GET /api/v1/health` - Basic health check
 - `GET /api/v1/health/detailed` - Comprehensive system health
 
-### Query Processing
-- `POST /api/v1/query/ask` - Single query with metadata filtering
-- `POST /api/v1/query/batch` - Batch queries
-- `GET /api/v1/query/documents` - List documents with metadata
-- `GET /api/v1/query/search` - Search documents
-- `GET /api/v1/query/history` - Query history
+### Query Processing (RESTful)
+- `POST /api/v1/queries` - Create single query with metadata filtering
+- `POST /api/v1/queries/batch` - Create batch queries
+- `POST /api/v1/queries/validate` - Validate query without processing
+- `GET /api/v1/queries/documents` - List documents with metadata
+- `GET /api/v1/queries/search` - Search documents
+- `GET /api/v1/queries/history` - Query history
+- `GET /api/v1/queries/config` - Get query configuration
+- `PUT /api/v1/queries/config` - Update query configuration
+- `GET /api/v1/queries/stats` - Get query statistics
 
-### Delta Sync
-- `POST /api/v1/sync/trigger` - Trigger delta sync
-- `GET /api/v1/sync/status/{sync_id}` - Sync status
-- `GET /api/v1/sync/history` - Sync history
-- `GET /api/v1/sync/config` - Sync configuration
-- `POST /api/v1/sync/documents/{file_path}/process` - Process single document
+### Delta Sync (RESTful)
+- `POST /api/v1/syncs` - Create delta sync operation
+- `GET /api/v1/syncs/{sync_id}` - Get sync status
+- `DELETE /api/v1/syncs/{sync_id}` - Cancel sync operation
+- `GET /api/v1/syncs/history` - Sync history
+- `GET /api/v1/syncs/config` - Sync configuration
+- `PUT /api/v1/syncs/config` - Update sync configuration
+- `GET /api/v1/syncs/stats` - Get sync statistics
+- `POST /api/v1/syncs/documents` - Process single document
+- `DELETE /api/v1/syncs/documents/{document_id}` - Remove document
 
-### System Administration
-- `GET /api/v1/admin/system/status` - System status
-- `GET /api/v1/admin/system/metrics` - System metrics
+### System Administration (RESTful)
+#### Tenant Management
 - `POST /api/v1/admin/tenants` - Create tenant
 - `GET /api/v1/admin/tenants` - List tenants
+- `GET /api/v1/admin/tenants/{tenant_id}` - Get tenant details
+- `PUT /api/v1/admin/tenants/{tenant_id}` - Update tenant
+- `DELETE /api/v1/admin/tenants/{tenant_id}` - Delete tenant
+
+#### API Key Management
+- `POST /api/v1/admin/tenants/{tenant_id}/api-keys` - Create API key
+- `GET /api/v1/admin/tenants/{tenant_id}/api-keys` - List API keys
+- `DELETE /api/v1/admin/tenants/{tenant_id}/api-keys/{key_id}` - Delete API key
+
+#### System Monitoring
+- `GET /api/v1/admin/system/status` - System status
+- `GET /api/v1/admin/system/metrics` - System metrics
+
+#### System Maintenance (RESTful)
+- `DELETE /api/v1/admin/system/embeddings/stats` - Clear embedding stats
+- `DELETE /api/v1/admin/system/llm/stats` - Clear LLM stats
+- `DELETE /api/v1/admin/system/llm/cache` - Clear LLM cache
+- `PUT /api/v1/admin/system/maintenance` - Set maintenance mode
+
+#### Audit & Demo
+- `GET /api/v1/admin/audit/events` - Get audit events
+- `POST /api/v1/admin/demo/setup` - Setup demo environment
+- `GET /api/v1/admin/demo/tenants` - List demo tenants
+- `DELETE /api/v1/admin/demo/cleanup` - Clean up demo environment
 
 ## 🔧 Configuration
 

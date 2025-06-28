@@ -373,7 +373,7 @@ Answer:"""
     def _prepare_prompt(self, prompt: str, context: Optional[List[str]] = None) -> str:
         """Prepare the full prompt with optional context"""
         if not context:
-        return prompt
+            return prompt
         
         context_text = "\n\n".join(context)
         return f"Context: {context_text}\n\nQuestion: {prompt}\n\nAnswer:"

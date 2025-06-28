@@ -48,10 +48,16 @@ The Enterprise RAG Platform has been designed with complete separation between t
 
 | Endpoint | Method | Description | Authentication |
 |----------|--------|-------------|----------------|
-| `/api/v1/query` | POST | Process natural language query | Required |
-| `/api/v1/query/history` | GET | Get query history (paginated) | Required |
-| `/api/v1/query/{query_id}` | GET | Get specific query result | Required |
-| `/api/v1/query/{query_id}` | DELETE | Delete query from history | Required |
+| `/api/v1/queries` | POST | Process natural language query | Required |
+| `/api/v1/queries/history` | GET | Get query history (paginated) | Required |
+| `/api/v1/queries/{query_id}` | GET | Get specific query result | Required |
+| `/api/v1/queries/{query_id}` | DELETE | Delete query from history | Required |
+| `/api/v1/queries/batch` | POST | Process multiple queries | Required |
+| `/api/v1/queries/validate` | POST | Validate query without processing | Required |
+| `/api/v1/queries/documents` | GET | List documents with metadata | Required |
+| `/api/v1/queries/search` | GET | Search documents by content | Required |
+| `/api/v1/queries/config` | GET/PUT | Query configuration management | Required |
+| `/api/v1/queries/stats` | GET | Query statistics | Required |
 
 ### 3. Document Management APIs
 
@@ -80,13 +86,14 @@ The Enterprise RAG Platform has been designed with complete separation between t
 
 | Endpoint | Method | Description | Authentication |
 |----------|--------|-------------|----------------|
-| `/api/v1/sync/` | POST | Trigger manual sync | Required |
-| `/api/v1/sync/status` | GET | Get current sync status | Required |
-| `/api/v1/sync/{sync_id}` | GET | Get specific sync operation | Required |
-| `/api/v1/sync/history` | GET | Get sync history (paginated) | Required |
-| `/api/v1/sync/{sync_id}` | DELETE | Cancel running sync | Required |
-| `/api/v1/sync/schedule` | GET | Get auto-sync schedule | Required |
-| `/api/v1/sync/schedule` | PUT | Update auto-sync schedule | Required |
+| `/api/v1/syncs` | POST | Trigger manual sync | Required |
+| `/api/v1/syncs/{sync_id}` | GET | Get specific sync operation | Required |
+| `/api/v1/syncs/{sync_id}` | DELETE | Cancel running sync | Required |
+| `/api/v1/syncs/history` | GET | Get sync history (paginated) | Required |
+| `/api/v1/syncs/config` | GET/PUT | Sync configuration management | Required |
+| `/api/v1/syncs/stats` | GET | Sync statistics | Required |
+| `/api/v1/syncs/documents` | POST | Process single document | Required |
+| `/api/v1/syncs/documents/{doc_id}` | DELETE | Remove document from vector store | Required |
 
 ### 6. Audit & Logging APIs
 

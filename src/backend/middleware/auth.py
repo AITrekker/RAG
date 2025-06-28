@@ -71,4 +71,53 @@ def get_current_tenant(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired API key",
         )
-    return tenant_info 
+    return tenant_info
+
+def require_admin(
+    current_tenant: dict = Depends(get_current_tenant)
+) -> dict:
+    """
+    Require admin tenant authentication.
+    Only allows access if the current tenant is the admin tenant.
+    """
+    if current_tenant.get("name") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return current_tenant
+
+def verify_tenant_access(
+    target_tenant_id: str,
+    current_tenant: dict = Depends(get_current_tenant)
+) -> str:
+    """
+    Verify tenant has access to target tenant (admin or self).
+    Returns the target tenant ID if access is granted.
+    """
+    if current_tenant.get("name") == "admin":
+        return target_tenant_id
+    if current_tenant.get("id") == target_tenant_id:
+        return target_tenant_id
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Access denied"
+    )
+
+def get_tenant_context(
+    current_tenant: dict = Depends(get_current_tenant)
+) -> dict:
+    """
+    Get enhanced tenant context with permissions.
+    """
+    # Add basic permission checking
+    permissions = []
+    if current_tenant.get("name") == "admin":
+        permissions = ["admin", "tenant_management", "system_management"]
+    else:
+        permissions = ["tenant_operations", "document_access", "query_access"]
+    
+    return {
+        **current_tenant,
+        "permissions": permissions
+    } 

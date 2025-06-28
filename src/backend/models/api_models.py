@@ -449,4 +449,123 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
     code: str = Field(..., description="Error code")
     details: Optional[Dict[str, Any]] = Field(None, description="Error details")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp") 
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
+
+# =============================================================================
+# TENANT CONTEXT & DEMO MANAGEMENT MODELS
+# =============================================================================
+
+class TenantContextResponse(BaseModel):
+    """Current tenant context information."""
+    tenant_id: str = Field(..., description="Current tenant ID")
+    tenant_name: str = Field(..., description="Current tenant name")
+    description: Optional[str] = Field(None, description="Tenant description")
+    status: TenantStatus = Field(..., description="Tenant status")
+    permissions: List[str] = Field(default_factory=list, description="Tenant permissions")
+    api_keys: List[ApiKeyResponse] = Field(default_factory=list, description="Tenant's API keys")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    auto_sync: bool = Field(..., description="Automatic sync enabled")
+    sync_interval: int = Field(..., description="Sync interval in minutes")
+
+class TenantSwitchRequest(BaseModel):
+    """Request to switch tenant context."""
+    tenant_id: str = Field(..., description="Target tenant ID")
+    api_key: str = Field(..., description="API key for target tenant")
+
+class TenantSwitchResponse(BaseModel):
+    """Response after tenant context switch."""
+    success: bool = Field(..., description="Switch successful")
+    tenant_context: TenantContextResponse = Field(..., description="New tenant context")
+    message: str = Field(..., description="Switch message")
+
+class DemoSetupRequest(BaseModel):
+    """Request to setup demo environment."""
+    demo_tenants: List[str] = Field(..., description="List of tenant IDs for demo")
+    demo_duration_hours: int = Field(24, ge=1, le=168, description="Demo duration in hours")
+    generate_api_keys: bool = Field(True, description="Generate API keys for demo tenants")
+
+class DemoTenantInfo(BaseModel):
+    """Demo tenant information with API keys."""
+    tenant_id: str = Field(..., description="Tenant ID")
+    tenant_name: str = Field(..., description="Tenant name")
+    description: Optional[str] = Field(None, description="Tenant description")
+    api_keys: List[ApiKeyCreateResponse] = Field(default_factory=list, description="Generated API keys")
+    demo_expires_at: datetime = Field(..., description="Demo expiration")
+    created_at: datetime = Field(..., description="Demo creation timestamp")
+
+class DemoSetupResponse(BaseModel):
+    """Response after demo setup."""
+    success: bool = Field(..., description="Setup successful")
+    demo_tenants: List[DemoTenantInfo] = Field(..., description="Demo tenant information")
+    admin_api_key: str = Field(..., description="Admin API key for demo management")
+    message: str = Field(..., description="Setup message")
+    total_tenants: int = Field(..., description="Total demo tenants created")
+
+class DemoCleanupResponse(BaseModel):
+    """Response after demo cleanup."""
+    success: bool = Field(..., description="Cleanup successful")
+    cleaned_tenants: int = Field(..., description="Number of tenants cleaned up")
+    expired_keys: int = Field(..., description="Number of expired API keys")
+    message: str = Field(..., description="Cleanup message")
+
+# =============================================================================
+# ENHANCED TENANT OPERATIONS MODELS
+# =============================================================================
+
+class TenantDocumentListRequest(BaseModel):
+    """Request to list tenant documents with filtering."""
+    page: int = Field(1, ge=1, description="Page number")
+    page_size: int = Field(10, ge=1, le=100, description="Page size")
+    document_type: Optional[str] = Field(None, description="Filter by document type")
+    status: Optional[str] = Field(None, description="Filter by document status")
+
+class TenantSyncStatusRequest(BaseModel):
+    """Request to get tenant sync status."""
+    include_history: bool = Field(False, description="Include sync history")
+    limit: int = Field(10, ge=1, le=50, description="Number of history entries")
+
+class TenantApiKeyManagementRequest(BaseModel):
+    """Request for tenant API key management."""
+    key_name: str = Field(..., min_length=1, max_length=100, description="API key name")
+    description: Optional[str] = Field(None, max_length=500, description="Key description")
+    expires_at: Optional[datetime] = Field(None, description="Expiration date")
+    permissions: List[str] = Field(default_factory=list, description="Key permissions")
+
+# =============================================================================
+# AUDIT & MONITORING MODELS
+# =============================================================================
+
+class SyncEventResponse(BaseModel):
+    """Audit event response for sync operations."""
+    event_id: str = Field(..., description="Event ID")
+    tenant_id: str = Field(..., description="Tenant ID")
+    event_type: str = Field(..., description="Event type")
+    status: str = Field(..., description="Event status")
+    timestamp: datetime = Field(..., description="Event timestamp")
+    message: Optional[str] = Field(None, description="Event message")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Event metadata")
+
+# =============================================================================
+# RAG PIPELINE MODELS
+# =============================================================================
+
+class RAGSource(BaseModel):
+    """Source document information for RAG responses."""
+    id: str = Field(..., description="Source ID")
+    text: str = Field(..., description="Source text content")
+    score: float = Field(..., description="Relevance score")
+    document_id: str = Field(..., description="Document ID")
+    document_name: str = Field(..., description="Document name")
+    page_number: Optional[int] = Field(None, description="Page number")
+    chunk_index: Optional[int] = Field(None, description="Chunk index")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Document metadata")
+
+class RAGResponse(BaseModel):
+    """Response from RAG pipeline."""
+    query: str = Field(..., description="Original query")
+    answer: str = Field(..., description="Generated answer")
+    sources: List[RAGSource] = Field(..., description="Source citations")
+    confidence: float = Field(..., description="Confidence score")
+    processing_time: float = Field(..., description="Processing time in seconds")
+    tokens_used: Optional[int] = Field(None, description="Tokens used")
+    model_used: Optional[str] = Field(None, description="Model used for generation") 

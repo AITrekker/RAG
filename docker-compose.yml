@@ -19,6 +19,13 @@ services:
       dockerfile: docker/Dockerfile.backend
     ports:
       - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ./src/backend:/app/src/backend
       - ./documents:/app/documents

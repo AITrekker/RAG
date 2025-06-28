@@ -3,6 +3,9 @@
 # =============================================================================
 # Install base requirements first: pip install -r requirements-base.txt
 # Then install these: pip install -r requirements.txt
+#
+# WARNING: DO NOT add torch, torchvision, or torchaudio here!
+# PyTorch is installed via CUDA 12.8 index in Dockerfile for RTX 5070 support
 
 # Include heavyweight base packages
 -r requirements-base.txt
@@ -33,7 +36,7 @@ schedule>=1.2.0
 
 # ===== CLI & OUTPUT =====
 rich==14.0.0
-typer==0.16.0
+typer>=0.12.0,<0.16.0
 
 # ===== DEVELOPMENT & TESTING =====
 pytest==8.4.1
