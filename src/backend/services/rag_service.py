@@ -72,9 +72,12 @@ class RAGService:
             # Initialize embedding model for query processing
             try:
                 from sentence_transformers import SentenceTransformer
+                import torch
+                
                 embedding_model = getattr(settings, 'embedding_model', 'all-MiniLM-L6-v2')
-                self._embedding_model = SentenceTransformer(embedding_model)
-                print(f"✓ Query embedding model initialized: {embedding_model}")
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                self._embedding_model = SentenceTransformer(embedding_model, device=device)
+                print(f"✓ Query embedding model initialized: {embedding_model} on {device}")
             except ImportError:
                 print("⚠️ sentence-transformers not available for query embeddings")
                 self._embedding_model = None

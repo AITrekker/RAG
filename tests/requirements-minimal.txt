@@ -1,0 +1,21 @@
+# Minimal test requirements that should install cleanly
+# Install with: pip install -r tests/requirements-minimal.txt
+
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Core async database
+asyncpg>=0.28.0
+sqlalchemy>=2.0.0
+
+# HTTP client
+requests>=2.28.0
+
+# Basic ML (will try to use existing installations)
+# These are optional - tests will adapt if not available
+numpy>=1.20.0
+torch>=1.13.0
+
+# Performance monitoring
+psutil>=5.8.0

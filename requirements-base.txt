@@ -32,11 +32,8 @@ llama-index-readers-file>=0.4.0
 
 # ===== DOCUMENT PROCESSING =====
 # Heavy document processing libraries
-unstructured>=0.17.0
 pypdf==5.6.0
 python-docx>=0.8.11
-beautifulsoup4==4.13.4
-pandas==2.2.3
 
 # ===== DATABASE DRIVERS =====
 # PostgreSQL drivers (add to base for caching)

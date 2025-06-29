@@ -1,96 +1,110 @@
 """
-Pytest configuration and fixtures for the entire test suite.
+Pytest configuration and fixtures for RAG system tests.
 """
 
+import asyncio
 import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone, timedelta
-import uuid
-import hashlib
+import pytest_asyncio
+import sys
+import os
+from pathlib import Path
+from uuid import UUID, uuid4
+from typing import AsyncGenerator
 
-from src.backend.main import app
-from src.backend.config.settings import get_settings
-# from src.backend.db.session import get_db
-# from src.backend.models.tenant import Tenant, TenantApiKey
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
+# Set environment variables for testing
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://rag_user:rag_password@localhost:5432/rag_db")
+os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
 
-# @pytest.fixture(scope="session")
-# def db_session():
-#     """Provides a database session for the test suite."""
-#     db = next(get_db())
-#     try:
-#         yield db
-#     finally:
-#         db.close()
+from src.backend.database import AsyncSessionLocal
+from src.backend.models.database import Tenant, User, File, EmbeddingChunk
 
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for the test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
 
-@pytest.fixture(scope="module")
-def test_app():
-    """
-    Creates a FastAPI app instance for testing, ensuring that 'testserver'
-    is in the trusted hosts list to bypass TrustedHostMiddleware during tests.
-    """
-    # Get the application settings
-    settings = get_settings()
+@pytest_asyncio.fixture
+async def db_session():
+    """Provide a database session for testing."""
+    async with AsyncSessionLocal() as session:
+        yield session
+
+@pytest.fixture
+def test_tenant_id() -> UUID:
+    """Provide a consistent test tenant ID."""
+    return UUID("110174a1-8e2f-47a1-af19-1478f1be07a8")
+
+@pytest.fixture
+def test_user_id() -> UUID:
+    """Provide a consistent test user ID."""
+    return UUID("22028462-9f3e-48b2-b048-2568f2ce17b8")
+
+@pytest.fixture
+def sample_queries():
+    """Provide sample queries for testing."""
+    return [
+        "company mission innovation",
+        "work from home remote",
+        "vacation time off policy",
+        "culture team learning",
+        "benefits healthcare",
+        "code review process",
+        "agile development methodology",
+        "customer feedback analysis"
+    ]
+
+@pytest.fixture
+def qdrant_config():
+    """Provide Qdrant configuration for testing."""
+    return {
+        "url": "http://localhost:6333",
+        "timeout": 30,
+        "collection_prefix": "tenant_"
+    }
+
+@pytest.fixture
+def embedding_config():
+    """Provide embedding model configuration."""
+    return {
+        "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+        "device": "cuda",  # Will fallback to CPU if not available
+        "dimensions": 384,
+        "batch_size": 32
+    }
+
+@pytest.fixture
+def test_file_metadata():
+    """Provide sample file metadata for testing."""
+    return {
+        "filename": "test_document.txt",
+        "content": "This is a test document for the RAG system. It contains information about company policies, remote work guidelines, and team collaboration processes.",
+        "mime_type": "text/plain",
+        "file_size": 1024
+    }
+
+class TestConfig:
+    """Test configuration constants."""
     
-    # Add 'testserver' to the list of allowed hosts for the test environment
-    if "testserver" not in settings.allowed_hosts:
-        settings.allowed_hosts.append("testserver")
+    # Similarity thresholds
+    MIN_SCORE_THRESHOLD = 0.3
+    HIGH_SCORE_THRESHOLD = 0.7
     
-    # Use a patch to ensure the modified settings are used by the app
-    with patch('src.backend.main.settings', settings):
-        yield app
-
-@pytest.fixture(scope="module")
-def client(test_app):
-    """
-    Provides a non-authenticated TestClient instance.
-    """
-    with TestClient(test_app) as test_client:
-        yield test_client
-
-# @pytest.fixture(scope="module")
-# def authenticated_client(test_app):
-#     """
-#     Provides an authenticated TestClient instance.
-#     - Creates a real tenant and API key in the database.
-#     - Adds the API key to the client's headers.
-#     - Cleans up the tenant and key after tests.
-#     """
-#     db = next(get_db())
+    # Performance expectations
+    MAX_QUERY_TIME = 2.0  # seconds
+    MAX_EMBEDDING_TIME = 1.0  # seconds
+    MIN_GPU_SPEEDUP = 2.0  # minimum expected GPU speedup
     
-#     tenant_id_str = f"test-tenant-{uuid.uuid4()}"
-#     api_key_str = f"test-token-{uuid.uuid4()}"
-#     key_hash = hashlib.sha256(api_key_str.encode('utf-8')).hexdigest()
-
-#     # Create tenant and API key in a single transaction
-#     tenant = Tenant(tenant_id=tenant_id_str, name=tenant_id_str, status="active")
-#     db.add(tenant)
-#     db.flush()  # Ensure tenant gets an ID
-
-#     api_key = TenantApiKey(
-#         tenant_id=tenant.id,
-#         key_name="Test Key",
-#         key_hash=key_hash,
-#         key_prefix="test",
-#         is_active=True,
-#         expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
-#     )
-#     db.add(api_key)
-#     db.commit()
-
-#     with TestClient(test_app) as test_client:
-#         test_client.headers['Authorization'] = f'Bearer {api_key_str}'
-#         yield test_client
+    # Test data limits
+    MAX_TEST_CHUNKS = 100
+    MIN_RESULT_COUNT = 1
+    MAX_RESULT_COUNT = 50
     
-#     # Cleanup
-#     db.delete(api_key)
-#     db.delete(tenant)
-#     db.commit()
-#     db.close()
-
-# @pytest.fixture
-# def auth_headers(authenticated_client):
-#     """Provides authentication headers for manual requests if needed."""
-#     return authenticated_client.headers 
+    # File paths
+    TEST_DATA_DIR = project_root / "data" / "test_uploads"
+    SAMPLE_FILES_DIR = project_root / "data" / "uploads"

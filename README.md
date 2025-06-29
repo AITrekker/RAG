@@ -7,9 +7,11 @@ A production-ready Retrieval-Augmented Generation (RAG) platform designed for en
 - **Multi-tenant Architecture**: Isolated data and processing per tenant
 - **Delta Sync**: Efficient document processing with hash-based change detection
 - **Rich Metadata**: Comprehensive document metadata extraction and filtering
-- **RAG Pipeline**: Advanced query processing with confidence scoring
+- **Complete RAG Pipeline**: Query processing, vector retrieval, context ranking, and response generation
+- **Hybrid Storage**: PostgreSQL for metadata + Qdrant for vector embeddings
+- **Multi-Format Support**: PDF, HTML, TXT, DOCX with extensible document processing
 - **API-First Design**: RESTful API with comprehensive documentation
-- **Production Ready**: Health checks, monitoring, and error handling
+- **Production Ready**: Health checks, monitoring, graceful fallbacks, and error handling
 
 ## 📁 Architecture
 
@@ -33,8 +35,9 @@ The platform is built with a clean service layer pattern:
 - **🔑 Authentication Service**: API key authentication with tenant isolation
 - **📁 File Management Service**: Upload, CRUD operations, metadata tracking
 - **🔄 Delta Sync Service**: Hash-based change detection and sync operations
-- **🧠 Embedding Service**: Document processing and embedding generation
-- **🔍 RAG Service**: Query processing and vector search
+- **📄 Document Processing Service**: Multi-format extraction (PDF, HTML, TXT, DOCX)
+- **🧠 Embedding Service**: Sentence-transformers integration with fallbacks
+- **🔍 RAG Service**: Complete query processing, vector search, and answer generation
 
 ### File Storage Structure
 ```
@@ -82,9 +85,11 @@ The following core services are **fully implemented and functional**:
 - ✅ **Database Layer**: PostgreSQL schema with full tenant isolation
 - ✅ **API Routes**: RESTful endpoints for files, sync, query operations
 - ✅ **Service Architecture**: Clean dependency injection and service layer
+- ✅ **Document Processing**: Multi-format extraction (PDF, HTML, TXT, DOCX) with factory pattern
 - ✅ **Embedding Service**: Full ML pipeline with sentence-transformers + fallbacks
-- ✅ **RAG Service**: Vector search + answer generation with Qdrant integration
-- ✅ **ML Pipeline**: Complete document processing, embedding, and retrieval
+- ✅ **RAG Service**: Complete pipeline - query processing, vector retrieval, context ranking, response generation
+- ✅ **Vector Storage**: Qdrant integration with PostgreSQL fallback for keyword search
+- ✅ **Testing Infrastructure**: Comprehensive test suites for all components
 
 ### **🧪 Testing**
 
@@ -106,6 +111,12 @@ python scripts/test_api_endpoints.py
 # Test complete ML pipeline (embeddings, RAG, vector search) 
 python scripts/test_ml_pipeline.py
 
+# Test complete RAG system (query processing, retrieval, ranking)
+python scripts/test_rag_system.py
+
+# Test simple RAG with PostgreSQL fallback (when Qdrant unavailable)
+python scripts/test_rag_simple.py
+
 # Test with your existing tenant data (legacy test)
 python scripts/test_existing_tenants.py
 ```
@@ -120,12 +131,13 @@ python scripts/test_existing_tenants.py
 
 The platform now includes complete **production-grade ML capabilities**:
 
-- **📄 Document Processing**: PDF, DOCX, text files with smart chunking
+- **📄 Document Processing**: PDF, HTML, TXT, DOCX with extensible factory pattern
 - **🧠 ML Models**: sentence-transformers integration with graceful fallbacks
-- **🔍 Vector Search**: Qdrant integration with similarity search and filtering
-- **💬 RAG Pipeline**: Complete retrieval-augmented generation with source citations
+- **🔍 Vector Search**: Qdrant integration with PostgreSQL keyword search fallback
+- **💬 RAG Pipeline**: Complete query processing, vector retrieval, context ranking, and answer generation
 - **⚡ Performance**: Batch processing, caching, and optimized database queries
 - **🛡️ Security**: Tenant isolation at all levels (database, vectors, file system)
+- **🔧 Resilience**: Graceful degradation when ML services unavailable
 
 ### **🏢 Testing with Your Company Data**
 
@@ -201,12 +213,14 @@ curl -X POST 'http://localhost:8000/api/v1/files/upload' \
 curl -X POST 'http://localhost:8000/api/v1/sync/trigger' \
   -H 'X-API-Key: '$TENANT1_KEY''
 
-# Ask about company culture
+# Test RAG query (after documents are processed)
 curl -X POST 'http://localhost:8000/api/v1/query' \
   -H 'X-API-Key: '$TENANT1_KEY'' \
   -H 'Content-Type: application/json' \
   -d '{
-    "query": "What is our company culture?"
+    "query": "What is our company culture?",
+    "max_results": 5,
+    "min_score": 0.7
   }'
 ```
 
@@ -221,9 +235,10 @@ With the demo setup, you should see:
 - 💾 **Persistent storage** with API keys saved for reuse
 
 **Next Steps After Demo Setup:**
-- Upload documents via API or copy files to tenant directories
+- Upload documents via API or copy files to tenant directories  
 - Trigger sync operations to process documents into embeddings
-- Test RAG queries with actual content
+- Test RAG queries with actual content using the comprehensive test scripts
+- Use simple RAG test for quick verification without ML dependencies
 
 ## 🛠️ API Structure
 
@@ -241,16 +256,18 @@ curl -H "Authorization: Bearer your-api-key" http://localhost:8000/api/v1/files
 - **`/api/v1/health`** - System health checks (no auth required)
 - **`/api/v1/files`** - File management with upload and CRUD operations  
 - **`/api/v1/sync`** - Delta sync operations and change detection
-- **`/api/v1/query`** - RAG query processing with metadata filtering
+- **`/api/v1/query`** - Complete RAG query processing with vector search and ranking
 - **`/api/v1/auth`** - Tenant and API key management
 - **`/api/v1/setup`** - System initialization (no auth required)
 - **`/api/v1/admin`** - System administration
 
 ### Key Features
-- **Metadata Filtering**: Filter queries by author, date, tags, document type
+- **Complete RAG Pipeline**: Query processing, vector retrieval, context ranking, answer generation
+- **Hybrid Search**: Vector similarity search with PostgreSQL keyword fallback
 - **Delta Sync**: Only process changed files using hash comparison
-- **Document Search**: Search documents by content and metadata
-- **Query History**: Track and analyze query patterns
+- **Multi-Format Processing**: PDF, HTML, TXT, DOCX with extensible factory pattern
+- **Tenant Isolation**: Complete data separation at all storage levels
+- **Graceful Fallbacks**: System works with or without ML dependencies
 - **System Monitoring**: Comprehensive health and performance metrics
 
 ## 🚀 Quick Start
@@ -278,7 +295,7 @@ pip install -r requirements.txt
 
 # Optional: Install additional ML packages for full functionality
 pip install sentence-transformers qdrant-client torch
-pip install PyPDF2 python-docx nltk  # For document processing
+pip install PyPDF2 python-docx nltk selectolax  # For document processing
 
 # Run setup (creates .env, sets up directories)
 python setup.py
@@ -307,13 +324,13 @@ pip install sentence-transformers torch
 pip install qdrant-client
 
 # For document processing (vs plain text only)
-pip install PyPDF2 python-docx nltk
+pip install PyPDF2 python-docx nltk selectolax
 ```
 
 **Performance Modes**:
-- 🚀 **Full ML Mode**: All packages installed, real embeddings + vector search
-- ⚡ **Hybrid Mode**: Some packages, partial ML functionality  
-- 🔧 **Fallback Mode**: No ML packages, structured text responses
+- 🚀 **Full ML Mode**: All packages installed, real embeddings + vector search + complete RAG pipeline
+- ⚡ **Hybrid Mode**: Some packages, partial ML functionality with fallbacks 
+- 🔧 **Fallback Mode**: No ML packages, PostgreSQL keyword search with template responses
 
 The system automatically detects available packages and adapts accordingly!
 
@@ -390,17 +407,16 @@ curl -X POST "http://localhost:8000/api/v1/syncs" \
 
 #### Query with Metadata Filtering
 ```bash
-curl -X POST "http://localhost:8000/api/v1/queries" \
+curl -X POST "http://localhost:8000/api/v1/query" \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What is machine learning?",
-    "max_sources": 5,
-    "confidence_threshold": 0.7,
-    "metadata_filters": {
-      "author": "John Doe",
-      "date_from": "2023-01-01",
-      "tags": ["AI", "research"]
+    "max_results": 5,
+    "min_score": 0.7,
+    "filters": {
+      "file_types": ["pdf", "txt"],
+      "temporal": "recent"
     }
   }'
 ```
@@ -411,62 +427,48 @@ curl -X POST "http://localhost:8000/api/v1/queries" \
 - `GET /api/v1/health` - Basic health check
 - `GET /api/v1/health/detailed` - Comprehensive system health
 
-### Query Processing (RESTful)
-- `POST /api/v1/queries` - Create single query with metadata filtering
-- `POST /api/v1/queries/batch` - Create batch queries
-- `POST /api/v1/queries/validate` - Validate query without processing
-- `GET /api/v1/queries/documents` - List documents with metadata
-- `GET /api/v1/queries/search` - Search documents
-- `GET /api/v1/queries/history` - Query history
-- `GET /api/v1/queries/config` - Get query configuration
-- `PUT /api/v1/queries/config` - Update query configuration
-- `GET /api/v1/queries/stats` - Get query statistics
+### RAG Query Processing
+- `POST /api/v1/query` - Complete RAG query with vector search and answer generation
+- `POST /api/v1/query/validate` - Validate query without processing
+- `GET /api/v1/query/history` - Query history and analytics
+- `GET /api/v1/query/suggestions` - Get query suggestions
+- `GET /api/v1/query/stats` - RAG performance statistics
 
-### Delta Sync (RESTful)
-- `POST /api/v1/syncs` - Create delta sync operation
-- `GET /api/v1/syncs/{sync_id}` - Get sync status
-- `DELETE /api/v1/syncs/{sync_id}` - Cancel sync operation
-- `GET /api/v1/syncs/history` - Sync history
-- `GET /api/v1/syncs/config` - Sync configuration
-- `PUT /api/v1/syncs/config` - Update sync configuration
-- `GET /api/v1/syncs/stats` - Get sync statistics
-- `POST /api/v1/syncs/documents` - Process single document
-- `DELETE /api/v1/syncs/documents/{document_id}` - Remove document
+### Delta Sync Operations
+- `POST /api/v1/sync/trigger` - Trigger delta sync with hash-based change detection
+- `GET /api/v1/sync/status` - Current sync operation status
+- `GET /api/v1/sync/history` - Sync operation history and analytics
+- `GET /api/v1/sync/stats` - Sync performance statistics
 
-### System Administration (RESTful)
+### File Management
+- `GET /api/v1/files` - List tenant files with metadata
+- `POST /api/v1/files/upload` - Upload files with automatic processing
+- `GET /api/v1/files/{file_id}` - Get file details and processing status
+- `DELETE /api/v1/files/{file_id}` - Delete file and associated embeddings
+
+### System Administration
 #### Tenant Management
-- `POST /api/v1/admin/tenants` - Create tenant
-- `GET /api/v1/admin/tenants` - List tenants
-- `GET /api/v1/admin/tenants/{tenant_id}` - Get tenant details
-- `PUT /api/v1/admin/tenants/{tenant_id}` - Update tenant
-- `DELETE /api/v1/admin/tenants/{tenant_id}` - Delete tenant
-
-#### API Key Management
-- `POST /api/v1/admin/tenants/{tenant_id}/api-keys` - Create API key
-- `GET /api/v1/admin/tenants/{tenant_id}/api-keys` - List API keys
-- `DELETE /api/v1/admin/tenants/{tenant_id}/api-keys/{key_id}` - Delete API key
+- `GET /api/v1/auth/tenant` - Get current tenant info
+- `GET /api/v1/auth/tenants` - List all tenants (admin only)
+- `POST /api/v1/admin/tenants` - Create new tenant
+- `PUT /api/v1/admin/tenants/{tenant_id}` - Update tenant settings
 
 #### System Monitoring
-- `GET /api/v1/admin/system/status` - System status
-- `GET /api/v1/admin/system/metrics` - System metrics
-
-#### System Maintenance (RESTful)
-- `DELETE /api/v1/admin/system/embeddings/stats` - Clear embedding stats
-- `DELETE /api/v1/admin/system/llm/stats` - Clear LLM stats
-- `DELETE /api/v1/admin/system/llm/cache` - Clear LLM cache
-- `PUT /api/v1/admin/system/maintenance` - Set maintenance mode
-
-#### Audit & Demo
-- `GET /api/v1/admin/audit/events` - Get audit events
-- `POST /api/v1/admin/demo/setup` - Setup demo environment
-- `GET /api/v1/admin/demo/tenants` - List demo tenants
-- `DELETE /api/v1/admin/demo/cleanup` - Clean up demo environment
+- `GET /api/v1/admin/system/status` - Comprehensive system health
+- `GET /api/v1/admin/system/metrics` - Performance metrics and statistics
 
 ## 🔧 Configuration
 
 ### Environment Variables
 ```bash
 # Database
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=rag_db
+POSTGRES_USER=rag_user
+POSTGRES_PASSWORD=rag_password
+
+# Vector Store
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 
@@ -475,41 +477,43 @@ API_HOST=0.0.0.0
 API_PORT=8000
 LOG_LEVEL=INFO
 
-# Embedding Model
-EMBEDDING_MODEL_PATH=/path/to/model
-EMBEDDING_DEVICE=cpu
-
-# LLM Settings
-LLM_MODEL_PATH=/path/to/llm
-LLM_DEVICE=cpu
+# ML Settings
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+NLTK_DATA=/tmp/nltk_data
 ```
 
 ## 🧪 Testing
 
 ```bash
-# Run unit tests
-pytest tests/
+# Setup demo tenants with API keys (run this first!)
+python scripts/setup_demo_tenants.py
 
-# Run integration tests
-pytest tests/test_integration_e2e.py
+# Test complete RAG system (all components)
+python scripts/test_rag_system.py
 
-# Quick API test
-python tests/quick_api_test.py
+# Test simple RAG with PostgreSQL fallback
+python scripts/test_rag_simple.py
+
+# Test ML pipeline (embeddings + vector storage)
+python scripts/test_ml_pipeline.py
+
+# Test API endpoints and authentication
+python scripts/test_api_endpoints.py
 ```
 
 ## 📊 Monitoring
 
 ### Health Checks
-- System component status
-- Vector store connectivity
-- Embedding service health
-- LLM service health
+- PostgreSQL database connectivity
+- Qdrant vector store status
+- Document processing pipeline health
+- RAG service component status
 
 ### Metrics
-- Query performance
-- Sync operations
-- System resource usage
-- Error rates
+- RAG query performance and accuracy
+- Document processing and sync operations
+- Vector search response times
+- System resource usage and error rates
 
 ## 🔒 Security
 
@@ -532,11 +536,12 @@ docker build -f docker/Dockerfile.frontend -t rag-frontend .
 ```
 
 ### Production Considerations
-- Use external Qdrant instance
-- Configure proper logging
-- Set up monitoring and alerting
-- Implement backup strategies
-- Use HTTPS in production
+- Use external PostgreSQL and Qdrant instances
+- Configure ML model caching and GPU acceleration
+- Set up monitoring for RAG query performance
+- Implement backup strategies for both databases
+- Use HTTPS and proper authentication in production
+- Consider scaling vector collections for large tenants
 
 ## 🤝 Contributing
 

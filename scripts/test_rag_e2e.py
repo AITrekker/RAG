@@ -27,7 +27,7 @@ async def test_e2e_rag_with_vectors():
     async with AsyncSessionLocal() as session:
         # Initialize components with correct Qdrant URL
         print("🔧 Initializing RAG components...")
-        retriever = VectorRetriever(session, qdrant_url="http://localhost:6333")
+        retriever = VectorRetriever(session, qdrant_url="http://rag_qdrant:6333")
         processor = QueryProcessor()
         ranker = ContextRanker()
         pipeline = RAGPipeline(session)
@@ -104,7 +104,7 @@ async def test_vector_performance():
     tenant_id = UUID("110174a1-8e2f-47a1-af19-1478f1be07a8")
     
     async with AsyncSessionLocal() as session:
-        retriever = VectorRetriever(session, qdrant_url="http://localhost:6333")
+        retriever = VectorRetriever(session, qdrant_url="http://rag_qdrant:6333")
         processor = QueryProcessor()
         
         # Performance test queries

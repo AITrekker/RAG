@@ -14,6 +14,7 @@ from sqlalchemy import select, delete
 
 from src.backend.models.database import File, EmbeddingChunk
 from src.backend.config.settings import get_settings
+from .document_processing.factory import DocumentProcessorFactory
 
 settings = get_settings()
 
@@ -107,10 +108,15 @@ class EmbeddingService:
     
     async def _extract_text(self, file_path: str, mime_type: Optional[str]) -> str:
         """
-        Extract text from various file formats
+        Extract text using new document processor system
         """
         try:
-            # Handle different file types
+            # Try new document processor system first
+            processor = DocumentProcessorFactory.get_processor(file_path)
+            if processor:
+                return processor.extract_text(file_path)
+            
+            # Fallback to legacy extraction for unsupported types
             if mime_type == "application/pdf":
                 return await self._extract_pdf_text(file_path)
             elif mime_type in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
