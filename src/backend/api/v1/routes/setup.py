@@ -18,7 +18,7 @@ from src.backend.models.api_models import (
     SetupInitializeResponse,
     ErrorResponse
 )
-from src.backend.core.tenant_service import TenantService
+from src.backend.services.tenant_service import TenantService
 from src.backend.core.embedding_manager import EmbeddingManager
 from src.backend.middleware.auth import get_current_tenant
 from src.backend.config.settings import get_settings

@@ -36,28 +36,28 @@ def load_env_file(file_path: str) -> dict:
 
 def get_admin_api_key() -> str:
     """
-    Get the admin API key from various sources in order of priority:
-    1. Environment variable ADMIN_API_KEY
-    2. .env file in project root
-    3. Docker container .env file
+    Get the admin API key from database (source of truth) with fallbacks:
+    1. Database query (most reliable)
+    2. Environment variable (fastest)
+    3. Docker container environment (fallback)
     """
-    # 1. Check environment variable
+    # 1. Try database first (source of truth)
+    try:
+        api_key = get_admin_key_from_database()
+        if api_key:
+            return api_key
+    except Exception as e:
+        print(f"[DEBUG] Database query failed: {e}")
+    
+    # 2. Try environment variable (fastest)
     api_key = os.getenv('ADMIN_API_KEY')
     if api_key:
         return api_key
     
-    # 2. Check .env file in project root
-    project_root = Path(__file__).parent.parent
-    env_file = project_root / '.env'
-    env_vars = load_env_file(str(env_file))
-    api_key = env_vars.get('ADMIN_API_KEY')
-    if api_key:
-        return api_key
-    
-    # 3. Try to get from Docker container
+    # 3. Try Docker container environment (fallback)
     try:
         result = subprocess.run(
-            ['docker', 'exec', 'rag_backend', 'cat', '.env'],
+            ['docker', 'exec', 'rag_backend', 'env'],
             capture_output=True,
             text=True,
             check=True
@@ -70,18 +70,50 @@ def get_admin_api_key() -> str:
                 if api_key:
                     return api_key
                     
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"[DEBUG] Docker query failed: {e}")
     
     # 4. If all else fails, show helpful error
     print("❌ ERROR: Admin API key not found!")
     print()
     print("💡 Solutions:")
-    print("1. Run: python scripts/get-apikey.py")
-    print("2. Set environment variable: export ADMIN_API_KEY='your_key'")
-    print("3. Add to .env file: ADMIN_API_KEY=your_key")
-    print("4. Ensure Docker backend is running: docker-compose up -d backend")
+    print("1. Ensure backend is running: docker-compose up -d backend")
+    print("2. Run setup script: python scripts/setup_demo_tenants.py")
+    print("3. Set environment variable: export ADMIN_API_KEY='your_key'")
+    print("4. Check database: docker-compose exec postgres psql -U rag_user -d rag_db -c \"SELECT api_key FROM tenants WHERE slug = 'system_admin';\"")
     sys.exit(1)
+
+def get_admin_key_from_database() -> Optional[str]:
+    """
+    Get admin API key directly from database.
+    This is the most reliable source of truth.
+    """
+    try:
+        # Use subprocess to query database (no SQLAlchemy dependency)
+        result = subprocess.run([
+            'docker', 'exec', 'rag_postgres', 'psql', 
+            '-U', 'rag_user', '-d', 'rag_db', 
+            '-t', '-c', "SELECT api_key FROM tenants WHERE slug = 'system_admin' AND is_active = true;"
+        ], capture_output=True, text=True, check=True)
+        
+        # Parse the result
+        lines = result.stdout.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('-') and not line.startswith('('):
+                # Remove any extra whitespace and return the key
+                api_key = line.strip()
+                if api_key and len(api_key) > 10:  # Basic validation
+                    return api_key
+        
+        return None
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[DEBUG] Database query failed: {e.stderr}")
+        return None
+    except Exception as e:
+        print(f"[DEBUG] Unexpected error querying database: {e}")
+        return None
 
 def get_base_url() -> str:
     """Get the base URL for API requests."""
@@ -119,8 +151,15 @@ def print_demo_keys():
     keys = get_demo_api_keys()
     if keys:
         print("🔑 Available Demo Tenant API Keys:")
-        for tenant_name, api_key in keys.items():
-            print(f"  {tenant_name}: {api_key[:8]}...{api_key[-8:]}")
+        for tenant_name, tenant_info in keys.items():
+            if isinstance(tenant_info, dict) and 'api_key' in tenant_info:
+                api_key = tenant_info['api_key']
+                if isinstance(api_key, str) and len(api_key) > 16:
+                    print(f"  {tenant_name}: {api_key[:8]}...{api_key[-8:]}")
+                else:
+                    print(f"  {tenant_name}: {api_key}")
+            else:
+                print(f"  {tenant_name}: {tenant_info}")
     else:
         print("❌ No demo tenant keys available")
 

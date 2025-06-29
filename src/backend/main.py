@@ -14,48 +14,81 @@ from contextlib import asynccontextmanager
 
 from src.backend.config.settings import get_settings
 from src.backend.api.v1.routes import (
-    query as query_routes,
     health as health_routes,
-    sync as sync_routes,
     admin as admin_routes,
     setup as setup_routes,
     tenants as tenant_routes,
+    auth as auth_routes,
+    files as file_routes,
+    sync as sync_routes,
+    query as query_routes
 )
-from src.backend.core.embeddings import get_embedding_service, EmbeddingService
-from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
-from src.backend.core.tenant_service import get_tenant_service, TenantService
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
+from src.backend.middleware.api_key_auth import api_key_auth_middleware
+from src.backend.database import startup_database_checks, close_database
+
+# Import service modules for initialization
+from src.backend.services.tenant_service import TenantService
+from src.backend.services.file_service import FileService
+from src.backend.services.embedding_service import EmbeddingService
+from src.backend.services.sync_service import SyncService
+from src.backend.services.rag_service import RAGService
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
 
+# Service instances
+tenant_service: TenantService = None
+file_service: FileService = None
 embedding_service: EmbeddingService = None
-vector_store_manager: VectorStoreManager = None
+sync_service: SyncService = None
+rag_service: RAGService = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
     logger.info("Starting Enterprise RAG Platform API...")
     
-    global embedding_service, vector_store_manager
+    global tenant_service, file_service, embedding_service, sync_service, rag_service
     
     try:
+        logger.info("Running database startup checks...")
+        await startup_database_checks()
+        
         logger.info("Initializing monitoring system...")
         initialize_monitoring()
         
-        logger.info("Initializing embedding service...")
-        embedding_service = get_embedding_service()
-        logger.info("Embedding service initialized.")
+        # Initialize service architecture
+        logger.info("Initializing service layer...")
+        from src.backend.database import get_async_db
         
-        logger.info("Initializing vector store manager...")
-        vector_store_manager = get_vector_store_manager()
-        logger.info("Vector store manager initialized.")
+        # Get database session for service initialization
+        async for db in get_async_db():
+            # Initialize core services
+            tenant_service = TenantService(db)
+            file_service = FileService(db)
+            embedding_service = EmbeddingService(db)
+            
+            # Initialize services with dependencies
+            sync_service = SyncService(db, file_service, embedding_service)
+            rag_service = RAGService(db, file_service)
+            
+            # Initialize services that need async setup
+            await embedding_service.initialize()
+            await rag_service.initialize()
+            
+            logger.info("Service layer initialized successfully")
+            break  # Only need first session for initialization
         
+        # Set app state for services
+        app.state.tenant_service = tenant_service
+        app.state.file_service = file_service
         app.state.embedding_service = embedding_service
-        app.state.vector_store_manager = vector_store_manager
+        app.state.sync_service = sync_service
+        app.state.rag_service = rag_service
         
         logger.info("API startup completed successfully")
         
@@ -67,6 +100,9 @@ async def lifespan(app: FastAPI):
     
     logger.info("Shutting down Enterprise RAG Platform API...")
     try:
+        logger.info("Closing database connections...")
+        await close_database()
+        
         logger.info("Shutting down monitoring system...")
         shutdown_monitoring()
         logger.info("API shutdown completed successfully")
@@ -94,6 +130,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.middleware("http")(api_key_auth_middleware)
 app.middleware("http")(monitoring_middleware)
 app.middleware("http")(error_tracking_middleware)
 
@@ -114,12 +151,17 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
+# Core API routes
 app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])
-app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}", tags=["Query"])
-app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}", tags=["Sync"])
+app.include_router(auth_routes.router, prefix=f"{settings.api_v1_str}/auth", tags=["Authentication"])
 app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
 app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
+
+# Service-based routes
+app.include_router(file_routes.router, prefix=f"{settings.api_v1_str}/files", tags=["Files"])
+app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
+app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
 
 @app.get("/", include_in_schema=False)
 async def root():

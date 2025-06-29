@@ -23,15 +23,16 @@ import sys
 from typing import Optional
 
 # Import centralized configuration
-from config import get_admin_api_key, get_admin_base_url
+from config import get_admin_api_key, get_admin_base_url, get_base_url
 
 # Configuration loaded automatically from .env or environment
 ADMIN_API_KEY = get_admin_api_key()
-BASE_URL = get_admin_base_url()
+BASE_URL = get_base_url()
+ADMIN_BASE_URL = get_admin_base_url()
 
-def make_request(method: str, endpoint: str, data: Optional[dict] = None, params: Optional[dict] = None) -> dict:
+def make_request(method: str, endpoint: str, data: Optional[dict] = None, params: Optional[dict] = None, admin: bool = False) -> dict:
     """Make HTTP request to the API."""
-    url = f"{BASE_URL}{endpoint}"
+    url = f"{ADMIN_BASE_URL if admin else BASE_URL}{endpoint}"
     headers = {
         "Authorization": f"Bearer {ADMIN_API_KEY}",
         "Content-Type": "application/json"
@@ -67,7 +68,7 @@ def list_tenants(page: int = 1, page_size: int = 20, include_api_keys: bool = Fa
         "demo_only": demo_only
     }
     
-    result = make_request("GET", "/tenants", params=params)
+    result = make_request("GET", "/tenants", params=params, admin=True)
     print("Tenants:")
     print(json.dumps(result, indent=2))
 
@@ -80,14 +81,14 @@ def create_tenant(name: str, description: str = "", auto_sync: bool = True, sync
         "sync_interval": sync_interval
     }
     
-    result = make_request("POST", "/tenants", data=data)
+    result = make_request("POST", "/tenants", data=data, admin=True)
     print("Created tenant:")
     print(json.dumps(result, indent=2))
     return result
 
 def get_tenant(tenant_id: str):
     """Get tenant details."""
-    result = make_request("GET", f"/tenants/{tenant_id}")
+    result = make_request("GET", f"/tenants/{tenant_id}", admin=True)
     print("Tenant details:")
     print(json.dumps(result, indent=2))
 
@@ -108,13 +109,13 @@ def update_tenant(tenant_id: str, name: Optional[str] = None, description: Optio
         print("No update data provided")
         return
     
-    result = make_request("PUT", f"/tenants/{tenant_id}", data=data)
+    result = make_request("PUT", f"/tenants/{tenant_id}", data=data, admin=True)
     print("Updated tenant:")
     print(json.dumps(result, indent=2))
 
 def delete_tenant(tenant_id: str):
     """Delete a tenant."""
-    result = make_request("DELETE", f"/tenants/{tenant_id}")
+    result = make_request("DELETE", f"/tenants/{tenant_id}", admin=True)
     print(f"Tenant {tenant_id} deleted successfully")
 
 def create_api_key(tenant_id: str, name: str, description: str = ""):
@@ -124,19 +125,19 @@ def create_api_key(tenant_id: str, name: str, description: str = ""):
         "description": description
     }
     
-    result = make_request("POST", f"/tenants/{tenant_id}/api-keys", data=data)
+    result = make_request("POST", f"/tenants/{tenant_id}/api-keys", data=data, admin=False)
     print("Created API key:")
     print(json.dumps(result, indent=2))
 
 def list_api_keys(tenant_id: str):
     """List API keys for tenant."""
-    result = make_request("GET", f"/tenants/{tenant_id}/api-keys")
+    result = make_request("GET", f"/tenants/{tenant_id}/api-keys", admin=False)
     print("API keys:")
     print(json.dumps(result, indent=2))
 
 def delete_api_key(tenant_id: str, key_id: str):
     """Delete API key for tenant."""
-    result = make_request("DELETE", f"/tenants/{tenant_id}/api-keys/{key_id}")
+    result = make_request("DELETE", f"/tenants/{tenant_id}/api-keys/{key_id}", admin=False)
     print(f"API key {key_id} deleted successfully")
 
 def main():

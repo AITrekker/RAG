@@ -12,7 +12,7 @@ import schedule
 
 from ..core.delta_sync import DeltaSync
 from ..core.document_processor import DocumentProcessor
-from ..core.tenant_service import get_tenant_service
+from ..services.tenant_service import get_tenant_service
 
 logger = logging.getLogger(__name__)
 

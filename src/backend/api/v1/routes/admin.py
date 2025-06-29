@@ -10,9 +10,10 @@ This module provides admin-only endpoints for:
 All endpoints require admin authentication.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 import psutil
 import os
 import logging
@@ -35,9 +36,10 @@ from src.backend.models.api_models import (
     DemoCleanupResponse,
     SyncEventResponse
 )
-from src.backend.core.tenant_service import TenantService
+from src.backend.services.tenant_service import TenantService, get_tenant_service
 from src.backend.core.embedding_manager import EmbeddingManager
-from src.backend.middleware.auth import get_current_tenant, require_admin
+from src.backend.core.llm_service import get_llm_service
+from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
 from src.backend.core.auditing import AuditLogger, get_audit_logger
 from src.backend.utils.error_handling import (
@@ -59,7 +61,8 @@ router = APIRouter(tags=["Admin Operations"])
 @router.post("/tenants", response_model=TenantResponse)
 async def create_tenant(
     request: TenantCreateRequest,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Create a new tenant (Admin only).
@@ -67,15 +70,21 @@ async def create_tenant(
     Args:
         request: Tenant creation details
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         TenantResponse: Created tenant information
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
         # Create tenant
-        result = tenant_service.create_tenant(
+        result = await tenant_service.create_tenant(
             name=request.name,
             description=request.description,
             auto_sync=request.auto_sync,
@@ -83,9 +92,25 @@ async def create_tenant(
         )
         
         # Get created tenant details
-        tenant = tenant_service.get_tenant(result["tenant_id"])
-        return tenant
+        tenant = await tenant_service.get_tenant_by_id(UUID(result["id"]))
+        if not tenant:
+            raise HTTPException(status_code=500, detail="Failed to retrieve created tenant")
+            
+        return TenantResponse(
+            id=str(tenant.id),
+            name=tenant.name,
+            description=tenant.description,
+            status=tenant.status or "active",
+            created_at=tenant.created_at,
+            auto_sync=tenant.auto_sync,
+            sync_interval=tenant.sync_interval,
+            api_keys=[],
+            document_count=0,
+            storage_used_mb=0.0
+        )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise handle_exception(e, endpoint="create_tenant")
 
@@ -95,7 +120,8 @@ async def list_tenants(
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
     include_api_keys: bool = Query(False, description="Include API keys in response"),
     demo_only: bool = Query(False, description="Show only demo tenants"),
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     List all tenants (Admin only).
@@ -106,52 +132,80 @@ async def list_tenants(
         include_api_keys: Include API keys in response
         demo_only: Show only demo tenants
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         TenantListResponse: List of tenants with pagination
     """
     try:
-        tenant_service = TenantService()
-        tenants = tenant_service.list_tenants()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
+        tenants = await tenant_service.list_tenants()
+        
+        # Convert to response format
+        tenant_responses = []
+        for tenant in tenants:
+            tenant_response = TenantResponse(
+                id=str(tenant.id),
+                name=tenant.name,
+                description=tenant.description,
+                status=tenant.status or "active",
+                created_at=tenant.created_at,
+                auto_sync=tenant.auto_sync,
+                sync_interval=tenant.sync_interval,
+                api_keys=[],
+                document_count=0,
+                storage_used_mb=0.0
+            )
+            
+            # Add API keys if requested
+            if include_api_keys:
+                api_keys = await tenant_service.list_api_keys(tenant.id)
+                tenant_response.api_keys = [
+                    ApiKeyResponse(
+                        id=key.get("id", ""),
+                        name=key.get("name", ""),
+                        key_prefix=key.get("key_prefix", ""),
+                        is_active=key.get("is_active", True),
+                        created_at=key.get("created_at"),
+                        expires_at=key.get("expires_at")
+                    ) for key in api_keys
+                ]
+            
+            tenant_responses.append(tenant_response)
         
         # Filter for demo tenants if requested
         if demo_only:
-            demo_tenants = []
-            for tenant in tenants:
-                # Get API keys for tenant
-                api_keys = tenant_service.list_api_keys(tenant.get("id"))
-                # Check if tenant has demo keys
-                has_demo_keys = any(
-                    "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower()
-                    for key in api_keys
-                )
-                if has_demo_keys:
-                    demo_tenants.append(tenant)
-            tenants = demo_tenants
-        
-        # Add API keys to response if requested
-        if include_api_keys:
-            for tenant in tenants:
-                api_keys = tenant_service.list_api_keys(tenant.get("id"))
-                tenant["api_keys"] = api_keys
+            tenant_responses = [
+                t for t in tenant_responses 
+                if "demo" in t.name.lower() or "test" in t.name.lower()
+            ]
         
         # Apply pagination
         start_idx = (page - 1) * page_size
         end_idx = start_idx + page_size
-        paginated_tenants = tenants[start_idx:end_idx]
+        paginated_tenants = tenant_responses[start_idx:end_idx]
         
         return TenantListResponse(
             tenants=paginated_tenants,
-            total_count=len(tenants)
+            total_count=len(tenant_responses)
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise handle_exception(e, endpoint="list_tenants")
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse)
 async def get_tenant(
     tenant_id: str,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Get tenant details (Admin only).
@@ -159,18 +213,36 @@ async def get_tenant(
     Args:
         tenant_id: Tenant ID
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         TenantResponse: Tenant information
     """
     try:
-        tenant_service = TenantService()
-        tenant = tenant_service.get_tenant(tenant_id)
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
+        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
         
         if not tenant:
             raise not_found_error("Tenant", tenant_id)
             
-        return tenant
+        return TenantResponse(
+            id=str(tenant.id),
+            name=tenant.name,
+            description=tenant.description,
+            status=tenant.status or "active",
+            created_at=tenant.created_at,
+            auto_sync=tenant.auto_sync,
+            sync_interval=tenant.sync_interval,
+            api_keys=[],
+            document_count=0,
+            storage_used_mb=0.0
+        )
         
     except HTTPException:
         raise
@@ -181,7 +253,8 @@ async def get_tenant(
 async def update_tenant(
     tenant_id: str,
     request: TenantUpdateRequest,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Update tenant details (Admin only).
@@ -190,21 +263,26 @@ async def update_tenant(
         tenant_id: Tenant ID
         request: Update details
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         TenantResponse: Updated tenant information
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
-        # Check if tenant exists
-        existing_tenant = tenant_service.get_tenant(tenant_id)
-        if not existing_tenant:
+        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        
+        if not tenant:
             raise not_found_error("Tenant", tenant_id)
         
-        # Update tenant
-        updated_tenant = tenant_service.update_tenant(
-            tenant_id=tenant_id,
+        updated_tenant = await tenant_service.update_tenant(
+            tenant_id=UUID(tenant_id),
             name=request.name,
             description=request.description,
             status=request.status,
@@ -212,7 +290,18 @@ async def update_tenant(
             sync_interval=request.sync_interval
         )
         
-        return updated_tenant
+        return TenantResponse(
+            id=str(updated_tenant.id),
+            name=updated_tenant.name,
+            description=updated_tenant.description,
+            status=updated_tenant.status or "active",
+            created_at=updated_tenant.created_at,
+            auto_sync=updated_tenant.auto_sync,
+            sync_interval=updated_tenant.sync_interval,
+            api_keys=[],
+            document_count=0,
+            storage_used_mb=0.0
+        )
         
     except HTTPException:
         raise
@@ -222,7 +311,8 @@ async def update_tenant(
 @router.delete("/tenants/{tenant_id}", response_model=SuccessResponse)
 async def delete_tenant(
     tenant_id: str,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Delete a tenant (Admin only).
@@ -230,27 +320,32 @@ async def delete_tenant(
     Args:
         tenant_id: Tenant ID
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         dict: Deletion confirmation
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
-        # Check if tenant exists
-        existing_tenant = tenant_service.get_tenant(tenant_id)
-        if not existing_tenant:
+        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        
+        if not tenant:
             raise not_found_error("Tenant", tenant_id)
         
         # Prevent admin tenant deletion
-        if existing_tenant["name"] == "admin":
+        if tenant.name == "admin":
             raise validation_error(
                 "Cannot delete admin tenant",
                 {"tenant_id": tenant_id, "tenant_name": "admin"}
             )
         
-        # Delete tenant
-        tenant_service.delete_tenant(tenant_id)
+        await tenant_service.delete_tenant(UUID(tenant_id))
         
         return SuccessResponse(message=f"Tenant {tenant_id} deleted successfully")
         
@@ -267,7 +362,8 @@ async def delete_tenant(
 async def create_api_key(
     tenant_id: str,
     request: ApiKeyCreateRequest,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Create API key for a tenant (Admin only).
@@ -276,20 +372,25 @@ async def create_api_key(
         tenant_id: Tenant ID
         request: API key details
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         ApiKeyCreateResponse: Created API key
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
-        # Check if tenant exists
-        existing_tenant = tenant_service.get_tenant(tenant_id)
-        if not existing_tenant:
+        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        
+        if not tenant:
             raise not_found_error("Tenant", tenant_id)
         
-        # Create API key
-        api_key = tenant_service.create_api_key(tenant_id, request.name)
+        api_key = await tenant_service.create_api_key(UUID(tenant_id), request.name)
         
         return ApiKeyCreateResponse(
             tenant_id=tenant_id,
@@ -305,7 +406,8 @@ async def create_api_key(
 @router.get("/tenants/{tenant_id}/api-keys", response_model=List[ApiKeyResponse])
 async def list_api_keys(
     tenant_id: str,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     List API keys for a tenant (Admin only).
@@ -313,20 +415,25 @@ async def list_api_keys(
     Args:
         tenant_id: Tenant ID
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         List[ApiKeyResponse]: List of API keys
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
-        # Check if tenant exists
-        existing_tenant = tenant_service.get_tenant(tenant_id)
-        if not existing_tenant:
+        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        
+        if not tenant:
             raise not_found_error("Tenant", tenant_id)
         
-        # Get API keys
-        api_keys = tenant_service.list_api_keys(tenant_id)
+        api_keys = await tenant_service.list_api_keys(UUID(tenant_id))
         return api_keys
         
     except HTTPException:
@@ -338,7 +445,8 @@ async def list_api_keys(
 async def delete_api_key(
     tenant_id: str,
     key_id: str,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Delete an API key (Admin only).
@@ -347,20 +455,25 @@ async def delete_api_key(
         tenant_id: Tenant ID
         key_id: API key ID
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         dict: Deletion confirmation
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
-        # Check if tenant exists
-        existing_tenant = tenant_service.get_tenant(tenant_id)
-        if not existing_tenant:
+        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        
+        if not tenant:
             raise not_found_error("Tenant", tenant_id)
         
-        # Delete API key
-        tenant_service.delete_api_key(tenant_id, key_id)
+        await tenant_service.delete_api_key(UUID(tenant_id), key_id)
         
         return SuccessResponse(message=f"API key {key_id} deleted successfully")
         
@@ -375,26 +488,33 @@ async def delete_api_key(
 
 @router.get("/system/status", response_model=SystemStatusResponse)
 async def get_system_status(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Get comprehensive system status (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         SystemStatusResponse: System status information
     """
     try:
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
         
         # Get basic system info
         start_time = datetime.utcnow()  # This should be actual start time
         uptime = (datetime.utcnow() - start_time).total_seconds()
         
         # Get tenant and document counts
-        tenants = tenant_service.list_tenants()
+        tenants = await tenant_service.list_tenants()
         total_tenants = len(tenants)
         
         # Calculate total documents (simplified - TODO: implement proper document counting)
@@ -413,7 +533,7 @@ async def get_system_status(
         
         # Tenant service status
         try:
-            tenant_service.list_tenants()
+            await tenant_service.list_tenants()
             components["tenant_service"] = {"status": "healthy"}
         except Exception as e:
             components["tenant_service"] = {"status": "unhealthy", "error": str(e)}
@@ -427,23 +547,34 @@ async def get_system_status(
             components=components
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise handle_exception(e, endpoint="get_system_status")
 
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
 async def get_system_metrics(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Get system performance metrics (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         SystemMetricsResponse: System metrics
     """
     try:
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
         # Get system metrics using psutil
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
@@ -462,6 +593,8 @@ async def get_system_metrics(
             sync_operations=0  # This would need to be tracked
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise handle_exception(e, endpoint="get_system_metrics")
 
@@ -471,20 +604,28 @@ async def get_system_metrics(
 
 @router.delete("/system/embeddings/stats", response_model=SuccessResponse)
 async def delete_embedding_statistics(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Clear embedding generation statistics (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         dict: Clear operation confirmation
     """
     try:
-        from src.backend.core.embedding_manager import get_embedding_manager
-        embedding_manager = get_embedding_manager()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
+        embedding_manager = EmbeddingManager()
         embedding_manager.clear_stats()
         
         return SuccessResponse(message="Embedding statistics cleared successfully")
@@ -493,19 +634,27 @@ async def delete_embedding_statistics(
 
 @router.delete("/system/llm/stats", response_model=SuccessResponse)
 async def delete_llm_statistics(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Clear LLM service statistics (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         dict: Clear operation confirmation
     """
     try:
-        from src.backend.core.llm_service import get_llm_service
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
         llm_service = get_llm_service()
         llm_service.clear_stats()
         
@@ -515,19 +664,27 @@ async def delete_llm_statistics(
 
 @router.delete("/system/llm/cache", response_model=SuccessResponse)
 async def delete_llm_cache(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Clear LLM service cache (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         dict: Clear operation confirmation
     """
     try:
-        from src.backend.core.llm_service import get_llm_service
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
         llm_service = get_llm_service()
         llm_service.clear_cache()
         
@@ -538,7 +695,8 @@ async def delete_llm_cache(
 @router.put("/system/maintenance", response_model=Dict[str, Any])
 async def update_maintenance_mode(
     maintenance_request: dict,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Update system maintenance mode (Admin only).
@@ -546,11 +704,19 @@ async def update_maintenance_mode(
     Args:
         maintenance_request: Maintenance state request {"enabled": true/false}
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         dict: Maintenance mode status
     """
     try:
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
         enabled = maintenance_request.get("enabled", True)
         status = "maintenance" if enabled else "normal"
         
@@ -569,8 +735,9 @@ async def get_audit_events(
     tenant_id: str = None,
     limit: int = 100,
     offset: int = 0,
-    current_tenant: dict = Depends(require_admin),
-    audit_logger: AuditLogger = Depends(get_audit_logger)
+    current_tenant: dict = Depends(get_current_tenant),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ) -> List[SyncEventResponse]:
     """
     Retrieve audit events for a tenant (Admin only).
@@ -591,7 +758,8 @@ async def get_audit_events(
 @router.post("/demo/setup", response_model=DemoSetupResponse)
 async def setup_demo_environment(
     request: DemoSetupRequest,
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Setup demo environment with multiple tenants (Admin only).
@@ -599,6 +767,7 @@ async def setup_demo_environment(
     Args:
         request: Demo setup request with tenant IDs and duration
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         DemoSetupResponse: Demo setup results with API keys
@@ -606,7 +775,13 @@ async def setup_demo_environment(
     try:
         logger.info(f"Setting up demo environment for {len(request.demo_tenants)} tenants")
         
-        tenant_service = TenantService()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
         demo_tenants = []
         
         # Calculate demo expiration
@@ -614,7 +789,7 @@ async def setup_demo_environment(
         
         for tenant_id in request.demo_tenants:
             # Verify tenant exists
-            tenant = tenant_service.get_tenant(tenant_id)
+            tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
             if not tenant:
                 logger.warning(f"Tenant {tenant_id} not found, skipping")
                 continue
@@ -622,8 +797,8 @@ async def setup_demo_environment(
             api_keys = []
             if request.generate_api_keys:
                 # Generate demo API key for tenant
-                demo_api_key = tenant_service.create_api_key(
-                    tenant_id=tenant_id,
+                demo_api_key = await tenant_service.create_api_key(
+                    tenant_id=UUID(tenant_id),
                     name="Demo API Key",
                     description="Auto-generated for demo purposes",
                     expires_at=demo_expires_at
@@ -643,8 +818,8 @@ async def setup_demo_environment(
             
             demo_tenants.append(DemoTenantInfo(
                 tenant_id=tenant_id,
-                tenant_name=tenant.get("name", ""),
-                description=tenant.get("description"),
+                tenant_name=tenant.name,
+                description=tenant.description,
                 api_keys=api_keys,
                 demo_expires_at=demo_expires_at,
                 created_at=datetime.utcnow()
@@ -664,13 +839,15 @@ async def setup_demo_environment(
 
 @router.get("/demo/tenants", response_model=List[DemoTenantInfo])
 async def list_demo_tenants(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     List all demo tenants with their API keys (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         List[DemoTenantInfo]: List of demo tenants with API keys
@@ -678,17 +855,23 @@ async def list_demo_tenants(
     try:
         logger.info("Listing demo tenants")
         
-        tenant_service = TenantService()
-        all_tenants = tenant_service.list_tenants()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
+        all_tenants = await tenant_service.list_tenants()
         demo_tenants = []
         
         for tenant in all_tenants:
             # Skip admin tenant
-            if tenant.get("name") == "admin":
+            if tenant.name == "admin":
                 continue
             
             # Get API keys for tenant
-            api_keys = tenant_service.list_api_keys(tenant.get("id"))
+            api_keys = await tenant_service.list_api_keys(tenant.id)
             
             # Filter for demo keys (keys with "Demo" in name or description)
             demo_keys = []
@@ -701,12 +884,12 @@ async def list_demo_tenants(
             
             if demo_keys:  # Only include tenants with demo keys
                 demo_tenants.append(DemoTenantInfo(
-                    tenant_id=tenant.get("id"),
-                    tenant_name=tenant.get("name", ""),
-                    description=tenant.get("description"),
+                    tenant_id=tenant.id,
+                    tenant_name=tenant.name,
+                    description=tenant.description,
                     api_keys=demo_keys,
                     demo_expires_at=datetime.utcnow() + timedelta(hours=24),  # Default expiration
-                    created_at=tenant.get("created_at", datetime.utcnow())
+                    created_at=tenant.created_at
                 ))
         
         return demo_tenants
@@ -717,13 +900,15 @@ async def list_demo_tenants(
 
 @router.delete("/demo/cleanup", response_model=DemoCleanupResponse)
 async def cleanup_demo_environment(
-    current_tenant: dict = Depends(require_admin)
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service)
 ):
     """
     Clean up demo environment and expire demo API keys (Admin only).
     
     Args:
         current_tenant: Admin tenant (from auth)
+        tenant_service: Tenant service
         
     Returns:
         DemoCleanupResponse: Cleanup results
@@ -731,30 +916,36 @@ async def cleanup_demo_environment(
     try:
         logger.info("Cleaning up demo environment")
         
-        tenant_service = TenantService()
-        all_tenants = tenant_service.list_tenants()
+        # Verify admin access
+        if current_tenant.name != "admin" and current_tenant.slug != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required"
+            )
+        
+        all_tenants = await tenant_service.list_tenants()
         cleaned_tenants = 0
         expired_keys = 0
         
         for tenant in all_tenants:
             # Skip admin tenant
-            if tenant.get("name") == "admin":
+            if tenant.name == "admin":
                 continue
             
             # Get API keys for tenant
-            api_keys = tenant_service.list_api_keys(tenant.get("id"))
+            api_keys = await tenant_service.list_api_keys(tenant.id)
             
             # Find and delete demo keys
             for key in api_keys:
                 if "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower():
                     try:
-                        tenant_service.delete_api_key(tenant.get("id"), key.get("id"))
+                        await tenant_service.delete_api_key(tenant.id, key.get("id"))
                         expired_keys += 1
                     except Exception as e:
                         logger.warning(f"Failed to delete demo key {key.get('id')}: {e}")
             
             # If tenant only had demo keys and no other keys, mark as cleaned
-            remaining_keys = tenant_service.list_api_keys(tenant.get("id"))
+            remaining_keys = await tenant_service.list_api_keys(tenant.id)
             if not remaining_keys:
                 cleaned_tenants += 1
         

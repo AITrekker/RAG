@@ -71,24 +71,27 @@ def save_api_keys(api_keys: dict):
     except Exception as e:
         print(f"Error saving API keys: {e}")
 
-def create_tenant_direct(name: str, description: str = "") -> str:
-    """Create a new tenant directly using the TenantService."""
-    # Import here to avoid issues
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+def create_tenant_via_api(name: str, description: str = "") -> str:
+    """Create a new tenant using the admin API."""
+    create_data = {
+        "name": name,
+        "description": description,
+        "auto_sync": True,
+        "sync_interval": 60
+    }
     
-    from src.backend.core.tenant_service import TenantService
-    
-    tenant_service = TenantService()
-    result = tenant_service.create_tenant(name=name, description=description)
-    
-    print(f"Created tenant: {name} (ID: {result['tenant_id']})")
-    return result['tenant_id']
+    try:
+        result = make_request("POST", "/tenants", data=create_data)
+        tenant_id = result["id"]
+        print(f"Created tenant: {name} (ID: {tenant_id})")
+        return tenant_id
+    except Exception as e:
+        print(f"Failed to create tenant {name}: {e}")
+        raise
 
 def create_data_folder_tenants():
-    """Create tenants that match the /data/tenants folder structure."""
-    print("Creating tenants to match /data/tenants folder structure...")
+    """Create tenants that match the /data/uploads folder structure using API."""
+    print("Creating tenants to match /data/uploads folder structure...")
     
     # First, get list of existing tenants to avoid duplicates
     print("Checking for existing tenants...")
@@ -99,7 +102,7 @@ def create_data_folder_tenants():
         print(f"⚠️  Could not retrieve existing tenants: {e}")
         existing_tenant_names = {}
     
-    # Create tenants with names that match the data folders
+    # Create tenants with names that match the uploads folders
     tenant_configs = [
         {"name": "tenant1", "description": "GlobalCorp Inc. - Global industry leader"},
         {"name": "tenant2", "description": "Regional Solutions - Local community partner"},
@@ -117,18 +120,10 @@ def create_data_folder_tenants():
             print(f"  ✅ Tenant {tenant_name} already exists with ID: {tenant_id}")
             continue
         
-        # Create new tenant
+        # Create new tenant via API
         print(f"Creating new tenant: {tenant_name}")
-        create_data = {
-            "name": tenant_name,
-            "description": config["description"],
-            "auto_sync": True,
-            "sync_interval": 60
-        }
-        
         try:
-            result = make_request("POST", "/tenants", data=create_data)
-            tenant_id = result["id"]
+            tenant_id = create_tenant_via_api(tenant_name, config["description"])
             tenant_ids.append(tenant_id)
             print(f"  ✅ Created {tenant_name} with ID: {tenant_id}")
         except Exception as e:
@@ -139,9 +134,9 @@ def create_data_folder_tenants():
 
 def setup_default_tenants():
     """Setup default demo environment by creating tenants first, then setting up demo."""
-    print("Setting up demo environment for data folder tenants...")
+    print("Setting up demo environment for uploads folder tenants...")
     
-    # First create the tenants to match data folder structure
+    # First create the tenants to match uploads folder structure
     tenant_ids = create_data_folder_tenants()
     
     if not tenant_ids:
@@ -198,20 +193,19 @@ def cleanup_demo_environment():
         except Exception as e:
             print(f"⚠️  Could not remove {keys_file}: {e}")
     else:
-        print(f"\n⚠️  {keys_file} not found (may have been removed already)")
+        print(f"\nℹ️  {keys_file} not found (already removed or never created)")
 
 def main():
     parser = argparse.ArgumentParser(description="Demo Management Admin API")
-    parser.add_argument("--setup", action="store_true", help="Setup demo environment")
     parser.add_argument("--setup-default", action="store_true", help="Setup default demo environment (tenant1, tenant2, tenant3)")
+    parser.add_argument("--setup", action="store_true", help="Setup custom demo environment")
     parser.add_argument("--list", action="store_true", help="List demo tenants")
     parser.add_argument("--cleanup", action="store_true", help="Cleanup demo environment")
     
     # Setup parameters
-    parser.add_argument("--demo-tenants", help="Comma-separated list of demo tenant IDs")
+    parser.add_argument("--demo-tenants", help="Comma-separated list of tenant IDs for demo")
     parser.add_argument("--duration", type=int, default=24, help="Demo duration in hours")
     parser.add_argument("--generate-api-keys", action="store_true", default=True, help="Generate API keys for demo tenants")
-    parser.add_argument("--no-api-keys", action="store_true", help="Don't generate API keys")
     
     args = parser.parse_args()
     
@@ -221,13 +215,11 @@ def main():
         setup_default_tenants()
     elif args.setup:
         if not args.demo_tenants:
-            print("ERROR: --demo-tenants is required for setting up demo environment")
+            print("ERROR: --demo-tenants is required for custom setup")
             sys.exit(1)
         
-        demo_tenants = [tenant.strip() for tenant in args.demo_tenants.split(",")]
-        generate_api_keys = not args.no_api_keys
-        
-        setup_demo_environment(demo_tenants, args.duration, generate_api_keys)
+        tenant_ids = [tid.strip() for tid in args.demo_tenants.split(",")]
+        setup_demo_environment(tenant_ids, args.duration, args.generate_api_keys)
     elif args.list:
         list_demo_tenants()
     elif args.cleanup:

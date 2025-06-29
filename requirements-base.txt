@@ -38,6 +38,13 @@ python-docx>=0.8.11
 beautifulsoup4==4.13.4
 pandas==2.2.3
 
+# ===== DATABASE DRIVERS =====
+# PostgreSQL drivers (add to base for caching)
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+alembic==1.13.3
+
 # ===== SCIENTIFIC COMPUTING =====
 # Core scientific packages (moderate weight)
 numpy>=1.24.0,<2.0.0

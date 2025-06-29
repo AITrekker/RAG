@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import HTTPException, Request, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from ..core.tenant_service import TenantService, get_tenant_service
+from ..services.tenant_service import TenantService, get_tenant_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +35,14 @@ def get_current_tenant_id(
             detail="Missing API key",
         )
     
-    tenant_info = tenant_service.validate_api_key(creds.credentials)
-    if not tenant_info:
+    tenant = tenant_service.get_tenant_by_api_key(creds.credentials)
+    if not tenant:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired API key",
         )
         
-    return tenant_info["id"]
+    return str(tenant.id)
 
 def require_authentication(
     tenant_id: str = Depends(get_current_tenant_id)
@@ -65,13 +65,22 @@ def get_current_tenant(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing API key",
         )
-    tenant_info = tenant_service.validate_api_key(creds.credentials)
-    if not tenant_info:
+    tenant = tenant_service.get_tenant_by_api_key(creds.credentials)
+    if not tenant:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired API key",
         )
-    return tenant_info
+    
+    # Convert tenant object to dict
+    tenant_dict = {
+        "id": str(tenant.id),
+        "name": tenant.name,
+        "slug": tenant.slug,
+        "status": tenant.status,
+        "is_active": tenant.is_active
+    }
+    return tenant_dict
 
 def require_admin(
     current_tenant: dict = Depends(get_current_tenant)

@@ -574,4 +574,39 @@ class RAGResponse(BaseModel):
     confidence: float = Field(..., description="Confidence score")
     processing_time: float = Field(..., description="Processing time in seconds")
     tokens_used: Optional[int] = Field(None, description="Tokens used")
-    model_used: Optional[str] = Field(None, description="Model used for generation") 
+    model_used: Optional[str] = Field(None, description="Model used for generation")
+
+
+# =============================================================================
+# NEW SERVICE LAYER MODELS
+# =============================================================================
+
+class FileResponse(BaseModel):
+    """File response model for new service layer"""
+    id: str = Field(..., description="File ID")
+    filename: str = Field(..., description="File name")
+    file_size: int = Field(..., description="File size in bytes")
+    mime_type: Optional[str] = Field(None, description="MIME type")
+    sync_status: str = Field(..., description="Sync status")
+    word_count: Optional[int] = Field(None, description="Word count")
+    page_count: Optional[int] = Field(None, description="Page count")
+    language: Optional[str] = Field(None, description="Detected language")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Update timestamp")
+
+
+class FileListResponse(BaseModel):
+    """File list response model"""
+    files: List[FileResponse] = Field(..., description="List of files")
+    total_count: int = Field(..., description="Total count")
+    page: int = Field(..., description="Current page")
+    page_size: int = Field(..., description="Page size")
+
+
+class UploadResponse(BaseModel):
+    """File upload response model"""
+    file_id: str = Field(..., description="File ID")
+    filename: str = Field(..., description="File name")
+    file_size: int = Field(..., description="File size")
+    sync_status: str = Field(..., description="Sync status")
+    message: str = Field(..., description="Upload message") 

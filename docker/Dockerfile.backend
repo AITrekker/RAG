@@ -5,7 +5,7 @@ FROM nvcr.io/nvidia/pytorch:24.12-py3
 WORKDIR /app
 
 # Upgrade pip and install essential system packages
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --upgrade pip && \
     apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -24,13 +24,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # Install base requirements (heavyweight packages) 
-# Use constraints file to prevent PyTorch downgrades
+# Use constraints file to prevent PyTorch downgrades and leverage cache
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir --upgrade-strategy only-if-needed -c constraints.txt -r requirements-base.txt
+    pip install --upgrade-strategy only-if-needed -c constraints.txt -r requirements-base.txt
 
 # Install main requirements (lightweight packages)  
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir --upgrade-strategy only-if-needed -c constraints.txt -r requirements.txt
+    pip install --upgrade-strategy only-if-needed -c constraints.txt -r requirements.txt
 
 # Test that ML libraries can be imported successfully and verify CUDA support
 RUN python -c "import torch; print(f'PyTorch version: {torch.__version__}'); \

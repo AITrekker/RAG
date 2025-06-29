@@ -24,6 +24,7 @@ test_env/
 .idea/
 .cursor/
 .claude/
+CLAUDE.md
 .DS_Store
 Thumbs.db
 ehthumbs.db
@@ -85,14 +86,6 @@ build/
 *.db-journal
 *.db-wal
 *.db-shm
-
-# PostgreSQL data
-postgres_data/
-pgdata/
-
-# ChromaDB data
-chroma_db/
-chromadb/
 
 # ===================================================================
 # Machine Learning & AI Models

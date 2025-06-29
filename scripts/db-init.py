@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-Qdrant Database Initialization Script
+Hybrid Database Initialization Script
 
-This script initializes the Qdrant vector database with:
-1. Admin tenant with default API key
-2. All necessary collections
-3. Proper configuration for the RAG platform
+This script initializes both PostgreSQL and Qdrant databases with:
+1. PostgreSQL schema and tables
+2. System admin tenant with API key
+3. Qdrant connection verification
+4. Proper configuration for the RAG platform
 
 Usage:
-    python scripts/init_qdrant_db.py
+    python scripts/db-init.py
 """
 
 import os
 import sys
+import asyncio
 import logging
 from pathlib import Path
 from typing import Dict, Any
@@ -21,9 +23,10 @@ from typing import Dict, Any
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backend.config.settings import get_settings
-from src.backend.core.tenant_service import TenantService
-from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
+from src.backend.database import init_database, AsyncSessionLocal
+from src.backend.services.tenant_service import TenantService
+from src.backend.models.database import User
+from sqlalchemy import select
 
 # Configure logging
 logging.basicConfig(
@@ -32,32 +35,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class QdrantInitializer:
-    """Handles Qdrant database initialization."""
+class HybridDatabaseInitializer:
+    """Handles hybrid PostgreSQL + Qdrant database initialization."""
     
-    def __init__(self):
-        self.settings = get_settings()
-        self.vector_manager = get_vector_store_manager()
-        self.tenant_service = TenantService()
-        
     def print_banner(self):
         """Print initialization banner."""
-        print("🚀 Qdrant Database Initialization")
-        print("=" * 50)
-        print(f"Qdrant URL: {self.settings.qdrant_url}")
-        print(f"Embedding Model: {self.settings.embedding_model}")
-        print(f"Vector Dimensions: {self.settings.embedding_model_dimensions}")
+        print("🚀 Hybrid Database Initialization (PostgreSQL + Qdrant)")
+        print("=" * 60)
+        print("PostgreSQL: Control plane, tenant management, file metadata")
+        print("Qdrant: Vector storage for embeddings")
         print()
+    
+    async def check_postgresql_connection(self) -> bool:
+        """Check if PostgreSQL is accessible and initialize schema."""
+        try:
+            logger.info("Initializing PostgreSQL database...")
+            
+            # Initialize database schema
+            await init_database()
+            
+            # Test connection with a simple query
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(1))
+                result.scalar()
+            
+            logger.info("✅ PostgreSQL connected and schema initialized")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to PostgreSQL: {e}")
+            logger.error("   Please ensure PostgreSQL is running and accessible")
+            return False
     
     def check_qdrant_connection(self) -> bool:
         """Check if Qdrant is accessible."""
         try:
+            import requests
+            
             logger.info("Checking Qdrant connection...")
             
             # Test basic connection
-            collections = self.vector_manager.client.get_collections()
+            response = requests.get("http://localhost:6333/collections", timeout=5)
+            response.raise_for_status()
+            
+            collections = response.json()
             logger.info(f"✅ Successfully connected to Qdrant")
-            logger.info(f"   Found {len(collections.collections)} existing collections")
+            logger.info(f"   Found {len(collections.get('result', {}).get('collections', []))} existing collections")
             
             return True
             
@@ -66,119 +89,135 @@ class QdrantInitializer:
             logger.error("   Please ensure Qdrant is running and accessible")
             return False
     
-    def create_admin_tenant(self) -> Dict[str, Any]:
-        """Create the admin tenant with default API key."""
+    async def create_system_user(self) -> Dict[str, Any]:
+        """Create or get the system user for file uploads."""
+        logger.info("Creating/getting system user...")
+        
+        try:
+            async with AsyncSessionLocal() as session:
+                # Check if system user exists
+                result = await session.execute(
+                    select(User).where(User.email == 'system@rag-platform.local')
+                )
+                system_user = result.scalar_one_or_none()
+                
+                if system_user:
+                    logger.info(f"✅ System user already exists: {system_user.id}")
+                    return {
+                        "user_id": system_user.id,
+                        "email": system_user.email,
+                        "full_name": system_user.full_name
+                    }
+                
+                # Create system user
+                system_user = User(
+                    email='system@rag-platform.local',
+                    password_hash='system_user_no_login',
+                    full_name='System User for File Operations',
+                    is_active=True
+                )
+                session.add(system_user)
+                await session.commit()
+                await session.refresh(system_user)
+                
+                logger.info(f"✅ Created system user: {system_user.id}")
+                return {
+                    "user_id": system_user.id,
+                    "email": system_user.email,
+                    "full_name": system_user.full_name
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to create system user: {e}")
+            raise
+    
+    async def create_admin_tenant(self) -> Dict[str, Any]:
+        """Create the admin tenant with API key."""
         logger.info("Creating admin tenant...")
         
         try:
-            # Check if admin tenant already exists
-            existing_tenants = self.tenant_service.list_tenants()
-            admin_tenant = next((t for t in existing_tenants if t.get("name") == "admin"), None)
-            
-            if admin_tenant:
-                logger.info(f"✅ Admin tenant already exists with ID: {admin_tenant['tenant_id']}")
+            async with AsyncSessionLocal() as session:
+                tenant_service = TenantService(session)
+                
+                # Check if admin tenant already exists
+                tenants = await tenant_service.list_tenants()
+                admin_tenant = next((t for t in tenants if t.get("slug") == "system-admin"), None)
+                
+                if admin_tenant:
+                    logger.info(f"✅ Admin tenant already exists: {admin_tenant['name']}")
+                    logger.info(f"   Tenant ID: {admin_tenant['id']}")
+                    return {
+                        "tenant_id": admin_tenant["id"],
+                        "name": admin_tenant["name"],
+                        "api_key": "EXISTING_KEY"  # We can't retrieve the actual key
+                    }
+                
+                # Create new admin tenant
+                result = await tenant_service.create_tenant(
+                    name="System Admin",
+                    description="Default administrative tenant for the RAG platform",
+                    auto_sync=True,
+                    sync_interval=60
+                )
+                
+                logger.info(f"✅ Successfully created admin tenant")
+                logger.info(f"   Tenant ID: {result['id']}")
+                logger.info(f"   API Key: {result['api_key']}")
+                
                 return {
-                    "tenant_id": admin_tenant["tenant_id"],
-                    "name": admin_tenant["name"],
-                    "api_key": "EXISTING_KEY"  # We can't retrieve the actual key
+                    "tenant_id": result["id"],
+                    "name": "System Admin",
+                    "api_key": result["api_key"]
                 }
-            
-            # Create new admin tenant
-            result = self.tenant_service.create_tenant(
-                name="admin",
-                description="Default administrative tenant for the RAG platform"
-            )
-            
-            logger.info(f"✅ Successfully created admin tenant")
-            logger.info(f"   Tenant ID: {result['tenant_id']}")
-            logger.info(f"   API Key: {result['api_key']}")
-            
-            return {
-                "tenant_id": result["tenant_id"],
-                "name": "admin",
-                "api_key": result["api_key"]
-            }
-            
+                
         except Exception as e:
             logger.error(f"❌ Failed to create admin tenant: {e}")
             raise
     
-    def create_tenant_collections(self, tenant_id: str) -> bool:
-        """Create document collection for a tenant."""
-        try:
-            logger.info(f"Creating document collection for tenant {tenant_id}...")
-            
-            collection_name = self.vector_manager.get_collection_name_for_tenant(tenant_id)
-            self.vector_manager.ensure_collection_exists(
-                collection_name, 
-                self.settings.embedding_model_dimensions
-            )
-            
-            logger.info(f"✅ Created collection: {collection_name}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to create collection for tenant {tenant_id}: {e}")
-            return False
-    
-    def create_system_collections(self) -> bool:
-        """Create system-wide collections."""
-        try:
-            logger.info("Creating system collections...")
-            
-            # Tenants metadata collection (already created by TenantService)
-            tenants_collection = "tenants_metadata"
-            self.vector_manager.ensure_collection_exists(tenants_collection, vector_size=1)
-            logger.info(f"✅ System collection: {tenants_collection}")
-            
-            # Add any other system collections here as needed
-            # For example: audit_logs, system_config, etc.
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to create system collections: {e}")
-            return False
-    
-    def verify_initialization(self, admin_tenant: Dict[str, Any]) -> bool:
+    async def verify_initialization(self, admin_tenant: Dict[str, Any], system_user: Dict[str, Any]) -> bool:
         """Verify that initialization was successful."""
         try:
             logger.info("Verifying initialization...")
             
-            # Check admin tenant exists
-            tenants = self.tenant_service.list_tenants()
-            admin_exists = any(t["tenant_id"] == admin_tenant["tenant_id"] for t in tenants)
-            
-            if not admin_exists:
-                logger.error("❌ Admin tenant not found in verification")
-                return False
-            
-            # Check admin tenant collection exists
-            collection_name = self.vector_manager.get_collection_name_for_tenant(admin_tenant["tenant_id"])
-            collection_info = self.vector_manager.client.get_collection(collection_name)
-            
-            if not collection_info:
-                logger.error(f"❌ Admin tenant collection not found: {collection_name}")
-                return False
-            
-            # Check system collections
-            tenants_collection = self.vector_manager.client.get_collection("tenants_metadata")
-            if not tenants_collection:
-                logger.error("❌ Tenants metadata collection not found")
-                return False
-            
-            logger.info("✅ All verifications passed")
-            return True
-            
+            async with AsyncSessionLocal() as session:
+                tenant_service = TenantService(session)
+                
+                # Check admin tenant exists
+                tenants = await tenant_service.list_tenants()
+                admin_exists = any(str(t["id"]) == str(admin_tenant["tenant_id"]) for t in tenants)
+                
+                if not admin_exists:
+                    logger.error("❌ Admin tenant not found in verification")
+                    return False
+                
+                # Check system user exists
+                result = await session.execute(
+                    select(User).where(User.id == system_user["user_id"])
+                )
+                user_exists = result.scalar_one_or_none() is not None
+                
+                if not user_exists:
+                    logger.error("❌ System user not found in verification")
+                    return False
+                
+                logger.info("✅ All verifications passed")
+                return True
+                
         except Exception as e:
             logger.error(f"❌ Verification failed: {e}")
             return False
     
-    def print_summary(self, admin_tenant: Dict[str, Any]):
+    def print_summary(self, admin_tenant: Dict[str, Any], system_user: Dict[str, Any]):
         """Print initialization summary."""
-        print("\n" + "=" * 50)
-        print("🎉 QDRANT DATABASE INITIALIZATION COMPLETE")
-        print("=" * 50)
+        print("\n" + "=" * 60)
+        print("🎉 HYBRID DATABASE INITIALIZATION COMPLETE")
+        print("=" * 60)
+        print(f"PostgreSQL: ✅ Schema created, ready for metadata")
+        print(f"Qdrant: ✅ Connected, ready for vectors")
+        print()
+        print(f"System User ID: {system_user['user_id']}")
+        print(f"System User Email: {system_user['email']}")
+        print()
         print(f"Admin Tenant ID: {admin_tenant['tenant_id']}")
         print(f"Admin Tenant Name: {admin_tenant['name']}")
         
@@ -187,80 +226,53 @@ class QdrantInitializer:
             print("\n⚠️  IMPORTANT: Save this API key securely!")
             print("   You'll need it to access the admin tenant.")
         
-        print("\nCollections Created:")
-        print(f"  - tenants_metadata (system)")
-        print(f"  - {self.vector_manager.get_collection_name_for_tenant(admin_tenant['tenant_id'])} (admin tenant)")
-        
         print("\nNext Steps:")
-        print("  1. Use the admin API key in your frontend configuration")
-        print("  2. Start the backend server: python scripts/run_backend.py")
-        print("  3. Start the frontend: .\\scripts\\run_frontend.ps1")
-        print("  4. Upload documents and start querying!")
-        print("=" * 50)
+        print("  1. Use the admin API key in your API requests")
+        print("  2. Start the backend server with Docker Compose")
+        print("  3. Upload documents using scripts/delta-sync.py")
+        print("  4. Test with scripts/test_ml_pipeline.py")
+        print("=" * 60)
     
-    def check_and_prompt_reset(self) -> bool:
-        """Check if data exists and prompt user to reset if so."""
-        collections = self.vector_manager.client.get_collections().collections
-        # Exclude system collections (tenants_metadata)
-        user_collections = [c for c in collections if c.name != "tenants_metadata"]
-        if collections and (len(collections) > 1 or (collections and collections[0].name != "tenants_metadata")):
-            print("\n⚠️  Data already exists in Qdrant:")
-            for c in collections:
-                print(f"  - {c.name}")
-            response = input("\nDo you want to DELETE ALL DATA and reset the database? (y/n): ").strip().lower()
-            if response == "y":
-                print("\nDeleting all collections...")
-                for c in collections:
-                    self.vector_manager.client.delete_collection(collection_name=c.name)
-                    print(f"  Deleted: {c.name}")
-                print("All collections deleted. Proceeding with initialization.\n")
-                return True
-            else:
-                print("Aborting initialization. No changes made.")
-                return False
-        return True
-    
-    def run(self) -> bool:
+    async def run(self) -> bool:
         """Run the complete initialization process."""
         self.print_banner()
         
-        # Step 0: Check for existing data and prompt for reset
-        if not self.check_and_prompt_reset():
+        # Step 1: Check PostgreSQL connection and initialize schema
+        if not await self.check_postgresql_connection():
             return False
         
-        # Step 1: Check connection
+        # Step 2: Check Qdrant connection
         if not self.check_qdrant_connection():
             return False
         
-        # Step 2: Create system collections
-        if not self.create_system_collections():
+        # Step 3: Create system user
+        try:
+            system_user = await self.create_system_user()
+        except Exception as e:
+            logger.error(f"Failed to create system user: {e}")
             return False
         
-        # Step 3: Create admin tenant
+        # Step 4: Create admin tenant
         try:
-            admin_tenant = self.create_admin_tenant()
+            admin_tenant = await self.create_admin_tenant()
         except Exception as e:
             logger.error(f"Failed to create admin tenant: {e}")
             return False
         
-        # Step 4: Create tenant collections
-        if not self.create_tenant_collections(admin_tenant["tenant_id"]):
-            return False
-        
         # Step 5: Verify initialization
-        if not self.verify_initialization(admin_tenant):
+        if not await self.verify_initialization(admin_tenant, system_user):
             return False
         
         # Step 6: Print summary
-        self.print_summary(admin_tenant)
+        self.print_summary(admin_tenant, system_user)
         
         return True
 
-def main():
+async def main():
     """Main entry point."""
     try:
-        initializer = QdrantInitializer()
-        success = initializer.run()
+        initializer = HybridDatabaseInitializer()
+        success = await initializer.run()
         
         if success:
             logger.info("✅ Database initialization completed successfully")
@@ -274,7 +286,9 @@ def main():
         sys.exit(1)
     except Exception as e:
         logger.error(f"❌ Unexpected error during initialization: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main())

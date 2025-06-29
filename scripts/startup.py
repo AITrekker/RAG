@@ -50,14 +50,53 @@ def wait_for_qdrant(max_retries: int = 30, delay: int = 2) -> bool:
     logger.error("❌ Qdrant failed to become available within the expected time")
     return False
 
+def wait_for_postgres(max_retries: int = 30, delay: int = 2) -> bool:
+    """Wait for PostgreSQL to become available."""
+    logger.info("Waiting for PostgreSQL to become available...")
+    
+    # Get database connection details from environment
+    database_url = os.getenv("DATABASE_URL", "postgresql://rag_user:rag_password@postgres:5432/rag_db")
+    
+    for attempt in range(max_retries):
+        try:
+            from sqlalchemy import create_engine, text
+            
+            # Create a test engine
+            test_engine = create_engine(database_url, pool_pre_ping=True)
+            
+            # Test connection
+            with test_engine.connect() as conn:
+                result = conn.execute(text("SELECT 1"))
+                if result.scalar() == 1:
+                    logger.info("✅ PostgreSQL is available!")
+                    return True
+                    
+        except Exception as e:
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: PostgreSQL not ready yet ({e})")
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+    
+    logger.error("❌ PostgreSQL failed to become available within the expected time")
+    return False
+
 def is_database_empty() -> bool:
     """Check if the database is empty (no tenants)."""
     try:
         # Import here to avoid settings issues
-        from backend.core.tenant_service import TenantService
-        tenant_service = TenantService()
-        tenants = tenant_service.get_all_tenants()
-        return len(tenants) == 0
+        from src.backend.database import get_async_db
+        from src.backend.services.tenant_service import TenantService
+        
+        # Use asyncio to run the async check
+        import asyncio
+        
+        async def check_tenants():
+            async for db in get_async_db():
+                tenant_service = TenantService(db)
+                tenants = await tenant_service.list_tenants()
+                return len(tenants) == 0
+        
+        return asyncio.run(check_tenants())
+        
     except Exception as e:
         logger.warning(f"Could not check database state: {e}")
         # Assume empty if we can't check
@@ -69,14 +108,36 @@ def seed_database() -> Optional[dict]:
     
     try:
         # Import here to avoid settings issues
-        from backend.core.tenant_service import TenantService
-        tenant_service = TenantService()
+        from src.backend.database import get_async_db
+        from src.backend.services.tenant_service import TenantService
         
-        # Create admin tenant
-        result = tenant_service.create_tenant(
-            name="admin",
-            description="Default administrative tenant for the RAG platform"
-        )
+        # Use asyncio to run the async operations
+        import asyncio
+        
+        async def create_admin():
+            async for db in get_async_db():
+                tenant_service = TenantService(db)
+                
+                # Create admin tenant
+                admin_result = await tenant_service.create_tenant(
+                    name="System Admin",
+                    description="System administrator tenant",
+                    auto_sync=True,
+                    sync_interval=60
+                )
+                
+                # Get the created tenant
+                admin_tenant = await tenant_service.get_tenant_by_slug("admin")
+                
+                # Generate API key
+                api_key = await tenant_service.regenerate_api_key(admin_tenant.id)
+                
+                return {
+                    "tenant_id": str(admin_tenant.id),
+                    "api_key": api_key
+                }
+        
+        result = asyncio.run(create_admin())
         
         logger.info(f"✅ Created admin tenant with ID: {result['tenant_id']}")
         logger.info(f"✅ Generated admin API key: {result['api_key']}")
@@ -99,7 +160,7 @@ def write_env_config(admin_tenant_id: str, admin_api_key: str) -> bool:
                 existing_content = f.read()
         
         # Check if admin credentials already exist
-        if f"ADMIN_TENANT_ID={admin_tenant_id}" in existing_content:
+        if f"ADMIN_API_KEY={admin_api_key}" in existing_content:
             logger.info("Admin credentials already exist in .env file")
             return True
         
@@ -120,19 +181,24 @@ def main():
     """Main startup function."""
     logger.info("🚀 Starting RAG backend initialization...")
     
-    # Step 1: Wait for Qdrant
+    # Step 1: Wait for PostgreSQL
+    if not wait_for_postgres():
+        logger.error("Failed to connect to PostgreSQL. Exiting.")
+        sys.exit(1)
+    
+    # Step 2: Wait for Qdrant
     if not wait_for_qdrant():
         logger.error("Failed to connect to Qdrant. Exiting.")
         sys.exit(1)
     
-    # Step 2: Check if database is empty
+    # Step 3: Check if database is empty
     if is_database_empty():
         logger.info("Database is empty. Seeding with admin tenant...")
         
-        # Step 3: Seed the database
+        # Step 4: Seed the database
         seed_result = seed_database()
         if seed_result:
-            # Step 4: Write to .env
+            # Step 5: Write to .env
             write_env_config(
                 seed_result['tenant_id'],
                 seed_result['api_key']

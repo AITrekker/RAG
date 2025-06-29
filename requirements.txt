@@ -15,6 +15,8 @@ fastapi==0.115.13
 uvicorn[standard]==0.34.3
 python-multipart==0.0.9
 
+# Database drivers moved to requirements-base.txt for better caching
+
 # ===== CONFIGURATION & VALIDATION =====
 pydantic==2.11.7
 pydantic-settings==2.3.4

@@ -34,9 +34,30 @@ class Settings(BaseSettings):
         env="ALLOWED_ORIGINS"
     )
     
+    # Database settings
+    database_url: str = Field(default="postgresql://rag_user:rag_password@localhost:5432/rag_db", env="DATABASE_URL")
+    db_pool_size: int = Field(default=20, env="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=30, env="DB_MAX_OVERFLOW")
+    db_pool_timeout: int = Field(default=30, env="DB_POOL_TIMEOUT")
+    db_pool_recycle: int = Field(default=3600, env="DB_POOL_RECYCLE")
+    
     # Qdrant settings
     qdrant_url: str = Field(default="http://localhost:6333", env="QDRANT_URL")
     qdrant_api_key: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
+    
+    @property
+    def qdrant_host(self) -> str:
+        """Extract host from qdrant_url"""
+        from urllib.parse import urlparse
+        parsed = urlparse(self.qdrant_url)
+        return parsed.hostname or "localhost"
+    
+    @property
+    def qdrant_port(self) -> int:
+        """Extract port from qdrant_url"""
+        from urllib.parse import urlparse
+        parsed = urlparse(self.qdrant_url)
+        return parsed.port or 6333
     
     # Embedding model settings
     embedding_model: str = Field(

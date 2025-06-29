@@ -1,399 +1,304 @@
 """
-Delta Sync API endpoints for the Enterprise RAG Platform.
-
-This module provides endpoints for:
-- Delta sync operations with hash tracking
-- Sync status and history
-- Sync configuration
-- Document processing with metadata extraction
-
-All endpoints are scoped to the authenticated tenant.
+Sync Management API Routes - Using the new service architecture
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from typing import List, Optional, Dict, Any
-from datetime import datetime
-import uuid
-import hashlib
-import os
-from pathlib import Path
-import logging
+from uuid import UUID
 
-from src.backend.models.api_models import (
-    SyncTriggerRequest,
-    SyncResponse,
-    SyncHistoryResponse,
-    SyncConfigRequest,
-    SyncConfigResponse,
-    ErrorResponse
+from src.backend.dependencies import (
+    get_current_tenant_dep,
+    get_sync_service_dep
 )
-from src.backend.core.delta_sync import DeltaSync
-from src.backend.middleware.auth import get_current_tenant
-from src.backend.config.settings import get_settings
+from src.backend.services.sync_service import SyncService
+from src.backend.models.database import Tenant
 
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/syncs", tags=["Delta Sync"])
+router = APIRouter()
 
-# =============================================================================
-# DELTA SYNC OPERATIONS
-# =============================================================================
 
-@router.post("/", response_model=SyncResponse)
+@router.post("/")
 async def create_sync(
-    request: SyncTriggerRequest,
-    current_tenant: dict = Depends(get_current_tenant)
+    request: Dict[str, Any],
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Trigger a delta sync operation.
-    
-    Delta sync:
-    1. Scans tenant's document folder
-    2. Calculates file hashes
-    3. Compares with stored hashes
-    4. Only processes changed files (new, modified, deleted)
-    5. Extracts metadata and generates embeddings
-    6. Updates Qdrant collections
-    
-    Args:
-        request: Sync trigger details
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        SyncResponse: Sync operation details
-    """
+    """Create a new sync operation - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Individual sync operations not yet implemented",
+            "planned_features": [
+                "Sync ID tracking",
+                "Individual sync management",
+                "Sync operation cancellation"
+            ],
+            "status": "planned"
+        }
+    )
+
+
+@router.post("/trigger")
+async def trigger_sync(
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
+):
+    """Trigger a full sync for the authenticated tenant"""
     try:
-        tenant_id = current_tenant["tenant_id"]
-        sync_id = str(uuid.uuid4())
+        # TODO: Get actual user ID from authentication
+        user_id = UUID("00000000-0000-0000-0000-000000000000")  # Placeholder
         
-        # Create sync response
-        sync_response = SyncResponse(
-            sync_id=sync_id,
-            tenant_id=tenant_id,
-            status="pending",
-            started_at=datetime.utcnow(),
-            progress={"message": "Delta sync queued"}
+        sync_operation = await sync_service.trigger_full_sync(
+            tenant_id=current_tenant.id,
+            triggered_by=user_id
         )
         
-        # Start delta sync operation (async)
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        await delta_sync.start_delta_sync(
-            sync_id=sync_id,
-            force_full_sync=request.force_full_sync,
-            document_paths=request.document_paths
-        )
-        
-        return sync_response
+        return {
+            "sync_id": str(sync_operation.id),
+            "status": sync_operation.status,
+            "started_at": sync_operation.started_at.isoformat(),
+            "message": "Sync operation started successfully"
+        }
         
     except Exception as e:
-        logger.error(f"Failed to trigger delta sync: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to trigger delta sync: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to trigger sync: {str(e)}"
         )
 
-@router.get("/{sync_id}", response_model=SyncResponse)
+
+@router.get("/{sync_id}")
 async def get_sync(
     sync_id: str,
-    current_tenant: dict = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Get the status of a specific sync operation.
-    
-    Args:
-        sync_id: Sync operation ID
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        SyncResponse: Sync operation status with detailed progress
-    """
+    """Get specific sync operation status - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Individual sync operation tracking not yet implemented",
+            "planned_features": [
+                "Sync operation details",
+                "Progress tracking",
+                "Error reporting"
+            ],
+            "status": "planned"
+        }
+    )
+
+
+@router.get("/status")
+async def get_sync_status(
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
+):
+    """Get current sync status for the authenticated tenant"""
     try:
-        tenant_id = current_tenant["tenant_id"]
+        status_info = await sync_service.get_sync_status(current_tenant.id)
+        return status_info
         
-        # Get sync status from delta sync
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        sync_status = await delta_sync.get_sync_status(sync_id)
-        
-        if not sync_status:
-            raise HTTPException(status_code=404, detail="Sync operation not found")
-            
-        return sync_status
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to get sync status: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get sync status: {str(e)}"
         )
 
-@router.get("/history", response_model=SyncHistoryResponse)
+
+@router.get("/history")
 async def get_sync_history(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_tenant: dict = Depends(get_current_tenant)
+    limit: int = 50,
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Get sync operation history for the current tenant.
-    
-    Args:
-        page: Page number for pagination
-        page_size: Number of syncs per page
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        SyncHistoryResponse: Sync history with pagination
-    """
+    """Get sync history for the authenticated tenant"""
     try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Get sync history
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        syncs = await delta_sync.get_sync_history(page=page, page_size=page_size)
-        
-        return SyncHistoryResponse(
-            syncs=syncs,
-            total_count=len(syncs)  # This should be total count, not page count
+        operations = await sync_service.get_sync_history(
+            tenant_id=current_tenant.id,
+            limit=limit
         )
+        
+        history = [
+            {
+                "id": str(op.id),
+                "operation_type": op.operation_type,
+                "status": op.status,
+                "started_at": op.started_at.isoformat(),
+                "completed_at": op.completed_at.isoformat() if op.completed_at else None,
+                "files_processed": op.files_processed,
+                "files_added": op.files_added,
+                "files_updated": op.files_updated,
+                "files_deleted": op.files_deleted,
+                "error_message": op.error_message
+            }
+            for op in operations
+        ]
+        
+        return {"history": history}
         
     except Exception as e:
-        logger.error(f"Failed to get sync history: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get sync history: {str(e)}"
         )
+
 
 @router.delete("/{sync_id}")
 async def delete_sync(
     sync_id: str,
-    current_tenant: dict = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Cancel a running sync operation.
-    
-    Args:
-        sync_id: Sync operation ID
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        dict: Cancellation confirmation
-    """
+    """Cancel a sync operation - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Sync cancellation not yet implemented",
+            "planned_features": [
+                "Running sync cancellation",
+                "Sync operation cleanup",
+                "Cancellation confirmation"
+            ],
+            "status": "planned"
+        }
+    )
+
+
+@router.post("/detect-changes")
+async def detect_changes(
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
+):
+    """Detect file changes without executing sync"""
     try:
-        tenant_id = current_tenant["tenant_id"]
+        sync_plan = await sync_service.detect_file_changes(current_tenant.id)
         
-        # Cancel sync operation
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        success = await delta_sync.cancel_sync(sync_id)
+        changes = [
+            {
+                "change_type": change.change_type.value,
+                "file_path": change.file_path,
+                "file_id": str(change.file_id) if change.file_id else None,
+                "old_hash": change.old_hash,
+                "new_hash": change.new_hash,
+                "file_size": change.file_size
+            }
+            for change in sync_plan.changes
+        ]
         
-        if not success:
-            raise HTTPException(status_code=404, detail="Sync operation not found or not cancellable")
-            
-        return {"message": f"Sync {sync_id} cancelled successfully"}
+        return {
+            "total_changes": sync_plan.total_changes,
+            "new_files": len(sync_plan.new_files),
+            "updated_files": len(sync_plan.updated_files),
+            "deleted_files": len(sync_plan.deleted_files),
+            "changes": changes
+        }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Failed to cancel sync: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to cancel sync: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to detect changes: {str(e)}"
         )
 
-# =============================================================================
-# SYNC CONFIGURATION
-# =============================================================================
 
-@router.get("/config", response_model=SyncConfigResponse)
+@router.get("/config")
 async def get_sync_config(
-    current_tenant: dict = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Get current sync configuration for the tenant.
-    
-    Args:
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        SyncConfigResponse: Current sync configuration
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Get sync configuration
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        config = await delta_sync.get_sync_config()
-        
-        return config
-        
-    except Exception as e:
-        logger.error(f"Failed to get sync config: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get sync configuration: {str(e)}"
-        )
+    """Get sync configuration - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Sync configuration not yet implemented",
+            "planned_features": [
+                "Per-tenant sync settings",
+                "File type filters",
+                "Sync intervals",
+                "Auto-sync configuration"
+            ],
+            "status": "planned"
+        }
+    )
 
-@router.put("/config", response_model=SyncConfigResponse)
+
+@router.put("/config")
 async def update_sync_config(
-    request: SyncConfigRequest,
-    current_tenant: dict = Depends(get_current_tenant)
+    config: Dict[str, Any],
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Update sync configuration for the tenant.
-    
-    Args:
-        request: New sync configuration
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        SyncConfigResponse: Updated sync configuration
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Update sync configuration
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        updated_config = await delta_sync.update_sync_config(
-            auto_sync=request.auto_sync,
-            sync_interval=request.sync_interval,
-            document_paths=request.document_paths,
-            file_types=request.file_types,
-            chunk_size=request.chunk_size,
-            chunk_overlap=request.chunk_overlap
-        )
-        
-        return updated_config
-        
-    except Exception as e:
-        logger.error(f"Failed to update sync config: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update sync configuration: {str(e)}"
-        )
+    """Update sync configuration - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Sync configuration updates not yet implemented",
+            "planned_features": [
+                "Configuration validation",
+                "Settings persistence",
+                "Configuration history"
+            ],
+            "status": "planned"
+        }
+    )
 
-# =============================================================================
-# SYNC STATISTICS
-# =============================================================================
 
 @router.get("/stats")
 async def get_sync_stats(
-    current_tenant: dict = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Get sync statistics for the current tenant.
-    
-    Args:
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        dict: Sync statistics including file counts, processing times, etc.
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Get sync statistics
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        stats = await delta_sync.get_sync_stats()
-        
-        return {
-            "tenant_id": tenant_id,
-            "total_files": stats.get("total_files", 0),
-            "processed_files": stats.get("processed_files", 0),
-            "pending_files": stats.get("pending_files", 0),
-            "failed_files": stats.get("failed_files", 0),
-            "last_sync": stats.get("last_sync"),
-            "next_sync": stats.get("next_sync"),
-            "sync_duration_avg": stats.get("sync_duration_avg", 0),
-            "files_processed_avg": stats.get("files_processed_avg", 0),
-            "embedding_count": stats.get("embedding_count", 0),
-            "metadata_count": stats.get("metadata_count", 0)
+    """Get sync statistics - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Sync statistics not yet implemented",
+            "planned_features": [
+                "Sync performance metrics",
+                "File processing statistics",
+                "Error rate tracking",
+                "Sync frequency analysis"
+            ],
+            "status": "planned"
         }
-        
-    except Exception as e:
-        logger.error(f"Failed to get sync stats: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get sync statistics: {str(e)}"
-        )
+    )
 
-# =============================================================================
-# DOCUMENT PROCESSING
-# =============================================================================
 
-@router.post("/documents", response_model=dict)
+@router.post("/documents")
 async def create_document_processing(
-    request: dict,
-    current_tenant: dict = Depends(get_current_tenant)
+    request: Dict[str, Any],
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Process a single document manually.
-    
-    Args:
-        request: Document processing request with 'file_path' field
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        dict: Processing result
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        file_path = request.get("file_path")
-        
-        if not file_path:
-            raise HTTPException(status_code=400, detail="file_path is required")
-        
-        # Process single document
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        result = await delta_sync.process_single_document(file_path)
-        
-        return {
-            "file_path": file_path,
-            "success": result.success,
-            "message": result.message,
-            "metadata": result.metadata,
-            "embedding_count": result.embedding_count,
-            "processing_time": result.processing_time
+    """Create document processing job - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Document-specific sync operations not yet implemented",
+            "planned_features": [
+                "Individual document processing",
+                "Document sync tracking",
+                "Processing queue management"
+            ],
+            "status": "planned"
         }
-        
-    except Exception as e:
-        logger.error(f"Failed to process document {file_path}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to process document: {str(e)}"
-        )
+    )
+
 
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: str,
-    current_tenant: dict = Depends(get_current_tenant)
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """
-    Remove a document from Qdrant (does not delete the file).
-    
-    Args:
-        document_id: Document ID to remove
-        current_tenant: Current tenant (from auth)
-        
-    Returns:
-        dict: Removal result
-    """
-    try:
-        tenant_id = current_tenant["tenant_id"]
-        
-        # Remove document from Qdrant
-        delta_sync = DeltaSync(tenant_id=tenant_id)
-        result = await delta_sync.remove_document_by_id(document_id)
-        
-        return {
-            "document_id": document_id,
-            "success": result.success,
-            "message": result.message,
-            "removed_embeddings": result.removed_embeddings,
-            "removed_metadata": result.removed_metadata
+    """Delete document and sync - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Document deletion sync not yet implemented",
+            "planned_features": [
+                "Document removal from vector store",
+                "Embedding cleanup",
+                "Sync history tracking"
+            ],
+            "status": "planned"
         }
-        
-    except Exception as e:
-        logger.error(f"Failed to remove document {document_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to remove document: {str(e)}"
-        ) 
+    )

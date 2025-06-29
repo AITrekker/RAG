@@ -10,7 +10,7 @@ from fastapi.security import HTTPBearer
 import logging
 from datetime import datetime, timedelta
 
-from src.backend.core.tenant_service import TenantService, get_tenant_service
+from src.backend.services.tenant_service import TenantService, get_tenant_service
 from src.backend.models.api_models import (
     TenantResponse, 
     TenantListResponse, 

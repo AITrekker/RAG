@@ -1,0 +1,130 @@
+# Delta Sync Configuration for Tenant File Processing
+delta_sync:
+  
+  # Data Sources
+  data:
+    tenant_uploads_path: "./data/uploads/{tenant_name}"  # {tenant_name} will be replaced
+    temp_processing_path: "./data/temp/processing"
+    backup_path: "./data/backups"
+    logs_path: "./data/logs"
+  
+  # File Processing
+  file_processing:
+    hash_algorithm: "sha256"  # Options: md5, sha1, sha256, blake2b
+    max_file_size_mb: 100
+    supported_extensions: [".txt", ".pdf", ".docx", ".md", ".html", ".csv"]
+    ignored_patterns: [".*", "~*", "*.tmp", "*.lock"]
+    
+    # Document chunking
+    chunk_size: 1000
+    chunk_overlap: 200
+    chunk_strategy: "recursive"  # Options: simple, recursive, semantic
+  
+  # Embedding Generation  
+  embeddings:
+    model_name: "sentence-transformers/all-MiniLM-L6-v2"
+    device: "cuda"  # Options: cuda, cpu, auto
+    gpu_device_id: 0  # For multi-GPU systems
+    batch_size: 32   # Adjust based on GPU memory
+    max_sequence_length: 512
+    vector_dimensions: 384
+    normalize_embeddings: true
+    
+    # GPU Memory Management
+    memory_management:
+      clear_cache_after_batch: true
+      max_gpu_memory_gb: 14  # Leave 2GB for system on RTX 5070
+      enable_mixed_precision: true
+  
+  # Sync Behavior
+  sync:
+    mode: "manual"  # Options: manual, auto, scheduled
+    concurrency: 4  # Parallel file processing threads
+    batch_commit_size: 100  # Files to process before committing to DB
+    
+    # Retry Logic
+    retry_attempts: 3
+    retry_backoff_seconds: [1, 5, 15]
+    skip_failed_files: true
+    
+    # Progress Reporting
+    progress_update_frequency: 10  # Every N files
+    log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  
+  # Vector Database (Qdrant)
+  vector_db:
+    collection_prefix: "tenant_"  # Will become tenant_{tenant_id}_documents
+    distance_metric: "cosine"     # Options: cosine, dot, euclidean
+    vector_size: 384
+    
+    # Indexing Configuration
+    indexing:
+      hnsw_config:
+        m: 16
+        ef_construct: 200
+        full_scan_threshold: 10000
+      
+      # Payload indexing for metadata filtering
+      payload_indexes:
+        - field: "tenant_id"
+          type: "keyword"
+        - field: "file_path"
+          type: "keyword"
+        - field: "file_type"
+          type: "keyword"
+        - field: "created_at"
+          type: "datetime"
+  
+  # Metadata Storage
+  metadata:
+    # File attributes to store
+    file_attributes:
+      - "file_name"
+      - "file_path"
+      - "file_size"
+      - "mime_type"
+      - "created_at"
+      - "modified_at"
+      - "file_hash"
+    
+    # Document attributes to extract
+    document_attributes:
+      - "word_count"
+      - "chunk_index"
+      - "chunk_total"
+      - "language"  # Auto-detect if possible
+    
+    # Custom metadata fields for RAG
+    rag_metadata:
+      store_file_preview: true      # First 500 chars
+      store_chunk_context: true     # Surrounding chunks info
+      extract_keywords: false       # Requires additional processing
+      store_processing_timestamp: true
+  
+  # Database Schema
+  database:
+    # File tracking table
+    file_tracking_table: "tenant_file_tracking"
+    
+    # Cleanup settings
+    cleanup:
+      keep_deleted_records_days: 30
+      vacuum_frequency_days: 7
+      
+    # Performance
+    batch_insert_size: 1000
+    connection_pool_size: 5
+  
+  # Performance Tuning
+  performance:
+    # Memory limits
+    max_memory_usage_gb: 8
+    file_read_buffer_size_mb: 64
+    
+    # I/O Settings
+    concurrent_file_reads: 8
+    use_memory_mapping: false  # For very large files
+    
+    # Caching
+    enable_hash_cache: true
+    hash_cache_size_mb: 100

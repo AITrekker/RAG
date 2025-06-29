@@ -13,42 +13,237 @@ A production-ready Retrieval-Augmented Generation (RAG) platform designed for en
 
 ## 📁 Architecture
 
+### **🏗️ Hybrid PostgreSQL + Qdrant Architecture**
+
+The platform implements a hybrid architecture that separates concerns between metadata management and vector operations:
+
+```
+PostgreSQL (Control Plane)          Qdrant (Vector Store)
+├── tenants & users                  ├── tenant_{id}_documents
+├── files & metadata                 ├── minimal payload 
+├── sync operations                  ├── vector embeddings
+├── access control                   └── search indices
+└── audit trails                     
+```
+
+### **🔐 Service Layer Architecture**
+
+The platform is built with a clean service layer pattern:
+
+- **🔑 Authentication Service**: API key authentication with tenant isolation
+- **📁 File Management Service**: Upload, CRUD operations, metadata tracking
+- **🔄 Delta Sync Service**: Hash-based change detection and sync operations
+- **🧠 Embedding Service**: Document processing and embedding generation
+- **🔍 RAG Service**: Query processing and vector search
+
 ### File Storage Structure
 ```
 data/
-├── tenants/
-│   ├── tenant-1/
-│   │   ├── documents/          # Tenant's document folder
-│   │   │   ├── report.pdf
-│   │   │   ├── manual.docx
-│   │   │   └── data.csv
-│   │   └── uploads/           # Temporary upload area
-│   └── tenant-2/
-│       ├── documents/
-│       └── uploads/
+├── uploads/
+│   ├── {tenant-id}/
+│   │   ├── document1.pdf
+│   │   ├── report.docx
+│   │   └── data.csv
+│   └── {tenant-id-2}/
+│       ├── manual.pdf
+│       └── notes.txt
 ```
 
-### Qdrant Collections
-```
-tenant_{tenant_id}_documents     # Document metadata + file hashes
-tenant_{tenant_id}_embeddings    # Document chunks with embeddings
-tenant_{tenant_id}_sync_state    # Sync state and file hashes
+### Database Schema
+```sql
+-- PostgreSQL Tables
+├── tenants                    # Tenant management & API keys
+├── users                      # User accounts (future)
+├── files                      # File metadata & sync status
+├── embedding_chunks           # Chunk metadata linking to Qdrant
+├── sync_operations           # Sync history & tracking
+└── file_access_control       # Access permissions (future)
+
+-- Qdrant Collections
+└── tenant_{tenant_id}_documents   # Vector embeddings with minimal payload
 ```
 
 ## 🔄 Workflow
 
-1. **File Management**: Manually copy files to tenant document folders
-2. **Delta Sync**: API triggers sync to process new/modified files
-3. **Query Processing**: RAG queries with metadata filtering
-4. **Results**: Rich answers with source citations and metadata
+1. **🔑 Authentication**: API key-based tenant authentication
+2. **📤 File Upload**: Upload files via API or copy to tenant directories
+3. **🔄 Delta Sync**: Automatic hash-based change detection and processing
+4. **🧠 Processing**: Document chunking and embedding generation
+5. **🔍 Query**: RAG queries with metadata filtering and tenant isolation
+6. **📊 Results**: Rich answers with source citations and confidence scores
+
+### **✅ Current Implementation Status**
+
+The following core services are **fully implemented and functional**:
+
+- ✅ **Authentication Service**: API key authentication with tenant isolation
+- ✅ **File Management Service**: Upload, CRUD operations, hash calculation
+- ✅ **Delta Sync Service**: Hash-based change detection and sync tracking
+- ✅ **Database Layer**: PostgreSQL schema with full tenant isolation
+- ✅ **API Routes**: RESTful endpoints for files, sync, query operations
+- ✅ **Service Architecture**: Clean dependency injection and service layer
+- ✅ **Embedding Service**: Full ML pipeline with sentence-transformers + fallbacks
+- ✅ **RAG Service**: Vector search + answer generation with Qdrant integration
+- ✅ **ML Pipeline**: Complete document processing, embedding, and retrieval
+
+### **🧪 Testing**
+
+Comprehensive test suites are provided for different scenarios:
+
+```bash
+# Setup demo tenants with API keys (run this first!)
+python scripts/setup_demo_tenants.py
+
+# Test demo tenant authentication and basic functionality
+python scripts/test_demo_tenants.py
+
+# Test service layer and database (requires running backend)
+python scripts/test_services.py
+
+# Test HTTP API endpoints and authentication
+python scripts/test_api_endpoints.py
+
+# Test complete ML pipeline (embeddings, RAG, vector search) 
+python scripts/test_ml_pipeline.py
+
+# Test with your existing tenant data (legacy test)
+python scripts/test_existing_tenants.py
+```
+
+**Recommended Testing Workflow:**
+1. Start backend: `docker-compose up -d`
+2. Setup demo: `python scripts/setup_demo_tenants.py`
+3. Test functionality: `python scripts/test_demo_tenants.py`
+4. Use API keys from `demo_tenant_keys.json` for manual testing
+
+### **🎯 Production-Ready Features**
+
+The platform now includes complete **production-grade ML capabilities**:
+
+- **📄 Document Processing**: PDF, DOCX, text files with smart chunking
+- **🧠 ML Models**: sentence-transformers integration with graceful fallbacks
+- **🔍 Vector Search**: Qdrant integration with similarity search and filtering
+- **💬 RAG Pipeline**: Complete retrieval-augmented generation with source citations
+- **⚡ Performance**: Batch processing, caching, and optimized database queries
+- **🛡️ Security**: Tenant isolation at all levels (database, vectors, file system)
+
+### **🏢 Testing with Your Company Data**
+
+Your project includes **3 pre-configured tenants** with company documents:
+
+```
+data/uploads/
+├── tenant1/
+│   ├── company_mission.txt
+│   ├── our_culture.txt
+│   ├── vacation_policy.txt
+│   └── working_style.txt
+├── tenant2/ [same files]
+└── tenant3/ [same files]
+```
+
+#### **Quick Start Test**
+
+1. **Start the backend**:
+   ```bash
+   docker-compose up -d
+   # OR
+   python scripts/run_backend.py
+   ```
+
+2. **Setup demo tenants** (Creates 3 demo tenants with API keys):
+   ```bash
+   python scripts/setup_demo_tenants.py
+   ```
+
+   This will:
+   - ✅ Create admin tenant with system access
+   - ✅ Create 3 demo tenants (tenant1, tenant2, tenant3) with pro plans
+   - ✅ Generate API keys and save to `demo_tenant_keys.json`
+   - ✅ Save admin API key to `.env` file
+   - ✅ Discover company documents in `/data/uploads/` directories
+
+3. **Test demo tenants**:
+   ```bash
+   python scripts/test_demo_tenants.py
+   ```
+
+   This will:
+   - ✅ Test authentication for all demo tenants
+   - ✅ Verify file API endpoints are working
+   - ✅ Test tenant isolation and access control
+   - ✅ Provide ready-to-use API keys for manual testing
+
+#### **Manual Testing Commands**
+
+After running the demo setup, use the API keys from `demo_tenant_keys.json`:
+
+```bash
+# Example API keys (use the actual keys from your demo_tenant_keys.json):
+TENANT1_KEY="tenant_tenant1_xxxxx"
+ADMIN_KEY="tenant_admin_xxxxx"
+
+# Test admin access (list all tenants)
+curl -H 'X-API-Key: '$ADMIN_KEY'' http://localhost:8000/api/v1/auth/tenants
+
+# Test tenant authentication
+curl -H 'X-API-Key: '$TENANT1_KEY'' http://localhost:8000/api/v1/auth/tenant
+
+# List files for a tenant
+curl -H 'X-API-Key: '$TENANT1_KEY'' http://localhost:8000/api/v1/files
+
+# Upload a file (if you want to test file upload)
+curl -X POST 'http://localhost:8000/api/v1/files/upload' \
+  -H 'X-API-Key: '$TENANT1_KEY'' \
+  -F 'file=@path/to/your/document.pdf'
+
+# Trigger document sync
+curl -X POST 'http://localhost:8000/api/v1/sync/trigger' \
+  -H 'X-API-Key: '$TENANT1_KEY''
+
+# Ask about company culture
+curl -X POST 'http://localhost:8000/api/v1/query' \
+  -H 'X-API-Key: '$TENANT1_KEY'' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "What is our company culture?"
+  }'
+```
+
+#### **Expected Results**
+
+With the demo setup, you should see:
+- 🏢 **4 demo tenants** (admin + 3 company tenants) with proper isolation
+- 🔑 **API key authentication** working for all tenants  
+- 📄 **Company documents** detected in `/data/uploads/tenant[1-3]/`
+- 📊 **File API responses** showing empty file lists (until documents are uploaded/synced)
+- 🔒 **Access control** ensuring each tenant only sees their own data
+- 💾 **Persistent storage** with API keys saved for reuse
+
+**Next Steps After Demo Setup:**
+- Upload documents via API or copy files to tenant directories
+- Trigger sync operations to process documents into embeddings
+- Test RAG queries with actual content
 
 ## 🛠️ API Structure
 
+### **🔑 Authentication**
+All API endpoints (except `/health` and `/setup`) require authentication via API key:
+```bash
+# Header-based authentication
+curl -H "X-API-Key: your-api-key" http://localhost:8000/api/v1/files
+
+# Bearer token authentication  
+curl -H "Authorization: Bearer your-api-key" http://localhost:8000/api/v1/files
+```
+
 ### Core Endpoints
-- **`/api/v1/health`** - System health checks
+- **`/api/v1/health`** - System health checks (no auth required)
+- **`/api/v1/files`** - File management with upload and CRUD operations  
+- **`/api/v1/sync`** - Delta sync operations and change detection
 - **`/api/v1/query`** - RAG query processing with metadata filtering
-- **`/api/v1/sync`** - Delta sync operations and document processing
-- **`/api/v1/setup`** - System initialization
+- **`/api/v1/auth`** - Tenant and API key management
+- **`/api/v1/setup`** - System initialization (no auth required)
 - **`/api/v1/admin`** - System administration
 
 ### Key Features
@@ -78,18 +273,49 @@ python -m venv .venv
 # On Unix/MacOS:
 source .venv/bin/activate
 
-# Run setup (installs dependencies, creates .env, sets up directories)
+# Install dependencies (includes ML packages)
+pip install -r requirements.txt
+
+# Optional: Install additional ML packages for full functionality
+pip install sentence-transformers qdrant-client torch
+pip install PyPDF2 python-docx nltk  # For document processing
+
+# Run setup (creates .env, sets up directories)
 python setup.py
 
-# Start Qdrant
-docker-compose up -d qdrant
+# Start services
+docker-compose up -d
 
-# Initialize the database
-python scripts/db-init.py
-
-# Start the backend
-python scripts/run_backend.py
+# Test with your existing tenant data
+python scripts/test_existing_tenants.py
 ```
+
+### **🧠 ML Dependencies**
+
+The platform includes **graceful fallbacks**, so it works with or without ML packages:
+
+**Core Requirements** (always installed):
+- FastAPI, SQLAlchemy, PostgreSQL drivers
+- Basic text processing and file handling
+
+**ML Enhancement Packages** (optional but recommended):
+```bash
+# For real embedding generation (vs mock embeddings)
+pip install sentence-transformers torch
+
+# For vector search (vs database fallback)  
+pip install qdrant-client
+
+# For document processing (vs plain text only)
+pip install PyPDF2 python-docx nltk
+```
+
+**Performance Modes**:
+- 🚀 **Full ML Mode**: All packages installed, real embeddings + vector search
+- ⚡ **Hybrid Mode**: Some packages, partial ML functionality  
+- 🔧 **Fallback Mode**: No ML packages, structured text responses
+
+The system automatically detects available packages and adapts accordingly!
 
 ### 3. Alternative Setup Options
 
