@@ -20,24 +20,35 @@ Prerequisites:
 import asyncio
 import json
 import os
+import shutil
 import socket
 import sys
 from pathlib import Path
 from typing import Dict, Any
 from dotenv import load_dotenv
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Determine paths based on script location
+SCRIPT_DIR = Path(__file__).parent.absolute()
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+
+# Add project root to path  
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Setup environment BEFORE importing backend modules
 def setup_database_url():
     """Setup DATABASE_URL for current environment (Docker vs local)"""
-    load_dotenv()
+    env_file = PROJECT_ROOT / ".env"
+    load_dotenv(env_file)
     
-    # Get credentials from .env
-    postgres_user = os.getenv("POSTGRES_USER", "rag_user")
-    postgres_password = os.getenv("POSTGRES_PASSWORD", "rag_password")
+    # Get credentials from .env (no fallbacks for security)
+    postgres_user = os.getenv("POSTGRES_USER")
+    postgres_password = os.getenv("POSTGRES_PASSWORD") 
     postgres_db = "rag_db"  # This is consistent in docker-compose.yml
+    
+    if not postgres_user or not postgres_password:
+        print(f"❌ Missing database credentials in {env_file}")
+        print("   Required: POSTGRES_USER, POSTGRES_PASSWORD")
+        sys.exit(1)
     
     # Detect environment
     if is_running_in_docker():
@@ -125,10 +136,14 @@ class DemoTenantSetup:
         api_keys = {}
         
         for config in self.tenant_configs:
-            print(f"\n--- Setting up {config['name']} ---")
+            tenant_name = config["name"]
+            print(f"\n--- Setting up {tenant_name} ---")
+            
+            # Generate expected slug (same logic as TenantService)
+            expected_slug = tenant_name.lower().replace(" ", "_").replace("-", "_")
             
             # Check if tenant exists
-            tenant = await tenant_service.get_tenant_by_slug(config["slug"])
+            tenant = await tenant_service.get_tenant_by_slug(expected_slug)
             
             if not tenant:
                 # Create tenant
@@ -138,43 +153,70 @@ class DemoTenantSetup:
                     auto_sync=True,
                     sync_interval=60
                 )
-                tenant = await tenant_service.get_tenant_by_slug(config["slug"])
-                print(f"✓ Created tenant: {tenant_result['name']}")
+                # Get the created tenant by its ID (from the result)
+                tenant = await tenant_service.get_tenant_by_id(tenant_result['id'])
+                print(f"✓ Created tenant: {tenant.name}")
             else:
                 print(f"✓ Found existing tenant: {tenant.name}")
             
             # Generate API key
             api_key = await tenant_service.regenerate_api_key(tenant.id)
-            api_keys[config["slug"]] = api_key
+            api_keys[tenant.slug] = api_key
             
             print(f"  - Tenant ID: {tenant.id}")
+            print(f"  - Slug: {tenant.slug}")
             print(f"  - API Key: {api_key[:20]}...")
             
-            # Check for data directory
-            data_dir = Path(f"./data/uploads/{config['slug']}")
-            if data_dir.exists():
-                files = list(data_dir.glob("*.txt"))
-                print(f"  - Data files: {len(files)} files found")
-                for file in files:
-                    print(f"    * {file.name}")
+            # Copy demo files to tenant's UUID directory
+            demo_files_copied = self.copy_demo_files(tenant.id, config["name"])
+            if demo_files_copied > 0:
+                print(f"  - Demo files: {demo_files_copied} files copied")
             else:
-                print(f"  - ⚠️ Data directory not found: {data_dir}")
+                print(f"  - ⚠️ No demo files found for {config['name']}")
         
         return api_keys
     
+    def copy_demo_files(self, tenant_id, tenant_name: str) -> int:
+        """Copy demo files from demo-data directory to tenant's UUID directory"""
+        demo_source_dir = PROJECT_ROOT / "demo-data" / tenant_name
+        tenant_upload_dir = PROJECT_ROOT / "data" / "uploads" / str(tenant_id)
+        
+        if not demo_source_dir.exists():
+            return 0
+            
+        # Create tenant upload directory if it doesn't exist
+        tenant_upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        files_copied = 0
+        for demo_file in demo_source_dir.glob("*"):
+            if demo_file.is_file():
+                dest_file = tenant_upload_dir / demo_file.name
+                # Only copy if destination doesn't exist or is older
+                if not dest_file.exists() or demo_file.stat().st_mtime > dest_file.stat().st_mtime:
+                    shutil.copy2(demo_file, dest_file)
+                    files_copied += 1
+                    print(f"    * Copied: {demo_file.name}")
+                else:
+                    print(f"    * Skipped: {demo_file.name} (already exists)")
+        
+        return files_copied
+    
     def save_api_keys(self, api_keys: Dict[str, str]) -> None:
         """Save API keys to JSON file for reuse"""
-        keys_file = Path("demo_tenant_keys.json")
+        keys_file = PROJECT_ROOT / "demo_tenant_keys.json"
         
         # Create a structured format
         tenant_keys = {}
         for slug, api_key in api_keys.items():
-            config = next(c for c in self.tenant_configs if c["slug"] == slug)
-            tenant_keys[config["name"]] = {
-                "api_key": api_key,
-                "slug": slug,
-                "description": config["description"]
-            }
+            # Find config by matching slug to generated name
+            config = next((c for c in self.tenant_configs 
+                          if c["name"].lower().replace(" ", "_").replace("-", "_") == slug), None)
+            if config:
+                tenant_keys[config["name"]] = {
+                    "api_key": api_key,
+                    "slug": slug,
+                    "description": config["description"]
+                }
         
         try:
             with open(keys_file, 'w') as f:
@@ -215,8 +257,10 @@ class DemoTenantSetup:
             print("\n🔑 Quick Reference:")
             print(f"Admin API Key: {self.admin_api_key[:20]}...")
             for slug, api_key in self.api_keys.items():
-                config = next(c for c in self.tenant_configs if c["slug"] == slug)
-                print(f"{config['name']}: {api_key[:20]}...")
+                config = next((c for c in self.tenant_configs 
+                              if c["name"].lower().replace(" ", "_").replace("-", "_") == slug), None)
+                if config:
+                    print(f"{config['name']}: {api_key[:20]}...")
             
             print("\n🧪 Test Commands:")
             print("# Test admin access:")

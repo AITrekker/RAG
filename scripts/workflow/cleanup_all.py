@@ -16,25 +16,38 @@ from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Determine absolute paths based on script location
+SCRIPT_DIR = Path(__file__).parent.absolute()
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+UPLOADS_DIR = PROJECT_ROOT / "data" / "uploads"
+
+# Load environment variables from correct location
+load_dotenv(ENV_FILE)
+
+# Validate required environment variables
+required_env_vars = ["POSTGRES_USER", "POSTGRES_PASSWORD"]
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+if missing_vars:
+    print(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
+    print(f"   Please ensure your .env file at {ENV_FILE} contains these variables")
+    print(f"   Script location: {SCRIPT_DIR}")
+    print(f"   Project root: {PROJECT_ROOT}")
+    sys.exit(1)
 
 # Configuration from environment
 POSTGRES_CONFIG = {
     "host": "localhost",
     "port": 5432,
     "database": "rag_db",
-    "user": os.getenv("POSTGRES_USER", "rag_user"),
-    "password": os.getenv("POSTGRES_PASSWORD", "rag_password")
+    "user": os.getenv("POSTGRES_USER"),
+    "password": os.getenv("POSTGRES_PASSWORD")
 }
 
 QDRANT_CONFIG = {
     "host": "localhost",
     "port": 6333
 }
-
-UPLOADS_DIR = Path("./data/uploads")
-ENV_FILE = Path(".env")
 
 
 async def cleanup_postgres():
@@ -221,7 +234,7 @@ def cleanup_containers():
 
 async def verify_cleanup():
     """Verify that cleanup was successful."""
-    print("🔍 Verifying cleanup...")
+    print("Verifying cleanup...")
     
     try:
         # Check PostgreSQL (only if containers are still running)
@@ -307,20 +320,20 @@ async def main():
         
         print("\n🎉 Cleanup completed successfully!")
         print("Next steps:")
-        print("1. Start fresh system: docker-compose up -d")
-        print("   This will automatically:")
-        print("   - Start PostgreSQL & Qdrant")
-        print("   - Run init container (creates tables & admin tenant)")
-        print("   - Start backend API server")
-        print("2. Verify system is healthy: docker-compose ps")
-        print("3. Verify admin setup: python scripts/verify_admin_setup.py")
-        print("   (This automatically checks credentials, database, and API access)")
+        print("➡️ 1. Start fresh system: docker-compose up -d")
+        print("    This will automatically:")
+        print("    - Start PostgreSQL & Qdrant")
+        print("    - Run init container (creates tables & admin tenant)")
+        print("    - Start backend API server")
+        print("➡️ 2. Verify system is healthy: docker-compose ps")
+        print("    (This automatically checks credentials, database, and API access)")
         print("")
         print("📝 Notes:")
         print("- Containers were removed to reset deployment lifecycle")
         print("- Init container will run fresh and create admin tenant")
-        print("- Upload files were preserved during cleanup")
-        print("- Use scripts/setup_admin.py only for manual admin recreation if needed")
+        print("➡️ Upload files were preserved during cleanup. You can remove them manually")
+        print("- For manual admin checks: python scripts/verify_admin_setup.py")
+        print("")
         
         # Verify cleanup
         await verify_cleanup()

@@ -72,8 +72,13 @@ def setup_admin_tenant() -> bool:
         admin_api_key = os.getenv("ADMIN_API_KEY")
         
         if admin_tenant_id and admin_api_key:
-            logger.info("✅ Admin credentials already exist in .env file")
-            return True
+            # Verify the tenant actually exists in the database
+            if verify_admin_tenant_exists(admin_tenant_id):
+                logger.info("✅ Admin tenant verified in database")
+                return True
+            else:
+                logger.info("⚠️ Admin credentials exist but tenant not found in database, recreating...")
+                return create_admin_tenant_with_existing_credentials(admin_tenant_id, admin_api_key)
         
         # Create admin tenant directly
         return create_admin_tenant_inline()
@@ -81,6 +86,74 @@ def setup_admin_tenant() -> bool:
     except Exception as e:
         logger.error(f"❌ Failed to setup admin tenant: {e}")
         return False
+
+
+def verify_admin_tenant_exists(admin_tenant_id: str) -> bool:
+    """Verify if admin tenant exists in database."""
+    import asyncio
+    
+    async def async_verify():
+        try:
+            from src.backend.database import get_async_db
+            from src.backend.services.tenant_service import TenantService
+            
+            async for db in get_async_db():
+                tenant_service = TenantService(db)
+                tenant = await tenant_service.get_tenant_by_id(admin_tenant_id)
+                return tenant is not None
+                
+        except Exception as e:
+            logger.error(f"Error verifying admin tenant: {e}")
+            return False
+    
+    return asyncio.run(async_verify())
+
+
+def create_admin_tenant_with_existing_credentials(admin_tenant_id: str, admin_api_key: str) -> bool:
+    """Recreate admin tenant with existing credentials."""
+    import asyncio
+    
+    async def async_recreate():
+        try:
+            from src.backend.database import get_async_db
+            from src.backend.services.tenant_service import TenantService
+            from src.backend.models.database import Tenant
+            from uuid import UUID
+            
+            async for db in get_async_db():
+                tenant_service = TenantService(db)
+                
+                # Create tenant with the existing ID and API key
+                tenant = Tenant(
+                    id=UUID(admin_tenant_id),
+                    name="Admin",
+                    slug="admin",
+                    description="System administrator tenant",
+                    plan_tier="enterprise",
+                    storage_limit_gb=1000,
+                    max_users=10,
+                    settings={},
+                    is_active=True,
+                    auto_sync=True,
+                    sync_interval=300,
+                    api_key=admin_api_key,
+                    api_key_hash=tenant_service._hash_api_key(admin_api_key),
+                    api_key_name="System Generated"
+                )
+                
+                # Add to database
+                db.add(tenant)
+                await db.commit()
+                await db.refresh(tenant)
+                
+                logger.info(f"✅ Admin tenant recreated with existing credentials: {tenant.id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error recreating admin tenant: {e}")
+            return False
+    
+    return asyncio.run(async_recreate())
 
 
 def create_admin_tenant_inline() -> bool:
