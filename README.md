@@ -4,122 +4,79 @@ A production-ready Retrieval-Augmented Generation (RAG) platform designed for en
 
 ## 🚀 Features
 
-- **Multi-tenant Architecture**: Isolated data and processing per tenant
-- **Delta Sync**: Efficient document processing with hash-based change detection
-- **Rich Metadata**: Comprehensive document metadata extraction and filtering
-- **Complete RAG Pipeline**: Query processing, vector retrieval, context ranking, and response generation
-- **Hybrid Storage**: PostgreSQL for metadata + Qdrant for vector embeddings
-- **Multi-Format Support**: PDF, HTML, TXT, DOCX with extensible document processing
-- **API-First Design**: RESTful API with comprehensive documentation
-- **Production Ready**: Health checks, monitoring, graceful fallbacks, and error handling
-- **Init Container Pattern**: Automated database setup and admin tenant creation
+- **Multi-tenant Architecture**: Isolated data and processing per tenant.
+- **Delta Sync**: Efficient document processing with hash-based change detection.
+- **Hybrid Storage**: PostgreSQL for metadata + Qdrant for vector embeddings.
+- **API-First Design**: RESTful API for all operations.
+- **Production Ready**: Init container pattern, health checks, and monitoring.
+- **Extensible**: Supports multiple document formats (PDF, HTML, TXT).
 
-## 🏃 Quick Start
+## ⚡ Quick Start
+
+This guide will get the entire platform running on your local machine with a single command.
 
 ### Prerequisites
 - Docker and Docker Compose
-- GPU support (optional, for faster embedding generation)
 
-### ⚡ Quick Start (Recommended)
+### 1. Start the System
+
+Clone the repository and use Docker Compose to build and run the services:
 
 ```bash
-# 1. Clone and navigate to project
 git clone <repository-url>
 cd RAG
-
-# 2. Start the complete system (one command!)
 docker-compose up -d
-
-# 3. Verify everything is working
-python scripts/verify_admin_setup.py
 ```
+This command starts the backend, frontend, PostgreSQL, and Qdrant services. The first time it runs, an `init` container will set up the database and create an admin user.
 
-**What happens automatically:**
-1. **PostgreSQL & Qdrant** start and become healthy
-2. **Init container runs once** to create database tables and admin tenant
-3. **Backend API** starts and connects to everything
-4. **Admin credentials** are saved to `.env` file
+### 2. Verify the Setup
 
-### 🔄 Init Container Pattern
-
-The RAG system uses the **init container pattern** for production-ready deployments:
-
-- **First startup**: Init container runs and sets up everything (database schema, admin tenant)
-- **Subsequent startups**: Init container skips running (shows as "Exited (0)")
-- **This is normal and expected!** Don't worry if the init container isn't running after the first time
+Check that all containers are running and healthy. It's normal for the `rag_init` container to show `Exited (0)` after its first successful run.
 
 ```bash
-# Normal container status after first startup:
 docker-compose ps
-
-# Expected output:
-# rag_init     -> "Exited (0)"     ✅ Normal - ran once successfully
-# rag_postgres -> "Up (healthy)"   ✅ Running
-# rag_qdrant   -> "Up (healthy)"   ✅ Running  
-# rag_backend  -> "Up (healthy)"   ✅ Running
 ```
-
-### 🛠️ Manual Step-by-Step Startup
-
-If you need to run each step manually:
-
-```bash
-# 1. Start dependencies
-docker-compose up postgres qdrant -d
-
-# 2. Wait for services to be healthy (10-15 seconds)
-docker-compose ps  # Both should show "healthy"
-
-# 3. Run init container (one-time setup)
-docker-compose up init
-
-# 4. Start backend API
-docker-compose up backend -d
-
-# 5. Verify everything works
-python scripts/verify_admin_setup.py
+Expected output:
 ```
-
-### ✅ Verification
-
-**Single verification command (recommended):**
+NAME                STATUS              PORTS
+rag_backend         Up (healthy)        0.0.0.0:8000->8000/tcp
+rag_frontend        Up (running)        0.0.0.0:3000->3000/tcp
+rag_postgres        Up (healthy)        0.0.0.0:5432->5432/tcp
+rag_qdrant          Up (healthy)        0.0.0.0:6333->6333/tcp, 0.0.0.0:6334->6334/tcp
+rag_init            Exited (0)
+```
+You can also run the verification script to confirm the admin user was created correctly:
 ```bash
 python scripts/verify_admin_setup.py
 ```
 
-This automatically checks:
-- ✅ Database connection and schema
-- ✅ Admin tenant creation
-- ✅ API key configuration
-- ✅ Environment variables
-- ✅ Cross-platform compatibility (Linux/Mac/Windows)
+### 3. Access Services
 
-**Manual verification commands:**
+- **Frontend UI**: [http://localhost:3000](http://localhost:3000)
+- **Backend API Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Qdrant Dashboard**: [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
+
+## 📚 Documentation
+
+For more detailed information, please refer to our comprehensive guides in the `docs` folder.
+
+- **[Architecture](docs/ARCHITECTURE.md)**: A deep dive into the system's design, components, and data flows.
+- **[API Reference](docs/API_REFERENCE.md)**: The complete reference for all API endpoints, including authentication and data models.
+- **[Operations Guide](docs/OPERATIONS_GUIDE.md)**: A handbook for setup, deployment, Docker configuration, and managing demo tenants.
+
+## 🧪 Testing
+
+To run the full suite of tests, first set up the demo tenants and then execute the primary test script.
+
 ```bash
-# Check container status
-docker-compose ps
+# 1. Set up demo tenants and API keys
+python scripts/workflow/setup_demo_tenants.py
 
-# Quick admin credential check
-grep ADMIN_ .env                              # Linux/Mac
-Get-Content .env | Select-String "ADMIN_"     # PowerShell
-
-# Test API access (Linux/Mac)
-curl -H 'X-API-Key: YOUR_ADMIN_KEY' http://localhost:8000/api/v1/auth/tenants
-
-# Test API access (PowerShell)  
-curl 'http://localhost:8000/api/v1/auth/tenants' -Headers @{'X-API-Key'='YOUR_ADMIN_KEY'}
+# 2. Run system tests
+python scripts/test_system.py
 ```
 
-### ✅ Startup Sequence Status
-
-The production-ready startup sequence is now **fully operational**:
-
-1. **Init Container** ✅ - Database setup and admin tenant creation completed successfully
-2. **Backend Startup** ✅ - All health checks pass, service layer initialized  
-3. **API Endpoints** ✅ - Admin authentication working, all routes accessible
-4. **ML Pipeline** ✅ - Embedding models loaded, RAG services ready
-
-**Current Status**: All components are operational and ready for production deployment.
+For more details on testing, see the `tests/README.md` file.
 
 ## 📁 Architecture
 

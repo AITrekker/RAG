@@ -41,10 +41,11 @@ graph TB
 ### **Core Architecture Principles**
 
 1. **Hybrid Data Management**: PostgreSQL for structured metadata, Qdrant for vector operations
-2. **Multi-Tenant Isolation**: Complete data separation at all architectural layers
-3. **GPU Acceleration**: Optimized for RTX 5070 with 6.5x performance improvement
-4. **Delta Sync**: Hash-based change detection for efficient document synchronization
-5. **Production Ready**: Comprehensive error handling, monitoring, and scalability
+2. **Environment Separation**: Complete isolation between production, staging, test, and development
+3. **Multi-Tenant Isolation**: Complete data separation at all architectural layers within environments
+4. **GPU Acceleration**: Optimized for RTX 5070 with 6.5x performance improvement
+5. **Delta Sync**: Hash-based change detection for efficient document synchronization
+6. **Production Ready**: Comprehensive error handling, monitoring, and scalability
 
 ---
 
@@ -75,19 +76,48 @@ file_sync_history (file_id, sync_operation_id, change_type, processing_time, ...
 ```
 
 #### **Critical Design Elements**
-- **Tenant Isolation**: All tables include `tenant_id` with row-level security
+- **Environment Separation**: Separate databases per environment (production, staging, test, development)
+- **Tenant Isolation**: All tables include `tenant_id` with row-level security within environments
 - **File Hash Tracking**: SHA-256 hashes enable efficient delta sync
 - **Vector ID Mapping**: `qdrant_point_id` field links to Qdrant vectors
 - **Audit Trail**: Comprehensive tracking of all operations
 
+### **Environment Separation Strategy**
+
+The system uses complete environment isolation for maximum safety and compliance:
+
+#### **Database Structure**
+```bash
+# PostgreSQL Databases
+rag_db_production   # Live customer data
+rag_db_staging      # Pre-production testing  
+rag_db_test         # Automated testing
+rag_db_development  # Local development
+
+# Qdrant Collections  
+documents_production
+documents_staging
+documents_test
+documents_development
+```
+
+#### **Environment Usage Patterns**
+
+| Environment | Who | When | Data | Characteristics |
+|-------------|-----|------|------|----------------|
+| **Development** | Developers | Daily coding, debugging | Synthetic/sample data | Reset daily, small dataset |
+| **Test** | CI/CD | Every commit, regression | Known test datasets | Clean slate each run |
+| **Staging** | QA, Product | Pre-release, UAT | Production-like (sanitized) | Stable for weeks |
+| **Production** | End users | Live system | Real customer data | Never reset, full backup |
+
 ### **Qdrant (Vector Store)**
 
-Qdrant handles all vector storage and semantic search operations with tenant-isolated collections.
+Qdrant handles all vector storage and semantic search operations with environment-separated collections.
 
 #### **Collection Structure**
 ```python
-# Collection naming pattern
-collection_name = f"tenant_{tenant_id}_documents"
+# Collection naming pattern (per environment)
+collection_name = f"documents_{environment}"  # documents_production, documents_test, etc.
 
 # Vector configuration
 {
@@ -105,13 +135,15 @@ collection_name = f"tenant_{tenant_id}_documents"
         "chunk_id": str(chunk_id),     # PostgreSQL chunk reference
         "file_id": str(file_id),       # PostgreSQL file reference
         "tenant_id": str(tenant_id),   # Tenant isolation
+        "environment": environment,     # Environment isolation
         "chunk_index": 0               # Chunk position in file
     }
 }
 ```
 
 #### **Key Features**
-- **Tenant Collections**: Isolated vector collections per tenant
+- **Environment Isolation**: Separate collections per environment prevent data mixing
+- **Tenant Isolation**: Payload-based filtering within environments
 - **Minimal Payload**: Only essential metadata stored with vectors
 - **High Performance**: Optimized for sub-second search responses
 - **Scalability**: Handles 100K+ vectors per tenant efficiently
@@ -760,3 +792,64 @@ The Enterprise RAG Platform delivers a **production-ready, scalable architecture
 The architecture has been battle-tested through comprehensive validation and delivers enterprise-grade RAG capabilities suitable for production deployment at scale.
 
 **Status**: ✅ **Production Ready** - Full functionality validated and operational
+
+---
+
+## 🔄 Data & Service Flow
+
+This section outlines the critical data flows for querying and document processing, which is essential for understanding tenant isolation and debugging integration issues.
+
+### 🎯 Query Flow (The Critical Path)
+
+```mermaid
+graph TD
+    A[User enters query in UI] --> B[QueryInterface.tsx]
+    B --> C[Set tenant in API client header]
+    C --> D[API POST /query with X-Tenant-Id]
+    D --> E[get_tenant_from_header validates tenant]
+    E --> F[RAG Pipeline processes query]
+    F --> G[Vector search in tenant collection]
+    G --> H[LLM generates response]
+    H --> I[Return structured answer]
+```
+
+#### Frontend → Backend Handoff
+
+The correct handoff of the tenant ID from the frontend to the backend is critical for data isolation.
+
+**Frontend (`TenantContext.tsx`):**
+```typescript
+// Frontend sets tenant header
+useEffect(() => {
+  if (tenant?.id) {
+    apiClient.setTenantId(tenant.id);  // Sets X-Tenant-Id header
+  }
+}, [tenant]);
+```
+
+**Backend (`dependencies.py`):**
+```python
+# Backend extracts tenant from header
+async def get_tenant_from_header(request: Request) -> str:
+    tenant_id = request.headers.get("X-Tenant-Id")  # Must match exactly
+```
+
+### 🗄️ Document Upload Flow
+
+```mermaid
+graph TD
+    A[Upload document] --> B[Process with tenant context]
+    B --> C[Store in PostgreSQL with tenant_id]
+    C --> D[Chunk document content]
+    D --> E[Generate embeddings]
+    E --> F[Store in tenant vector collection]
+```
+
+### 🚨 Common Failure Points
+
+| Issue | Symptom | Root Cause |
+|-------|---------|------------|
+| "No relevant information" | UI gets empty results | Frontend not setting `X-Tenant-Id` header |
+| Cross-tenant data leakage | Wrong search results | Collection routing bug in the backend |
+| 500 errors on search | Server crashes | LLM service async/sync mismatch |
+| Inconsistent results | Works sometimes | Race conditions in tenant context |
