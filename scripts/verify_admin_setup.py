@@ -12,13 +12,60 @@ Usage:
 import asyncio
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Setup environment BEFORE importing backend modules
+def setup_database_url():
+    """Setup DATABASE_URL for current environment (Docker vs local)"""
+    load_dotenv()
+    
+    # Get credentials from .env
+    postgres_user = os.getenv("POSTGRES_USER", "rag_user")
+    postgres_password = os.getenv("POSTGRES_PASSWORD", "rag_password")
+    postgres_db = "rag_db"  # This is consistent in docker-compose.yml
+    
+    # Detect environment
+    if is_running_in_docker():
+        # Use Docker network hostname
+        database_url = f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/{postgres_db}"
+        print("🐳 Detected Docker environment")
+    else:
+        # Use localhost for local execution
+        database_url = f"postgresql://{postgres_user}:{postgres_password}@localhost:5432/{postgres_db}"
+        print("💻 Detected local environment")
+    
+    # Set the environment variable for database connections
+    os.environ["DATABASE_URL"] = database_url
+    print(f"📡 Database URL: {database_url}")
+
+def is_running_in_docker() -> bool:
+    """Detect if we're running inside a Docker container"""
+    try:
+        # Check for Docker-specific files/environments
+        if os.path.exists("/.dockerenv"):
+            return True
+        
+        # Check if hostname resolves to postgres (Docker network)
+        try:
+            socket.gethostbyname("postgres")
+            return True
+        except socket.gaierror:
+            return False
+            
+    except Exception:
+        return False
+
+# Setup database URL BEFORE importing backend modules
+setup_database_url()
+
+# Now import backend modules with correct DATABASE_URL
 from src.backend.database import get_async_db
 from src.backend.services.tenant_service import TenantService
 
@@ -27,6 +74,12 @@ class AdminVerifier:
     def __init__(self):
         self.admin_tenant = None
         self.admin_api_key = None
+        self.admin_tenant_id = None
+        
+        # Load environment variables (already loaded in setup_database_url, but ensure they're available)
+        load_dotenv()
+        self.env_admin_tenant_id = os.getenv("ADMIN_TENANT_ID")
+        self.env_admin_api_key = os.getenv("ADMIN_API_KEY")
         
     async def verify_admin_tenant(self) -> bool:
         """Verify admin tenant exists and is properly configured"""
@@ -74,7 +127,7 @@ class AdminVerifier:
         return True
     
     def check_env_file(self) -> bool:
-        """Check if admin API key is stored in .env file"""
+        """Check if admin credentials are stored in .env file"""
         print("\n=== Checking .env File ===")
         
         env_file = Path(".env")
@@ -82,32 +135,25 @@ class AdminVerifier:
             print("❌ .env file not found")
             return False
         
-        try:
-            with open(env_file, 'r') as f:
-                content = f.read()
-            
-            if "ADMIN_API_KEY=" in content:
-                # Extract the API key
-                for line in content.split('\n'):
-                    if line.startswith("ADMIN_API_KEY="):
-                        stored_key = line.split('=', 1)[1].strip()
-                        print(f"✅ Admin API key found in .env:")
-                        print(f"   - Key: {stored_key[:20]}...")
-                        
-                        # Verify it matches the database
-                        if self.admin_api_key and stored_key == self.admin_api_key:
-                            print("✅ API key matches database")
-                        else:
-                            print("⚠️  API key in .env doesn't match database")
-                        
-                        return True
-                
-                print("❌ ADMIN_API_KEY not found in .env file")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Error reading .env file: {e}")
+        if not self.env_admin_tenant_id or not self.env_admin_api_key:
+            print("❌ Admin credentials not found in .env file")
+            print("   Run: python scripts/setup_admin.py")
             return False
+        
+        print(f"✅ Admin tenant ID found in .env:")
+        print(f"   - ID: {self.env_admin_tenant_id}")
+        print(f"✅ Admin API key found in .env:")
+        print(f"   - Key: {self.env_admin_api_key[:20]}...")
+        
+        # Verify it matches the database if we have database data
+        if self.admin_api_key:
+            if self.env_admin_api_key == self.admin_api_key:
+                print("✅ API key matches database")
+            else:
+                print("⚠️  API key in .env doesn't match database")
+                print("   This might indicate the database was reset without updating .env")
+        
+        return True
     
     def check_demo_keys_file(self) -> bool:
         """Check if demo tenant keys are stored"""
@@ -135,10 +181,11 @@ class AdminVerifier:
             return False
     
     async def test_admin_api_access(self) -> bool:
-        """Test admin API access"""
+        """Test admin API access using .env credentials"""
         print("\n=== Testing Admin API Access ===")
         
-        if not self.admin_api_key:
+        api_key = self.env_admin_api_key or self.admin_api_key
+        if not api_key:
             print("❌ No admin API key available for testing")
             return False
         
@@ -147,7 +194,7 @@ class AdminVerifier:
             
             # Test basic admin endpoint
             url = "http://localhost:8000/api/v1/auth/tenants"
-            headers = {"X-API-Key": self.admin_api_key}
+            headers = {"X-API-Key": api_key}
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
@@ -193,20 +240,25 @@ class AdminVerifier:
         """Show commands to verify the setup"""
         print("\n=== Verification Commands ===")
         
+        api_key = self.env_admin_api_key or self.admin_api_key
+        
         print("🔍 Manual Verification:")
         print("1. Check database directly:")
-        print("   psql -d your_database -c \"SELECT name, slug, api_key, api_key_name FROM tenants WHERE slug = 'admin';\"")
+        print("   psql -d rag_db -c \"SELECT name, slug, api_key, api_key_name FROM tenants WHERE slug = 'admin';\"")
         
         print("\n2. Test API access:")
-        if self.admin_api_key:
-            print(f"   curl -H 'X-API-Key: {self.admin_api_key}' http://localhost:8000/api/v1/auth/tenants")
+        if api_key:
+            print(f"   curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/auth/tenants")
         
         print("\n3. Check setup status:")
         print("   curl http://localhost:8000/api/v1/setup/status")
         
         print("\n4. List all tenants (admin only):")
-        if self.admin_api_key:
-            print(f"   curl -H 'X-API-Key: {self.admin_api_key}' http://localhost:8000/api/v1/admin/tenants")
+        if api_key:
+            print(f"   curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/admin/tenants")
+        
+        print("\n5. Environment status:")
+        print("   Check .env file for ADMIN_TENANT_ID and ADMIN_API_KEY")
     
     async def run_verification(self) -> bool:
         """Run complete verification"""
@@ -233,17 +285,24 @@ class AdminVerifier:
         # Summary
         print("\n" + "=" * 50)
         print("📋 Verification Summary:")
-        print(f"   ✅ Admin tenant: {'OK' if self.admin_tenant else 'FAILED'}")
-        print(f"   ✅ API key: {'OK' if self.admin_api_key else 'FAILED'}")
-        print(f"   ✅ .env file: {'OK' if env_ok else 'FAILED'}")
+        print(f"   ✅ Admin tenant (DB): {'OK' if self.admin_tenant else 'FAILED'}")
+        print(f"   ✅ Admin API key (DB): {'OK' if self.admin_api_key else 'FAILED'}")
+        print(f"   ✅ .env credentials: {'OK' if env_ok else 'FAILED'}")
         print(f"   ✅ Demo keys: {'OK' if demo_keys_ok else 'FAILED'}")
         print(f"   ✅ API access: {'OK' if api_ok else 'FAILED'}")
         
-        if self.admin_tenant and self.admin_api_key and env_ok:
+        # Check if we have credentials from either source
+        has_credentials = (self.admin_tenant and self.admin_api_key) or (self.env_admin_tenant_id and self.env_admin_api_key)
+        
+        if has_credentials and env_ok:
             print("\n🎉 Admin setup is properly configured!")
+            if self.env_admin_tenant_id and self.env_admin_api_key:
+                print("   Using credentials from .env file (recommended)")
             return True
         else:
             print("\n⚠️  Some issues found. Check the details above.")
+            if not self.env_admin_tenant_id or not self.env_admin_api_key:
+                print("   Run: python scripts/setup_admin.py")
             return False
 
 

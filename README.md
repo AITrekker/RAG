@@ -12,6 +12,114 @@ A production-ready Retrieval-Augmented Generation (RAG) platform designed for en
 - **Multi-Format Support**: PDF, HTML, TXT, DOCX with extensible document processing
 - **API-First Design**: RESTful API with comprehensive documentation
 - **Production Ready**: Health checks, monitoring, graceful fallbacks, and error handling
+- **Init Container Pattern**: Automated database setup and admin tenant creation
+
+## 🏃 Quick Start
+
+### Prerequisites
+- Docker and Docker Compose
+- GPU support (optional, for faster embedding generation)
+
+### ⚡ Quick Start (Recommended)
+
+```bash
+# 1. Clone and navigate to project
+git clone <repository-url>
+cd RAG
+
+# 2. Start the complete system (one command!)
+docker-compose up -d
+
+# 3. Verify everything is working
+python scripts/verify_admin_setup.py
+```
+
+**What happens automatically:**
+1. **PostgreSQL & Qdrant** start and become healthy
+2. **Init container runs once** to create database tables and admin tenant
+3. **Backend API** starts and connects to everything
+4. **Admin credentials** are saved to `.env` file
+
+### 🔄 Init Container Pattern
+
+The RAG system uses the **init container pattern** for production-ready deployments:
+
+- **First startup**: Init container runs and sets up everything (database schema, admin tenant)
+- **Subsequent startups**: Init container skips running (shows as "Exited (0)")
+- **This is normal and expected!** Don't worry if the init container isn't running after the first time
+
+```bash
+# Normal container status after first startup:
+docker-compose ps
+
+# Expected output:
+# rag_init     -> "Exited (0)"     ✅ Normal - ran once successfully
+# rag_postgres -> "Up (healthy)"   ✅ Running
+# rag_qdrant   -> "Up (healthy)"   ✅ Running  
+# rag_backend  -> "Up (healthy)"   ✅ Running
+```
+
+### 🛠️ Manual Step-by-Step Startup
+
+If you need to run each step manually:
+
+```bash
+# 1. Start dependencies
+docker-compose up postgres qdrant -d
+
+# 2. Wait for services to be healthy (10-15 seconds)
+docker-compose ps  # Both should show "healthy"
+
+# 3. Run init container (one-time setup)
+docker-compose up init
+
+# 4. Start backend API
+docker-compose up backend -d
+
+# 5. Verify everything works
+python scripts/verify_admin_setup.py
+```
+
+### ✅ Verification
+
+**Single verification command (recommended):**
+```bash
+python scripts/verify_admin_setup.py
+```
+
+This automatically checks:
+- ✅ Database connection and schema
+- ✅ Admin tenant creation
+- ✅ API key configuration
+- ✅ Environment variables
+- ✅ Cross-platform compatibility (Linux/Mac/Windows)
+
+**Manual verification commands:**
+```bash
+# Check container status
+docker-compose ps
+
+# Quick admin credential check
+grep ADMIN_ .env                              # Linux/Mac
+Get-Content .env | Select-String "ADMIN_"     # PowerShell
+
+# Test API access (Linux/Mac)
+curl -H 'X-API-Key: YOUR_ADMIN_KEY' http://localhost:8000/api/v1/auth/tenants
+
+# Test API access (PowerShell)  
+curl 'http://localhost:8000/api/v1/auth/tenants' -Headers @{'X-API-Key'='YOUR_ADMIN_KEY'}
+```
+
+### ✅ Startup Sequence Status
+
+The production-ready startup sequence is now **fully operational**:
+
+1. **Init Container** ✅ - Database setup and admin tenant creation completed successfully
+2. **Backend Startup** ✅ - All health checks pass, service layer initialized  
+3. **API Endpoints** ✅ - Admin authentication working, all routes accessible
+4. **ML Pipeline** ✅ - Embedding models loaded, RAG services ready
+
+**Current Status**: All components are operational and ready for production deployment.
 
 ## 📁 Architecture
 

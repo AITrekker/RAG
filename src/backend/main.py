@@ -27,6 +27,7 @@ from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitor
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 from src.backend.middleware.api_key_auth import api_key_auth_middleware
 from src.backend.database import startup_database_checks, close_database
+from src.backend.startup import wait_for_dependencies, verify_system_requirements, run_health_checks
 
 # Import service modules for initialization
 from src.backend.services.tenant_service import TenantService
@@ -50,19 +51,45 @@ rag_service: RAGService = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
-    logger.info("Starting Enterprise RAG Platform API...")
+    logger.info("🚀 Starting Enterprise RAG Platform API...")
     
     global tenant_service, file_service, embedding_service, sync_service, rag_service
     
     try:
-        logger.info("Running database startup checks...")
+        # Step 1: Wait for external dependencies
+        logger.info("🔍 Waiting for external dependencies...")
+        deps_success, deps_error = wait_for_dependencies()
+        if not deps_success:
+            logger.error(f"❌ Dependency check failed: {deps_error}")
+            raise RuntimeError(f"Failed to connect to dependencies: {deps_error}")
+        
+        # Step 2: Verify system requirements
+        logger.info("🔍 Verifying system requirements...")
+        req_success, req_error = verify_system_requirements()
+        if not req_success:
+            logger.error(f"❌ System requirements check failed: {req_error}")
+            raise RuntimeError(f"System requirements not met: {req_error}")
+        
+        # Step 3: Run health checks
+        logger.info("🏥 Running health checks...")
+        health_success, health_results = await run_health_checks()
+        if not health_success:
+            logger.error("❌ Health checks failed!")
+            for check_name, result in health_results.items():
+                if not result["success"]:
+                    logger.error(f"   {check_name}: {result['message']}")
+            raise RuntimeError("Health checks failed")
+        
+        # Step 4: Original database startup checks and service initialization
+        logger.info("🗄️ Running database startup checks...")
         await startup_database_checks()
         
-        logger.info("Initializing monitoring system...")
+        # Step 5: Initialize monitoring system
+        logger.info("📊 Initializing monitoring system...")
         initialize_monitoring()
         
-        # Initialize service architecture
-        logger.info("Initializing service layer...")
+        # Step 6: Initialize service architecture
+        logger.info("⚙️ Initializing service layer...")
         from src.backend.database import get_async_db
         
         # Get database session for service initialization
@@ -90,7 +117,7 @@ async def lifespan(app: FastAPI):
         app.state.sync_service = sync_service
         app.state.rag_service = rag_service
         
-        logger.info("API startup completed successfully")
+        logger.info("🎉 API startup completed successfully!")
         
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}", exc_info=True)

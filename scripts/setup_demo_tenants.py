@@ -5,24 +5,75 @@ Demo Tenants Setup Script
 Creates 3 demo tenants based on your existing data structure:
 - tenant1, tenant2, tenant3 with company documents
 - Saves API keys to demo_tenant_keys.json for reuse
-- Creates admin tenant and saves admin API key to .env
+- Uses existing admin credentials from .env file
 
 This script works with the new PostgreSQL + service architecture.
 
 Usage:
     python scripts/setup_demo_tenants.py
+
+Prerequisites:
+    - Run 'docker-compose up -d' to start the system
+    - Init container should have created admin tenant automatically
 """
 
 import asyncio
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from typing import Dict, Any
+from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Setup environment BEFORE importing backend modules
+def setup_database_url():
+    """Setup DATABASE_URL for current environment (Docker vs local)"""
+    load_dotenv()
+    
+    # Get credentials from .env
+    postgres_user = os.getenv("POSTGRES_USER", "rag_user")
+    postgres_password = os.getenv("POSTGRES_PASSWORD", "rag_password")
+    postgres_db = "rag_db"  # This is consistent in docker-compose.yml
+    
+    # Detect environment
+    if is_running_in_docker():
+        # Use Docker network hostname
+        database_url = f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/{postgres_db}"
+        print("🐳 Detected Docker environment")
+    else:
+        # Use localhost for local execution
+        database_url = f"postgresql://{postgres_user}:{postgres_password}@localhost:5432/{postgres_db}"
+        print("💻 Detected local environment")
+    
+    # Set the environment variable for database connections
+    os.environ["DATABASE_URL"] = database_url
+    print(f"📡 Database URL: {database_url}")
+
+def is_running_in_docker() -> bool:
+    """Detect if we're running inside a Docker container"""
+    try:
+        # Check for Docker-specific files/environments
+        if os.path.exists("/.dockerenv"):
+            return True
+        
+        # Check if hostname resolves to postgres (Docker network)
+        try:
+            socket.gethostbyname("postgres")
+            return True
+        except socket.gaierror:
+            return False
+            
+    except Exception:
+        return False
+
+# Setup database URL BEFORE importing backend modules
+setup_database_url()
+
+# Now import backend modules with correct DATABASE_URL
 from src.backend.database import get_async_db
 from src.backend.services.tenant_service import TenantService
 
@@ -31,49 +82,41 @@ class DemoTenantSetup:
     def __init__(self):
         self.tenant_configs = [
             {
-                "name": "Company Demo 1", 
-                "slug": "tenant1",
+                "name": "tenant1", 
                 "description": "Demo tenant 1 with company documents"
             },
             {
-                "name": "Company Demo 2", 
-                "slug": "tenant2", 
+                "name": "tenant2", 
                 "description": "Demo tenant 2 with company documents"
             },
             {
-                "name": "Company Demo 3", 
-                "slug": "tenant3",
+                "name": "tenant3",
                 "description": "Demo tenant 3 with company documents"
             }
         ]
         self.api_keys = {}
-        self.admin_key = None
+        self.admin_tenant_id = None
+        self.admin_api_key = None
         
-    async def setup_admin_tenant(self, tenant_service: TenantService) -> str:
-        """Setup admin tenant and return API key"""
-        print("\n=== Setting Up Admin Tenant ===")
+        # Load environment variables
+        load_dotenv()
+        self.admin_tenant_id = os.getenv("ADMIN_TENANT_ID")
+        self.admin_api_key = os.getenv("ADMIN_API_KEY")
         
-        # Check if admin tenant exists
-        admin_tenant = await tenant_service.get_tenant_by_slug("admin")
+    def check_admin_credentials(self) -> bool:
+        """Check if admin credentials are available in .env"""
+        print("\n=== Checking Admin Credentials ===")
         
-        if not admin_tenant:
-            # Create admin tenant
-            admin_result = await tenant_service.create_tenant(
-                name="System Admin",
-                description="System administrator tenant",
-                auto_sync=True,
-                sync_interval=60
-            )
-            admin_tenant = await tenant_service.get_tenant_by_slug("admin")
-            print(f"✓ Created admin tenant: {admin_result['name']}")
-        else:
-            print(f"✓ Found existing admin tenant: {admin_tenant.name}")
+        if not self.admin_tenant_id or not self.admin_api_key:
+            print("❌ Admin credentials not found in .env file")
+            print("   The init container should have created them automatically.")
+            print("   Please ensure you've run: docker-compose up -d")
+            print("   Or verify setup with: python scripts/verify_admin_setup.py")
+            return False
         
-        # Generate/regenerate API key
-        api_key = await tenant_service.regenerate_api_key(admin_tenant.id)
-        print(f"✓ Admin API key: {api_key[:20]}...")
-        
-        return api_key
+        print(f"✅ Admin tenant ID: {self.admin_tenant_id}")
+        print(f"✅ Admin API key: {self.admin_api_key[:20]}...")
+        return True
     
     async def setup_demo_tenants(self, tenant_service: TenantService) -> Dict[str, str]:
         """Setup demo tenants and return API keys"""
@@ -140,56 +183,19 @@ class DemoTenantSetup:
         except Exception as e:
             print(f"\n✗ Failed to save API keys: {e}")
     
-    def save_admin_key(self, admin_key: str) -> None:
-        """Save admin API key to .env file"""
-        env_file = Path(".env")
-        
-        try:
-            # Read existing content
-            existing_content = ""
-            if env_file.exists():
-                with open(env_file, 'r') as f:
-                    existing_content = f.read()
-            
-            # Check if admin key already exists
-            admin_key_line = f"ADMIN_API_KEY={admin_key}"
-            
-            if "ADMIN_API_KEY=" in existing_content:
-                # Replace existing key
-                lines = existing_content.split('\n')
-                new_lines = []
-                for line in lines:
-                    if line.startswith("ADMIN_API_KEY="):
-                        new_lines.append(admin_key_line)
-                    else:
-                        new_lines.append(line)
-                
-                with open(env_file, 'w') as f:
-                    f.write('\n'.join(new_lines))
-                print(f"✓ Updated admin API key in {env_file}")
-            else:
-                # Add new key
-                with open(env_file, 'a') as f:
-                    if existing_content and not existing_content.endswith('\n'):
-                        f.write('\n')
-                    f.write(f"\n# Admin API Key (auto-generated)\n")
-                    f.write(f"{admin_key_line}\n")
-                print(f"✓ Added admin API key to {env_file}")
-                
-        except Exception as e:
-            print(f"✗ Failed to save admin key to .env: {e}")
     
     async def run_setup(self) -> bool:
         """Run the complete demo setup"""
         print("🚀 Demo Tenants Setup")
         print("=" * 50)
         
+        # Check admin credentials first
+        if not self.check_admin_credentials():
+            return False
+        
         try:
             async for db in get_async_db():
                 tenant_service = TenantService(db)
-                
-                # Setup admin tenant
-                self.admin_key = await self.setup_admin_tenant(tenant_service)
                 
                 # Setup demo tenants  
                 self.api_keys = await self.setup_demo_tenants(tenant_service)
@@ -197,26 +203,24 @@ class DemoTenantSetup:
                 break  # Only need first session
             
             # Save keys to files
-            self.save_admin_key(self.admin_key)
             self.save_api_keys(self.api_keys)
             
             # Summary
             print("\n" + "=" * 50)
             print("🎉 Demo Setup Complete!")
-            print(f"✓ Admin tenant configured")
-            print(f"✓ {len(self.api_keys)} demo tenants configured")
-            print(f"✓ API keys saved to demo_tenant_keys.json")
-            print(f"✓ Admin key saved to .env file")
+            print(f"✅ Using existing admin tenant")
+            print(f"✅ {len(self.api_keys)} demo tenants configured")
+            print(f"✅ API keys saved to demo_tenant_keys.json")
             
             print("\n🔑 Quick Reference:")
-            print(f"Admin API Key: {self.admin_key[:20]}...")
+            print(f"Admin API Key: {self.admin_api_key[:20]}...")
             for slug, api_key in self.api_keys.items():
                 config = next(c for c in self.tenant_configs if c["slug"] == slug)
                 print(f"{config['name']}: {api_key[:20]}...")
             
             print("\n🧪 Test Commands:")
             print("# Test admin access:")
-            print(f"curl -H 'X-API-Key: {self.admin_key}' http://localhost:8000/api/v1/auth/tenants")
+            print(f"curl -H 'X-API-Key: {self.admin_api_key}' http://localhost:8000/api/v1/auth/tenants")
             print("\n# Test tenant access:")
             first_key = list(self.api_keys.values())[0]
             print(f"curl -H 'X-API-Key: {first_key}' http://localhost:8000/api/v1/files")
