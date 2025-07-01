@@ -19,7 +19,15 @@ def verify_database_schema() -> Tuple[bool, str]:
     
     try:
         from sqlalchemy import create_engine, text
-        database_url = os.getenv("DATABASE_URL")
+        
+        # Use environment-specific database URL
+        environment = os.getenv("RAG_ENVIRONMENT", "development")
+        database_url = os.getenv(f"DATABASE_URL_{environment.upper()}")
+        
+        # Fallback to old DATABASE_URL for backwards compatibility
+        if not database_url:
+            database_url = os.getenv("DATABASE_URL")
+            
         if not database_url:
             return False, "DATABASE_URL environment variable not set"
         
@@ -69,7 +77,15 @@ def verify_admin_tenant() -> Tuple[bool, str]:
         
         # Simple database check using sync connection for verification
         from sqlalchemy import create_engine, text
-        database_url = os.getenv("DATABASE_URL")
+        
+        # Use environment-specific database URL
+        environment = os.getenv("RAG_ENVIRONMENT", "development")
+        database_url = os.getenv(f"DATABASE_URL_{environment.upper()}")
+        
+        # Fallback to old DATABASE_URL for backwards compatibility
+        if not database_url:
+            database_url = os.getenv("DATABASE_URL")
+            
         if not database_url:
             return False, "DATABASE_URL environment variable not set"
         

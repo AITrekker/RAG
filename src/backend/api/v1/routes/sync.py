@@ -44,12 +44,9 @@ async def trigger_sync(
 ):
     """Trigger a full sync for the authenticated tenant"""
     try:
-        # TODO: Get actual user ID from authentication
-        user_id = UUID("00000000-0000-0000-0000-000000000000")  # Placeholder
-        
         sync_operation = await sync_service.trigger_full_sync(
             tenant_id=current_tenant.id,
-            triggered_by=user_id
+            triggered_by=None  # Allow NULL for system-triggered syncs
         )
         
         return {
@@ -60,6 +57,8 @@ async def trigger_sync(
         }
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to trigger sync: {str(e)}"

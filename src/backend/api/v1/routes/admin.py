@@ -96,6 +96,18 @@ async def create_tenant(
         if not tenant:
             raise HTTPException(status_code=500, detail="Failed to retrieve created tenant")
             
+        # Include the API key from the creation result
+        api_keys = []
+        if result.get("api_key"):
+            api_keys = [ApiKeyResponse(
+                id=f"key_{tenant.id}",
+                name="Default Key",
+                key_prefix=result["api_key"][:8] + "..." + result["api_key"][-8:] if len(result["api_key"]) > 16 else result["api_key"],
+                is_active=True,
+                created_at=tenant.created_at,
+                expires_at=None
+            )]
+            
         return TenantResponse(
             id=str(tenant.id),
             name=tenant.name,
@@ -104,9 +116,10 @@ async def create_tenant(
             created_at=tenant.created_at,
             auto_sync=tenant.auto_sync,
             sync_interval=tenant.sync_interval,
-            api_keys=[],
+            api_keys=api_keys,
             document_count=0,
-            storage_used_mb=0.0
+            storage_used_mb=0.0,
+            api_key=result.get("api_key")  # Add the full API key for demo setup
         )
         
     except HTTPException:
@@ -752,6 +765,11 @@ async def get_audit_events(
     return [SyncEventResponse(**event) for event in events]
 
 # =============================================================================
+# SYNC MANAGEMENT (ADMIN)
+# =============================================================================
+
+
+# =============================================================================
 # DEMO MANAGEMENT
 # =============================================================================
 
@@ -958,4 +976,78 @@ async def cleanup_demo_environment(
         
     except Exception as e:
         logger.error(f"Failed to cleanup demo environment: {e}", exc_info=True)
-        raise handle_exception(e, endpoint="cleanup_demo_environment") 
+        raise handle_exception(e, endpoint="cleanup_demo_environment")
+
+
+@router.post("/system/init-database", response_model=SuccessResponse)
+async def initialize_database_schema(
+    request: Request,
+    environment: Optional[str] = Query(None, description="Target environment for initialization"),
+    current_tenant: dict = Depends(get_current_tenant),
+    tenant_service: TenantService = Depends(get_tenant_service),
+    audit_logger: AuditLogger = Depends(get_audit_logger)
+):
+    """
+    Initialize database schema for a specific environment (Admin only).
+    
+    Creates database tables if they don't exist in the target environment.
+    This is useful for setting up new environments or ensuring schema consistency.
+    
+    Args:
+        environment: Target environment (development, test, staging, production)
+        
+    Returns:
+        SuccessResponse: Confirmation of database initialization
+        
+    Raises:
+        HTTPException: If initialization fails
+    """
+    try:
+        logger.info(f"Initializing database schema for environment: {environment}")
+        
+        # Import database functions
+        from src.backend.database import create_tables
+        
+        # Set up environment-specific database connection if specified
+        if environment:
+            import os
+            current_env = os.getenv("RAG_ENVIRONMENT", "development")
+            postgres_user = os.getenv("POSTGRES_USER")
+            postgres_password = os.getenv("POSTGRES_PASSWORD")
+            
+            # Temporarily set DATABASE_URL for the target environment
+            original_db_url = os.getenv("DATABASE_URL")
+            env_db_url = f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/rag_db_{environment}"
+            os.environ["DATABASE_URL"] = env_db_url
+            
+            try:
+                # Create tables in target environment
+                create_tables()
+                logger.info(f"Database tables created/verified for {environment} environment")
+            finally:
+                # Restore original DATABASE_URL
+                if original_db_url:
+                    os.environ["DATABASE_URL"] = original_db_url
+        else:
+            # Use current environment
+            create_tables()
+            logger.info("Database tables created/verified for current environment")
+        
+        # Log the action (skip for now to avoid UUID serialization issues)
+        # await audit_logger.log_action(
+        #     tenant_id=None,
+        #     user_id=None,
+        #     action="database_init",
+        #     resource_type="system",
+        #     resource_id=f"env_{environment or 'current'}",
+        #     details={"environment": environment or "current"}
+        # )
+        
+        return SuccessResponse(
+            success=True,
+            message=f"Database schema initialized successfully for {environment or 'current'} environment"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize database schema: {e}", exc_info=True)
+        raise handle_exception(e, endpoint="initialize_database_schema") 

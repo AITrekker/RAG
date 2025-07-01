@@ -49,10 +49,11 @@ class RAGService:
         self.db = db_session
         self.file_service = file_service
         
-        # TODO: Initialize LLM and embedding models
+        # Model references (don't store model objects in class to avoid serialization issues)
         self._llm_model = None
         self._embedding_model = None
         self._qdrant_client = None
+        self._model_name = "not-initialized"
     
     async def initialize(self):
         """Initialize RAG components"""
@@ -82,10 +83,54 @@ class RAGService:
                 print("⚠️ sentence-transformers not available for query embeddings")
                 self._embedding_model = None
             
-            # TODO: Initialize LLM for answer generation
-            # For now, we'll use a mock LLM
-            self._llm_model = None
-            print("⚠️ LLM model not initialized - using mock responses")
+            # Initialize LLM for answer generation
+            try:
+                from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+                import torch
+                
+                # Use a model suitable for question answering
+                model_name = "distilgpt2"  # Smaller, faster model good for text generation
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                
+                print(f"🧠 Loading LLM model: {model_name} on {device}")
+                
+                # Create a text generation pipeline
+                self._llm_model = pipeline(
+                    "text-generation",
+                    model=model_name,
+                    device=0 if device == 'cuda' else -1,
+                    torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
+                    max_length=300,
+                    truncation=True,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9,
+                    pad_token_id=50256  # GPT-2 EOS token
+                )
+                
+                print(f"✓ LLM model initialized: {model_name} on {device}")
+                self._model_name = model_name
+                
+            except ImportError as e:
+                print(f"⚠️ transformers not available for LLM: {e}")
+                self._llm_model = None
+            except Exception as e:
+                print(f"⚠️ Failed to load LLM model: {e}")
+                print("  Using a simpler model...")
+                try:
+                    # Fallback to a smaller model
+                    self._llm_model = pipeline(
+                        "text-generation",
+                        model="gpt2",
+                        device=0 if torch.cuda.is_available() else -1,
+                        max_length=256,
+                        truncation=True
+                    )
+                    print("✓ Fallback LLM model (GPT-2) initialized")
+                    self._model_name = "gpt2"
+                except Exception as e2:
+                    print(f"⚠️ Failed to load fallback model: {e2} - using mock responses")
+                    self._llm_model = None
             
         except ImportError:
             print("⚠️ qdrant-client not available, using mock vector operations")
@@ -151,8 +196,8 @@ class RAGService:
             sources=filtered_results,
             confidence=sum(r.score for r in filtered_results) / len(filtered_results) if filtered_results else 0.0,
             processing_time=processing_time,
-            model_used="placeholder-model",  # TODO: Use actual model name
-            tokens_used=None  # TODO: Count actual tokens
+            model_used=self._model_name,
+            tokens_used=len(answer.split()) if answer else 0  # Rough token estimate
         )
     
     async def _generate_query_embedding(self, query: str) -> List[float]:
@@ -178,7 +223,7 @@ class RAGService:
         metadata_filters: Optional[Dict[str, Any]] = None
     ) -> List[SearchResult]:
         """Search for relevant chunks using vector similarity"""
-        collection_name = f"tenant_{tenant_id}_documents"
+        collection_name = "documents"
         
         if self._qdrant_client is not None:
             try:
@@ -341,10 +386,52 @@ Answer:"""
     
     async def _generate_llm_response(self, prompt: str) -> str:
         """Generate response using LLM model"""
-        # TODO: Implement actual LLM integration
-        # This would typically use transformers, OpenAI API, or other LLM
-        # For now, return a structured mock response
-        return "LLM model not yet integrated. This would be the generated answer based on the context."
+        if self._llm_model is None:
+            return "LLM model not available. Using fallback response generation."
+        
+        try:
+            # Run LLM generation in executor to avoid blocking
+            import asyncio
+            
+            def generate_text():
+                # Generate response with the loaded model
+                response = self._llm_model(
+                    prompt,
+                    max_new_tokens=150,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9,
+                    repetition_penalty=1.1,
+                    return_full_text=False,  # Only return the generated part
+                    clean_up_tokenization_spaces=True
+                )
+                
+                if response and len(response) > 0:
+                    generated_text = response[0]['generated_text'].strip()
+                    
+                    # Clean up the response
+                    lines = generated_text.split('\n')
+                    clean_lines = []
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('Context:') and not line.startswith('Question:'):
+                            clean_lines.append(line)
+                        if len(clean_lines) >= 5:  # Limit response length
+                            break
+                    
+                    return '\n'.join(clean_lines) if clean_lines else generated_text[:200]
+                
+                return "Unable to generate response."
+            
+            # Run in thread pool to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, generate_text)
+            
+            return response
+            
+        except Exception as e:
+            print(f"⚠️ LLM generation error: {e}")
+            return f"Error generating response: {str(e)}"
     
     def _generate_fallback_answer(self, query: str, search_results: List[SearchResult]) -> str:
         """Generate a fallback structured answer when LLM is not available"""

@@ -32,8 +32,8 @@ class VectorRetriever(RetrieverInterface):
             # Generate query embedding
             query_embedding = await self._generate_query_embedding(query.text)
             
-            # Build Qdrant query
-            collection_name = f"tenant_{query.tenant_id}_documents"
+            # Build Qdrant query with tenant filtering
+            collection_name = "documents"
             search_payload = self._build_search_payload(query, query_embedding)
             
             # Perform vector search
@@ -90,11 +90,10 @@ class VectorRetriever(RetrieverInterface):
             "with_vectors": False
         }
         
-        # Add filters based on query
-        if query.filters:
-            qdrant_filter = self._build_qdrant_filter(query.filters, query.tenant_id)
-            if qdrant_filter:
-                payload["filter"] = qdrant_filter
+        # Add tenant filtering - always include for multitenancy
+        qdrant_filter = self._build_qdrant_filter(query.filters or {}, query.tenant_id)
+        if qdrant_filter:
+            payload["filter"] = qdrant_filter
         
         return payload
     

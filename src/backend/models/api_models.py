@@ -101,6 +101,7 @@ class TenantResponse(BaseModel):
     api_keys: List[ApiKeyResponse] = Field(default_factory=list, description="API keys")
     document_count: int = Field(0, description="Number of documents")
     storage_used_mb: float = Field(0.0, description="Storage used in MB")
+    api_key: Optional[str] = Field(None, description="Full API key (only returned on creation)")
 
 class TenantListResponse(BaseModel):
     """Response for listing tenants."""

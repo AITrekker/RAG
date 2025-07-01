@@ -11,18 +11,68 @@ This script:
 
 import os
 import sys
+import socket
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Any
 from uuid import UUID
+from dotenv import load_dotenv
 
 # Set NLTK data path for Docker environment
 os.environ['NLTK_DATA'] = '/tmp/nltk_data'
 
 # Add the project root to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-src_path = os.path.join(project_root, 'src')
-sys.path.insert(0, src_path)
+sys.path.insert(0, project_root)
+
+# Setup DATABASE_URL for local vs Docker execution
+def setup_database_url():
+    """Setup DATABASE_URL for current environment (Docker vs local)"""
+    load_dotenv()
+    
+    # Get credentials from .env
+    postgres_user = os.getenv("POSTGRES_USER")
+    postgres_password = os.getenv("POSTGRES_PASSWORD") 
+    postgres_db = "rag_db"
+    
+    if not postgres_user or not postgres_password:
+        print("❌ Missing database credentials in .env file")
+        print("   Required: POSTGRES_USER, POSTGRES_PASSWORD")
+        sys.exit(1)
+    
+    # Detect environment
+    if is_running_in_docker():
+        # Use Docker network hostname
+        database_url = f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/{postgres_db}"
+        print("🐳 Detected Docker environment")
+    else:
+        # Use localhost for local execution
+        database_url = f"postgresql://{postgres_user}:{postgres_password}@localhost:5432/{postgres_db}"
+        print("💻 Detected local environment")
+    
+    # Set the environment variable for database connections
+    os.environ["DATABASE_URL"] = database_url
+    print(f"📡 Database URL: {database_url}")
+
+def is_running_in_docker() -> bool:
+    """Detect if we're running inside a Docker container"""
+    try:
+        # Check for Docker-specific files/environments
+        if os.path.exists("/.dockerenv"):
+            return True
+        
+        # Check if hostname resolves to postgres (Docker network)
+        try:
+            socket.gethostbyname("postgres")
+            return True
+        except socket.gaierror:
+            return False
+            
+    except Exception:
+        return False
+
+# Setup database URL BEFORE importing backend modules
+setup_database_url()
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

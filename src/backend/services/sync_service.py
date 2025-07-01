@@ -4,6 +4,7 @@ Sync Service - Handles delta sync operations and file synchronization
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from uuid import UUID
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from src.backend.models.database import File, SyncOperation, FileSyncHistory
+from src.backend.models.database import File, SyncOperation, FileSyncHistory, User
 from src.backend.services.file_service import FileService
 from src.backend.services.embedding_service import EmbeddingService
 
@@ -72,6 +73,28 @@ class SyncService:
         self.db = db_session
         self.file_service = file_service
         self.embedding_service = embedding_service
+    
+    async def get_or_create_system_user(self) -> UUID:
+        """Get or create a system user for auto-discovered files"""
+        # Try to find existing system user
+        result = await self.db.execute(
+            select(User).where(User.email == 'system@delta-sync.local')
+        )
+        system_user = result.scalar_one_or_none()
+        
+        if not system_user:
+            # Create system user
+            system_user = User(
+                email='system@delta-sync.local',
+                password_hash='system_user_no_login',
+                full_name='Delta Sync System User',
+                is_active=True
+            )
+            self.db.add(system_user)
+            await self.db.commit()
+            await self.db.refresh(system_user)
+        
+        return system_user.id
     
     async def detect_file_changes(self, tenant_id: UUID) -> SyncPlan:
         """
@@ -193,10 +216,15 @@ class SyncService:
     async def _process_new_file(self, change: FileChange, sync_op: SyncOperation):
         """Process a new file by creating record and scheduling for processing"""
         try:
+            # Use system user for auto-discovered files if no specific user
+            uploaded_by = sync_op.triggered_by
+            if uploaded_by is None:
+                uploaded_by = await self.get_or_create_system_user()
+            
             # Create file record for discovered file
             file_record = File(
                 tenant_id=sync_op.tenant_id,
-                uploaded_by=sync_op.triggered_by,  # May be None for auto-sync
+                uploaded_by=uploaded_by,
                 filename=Path(change.file_path).name,
                 file_path=change.file_path,
                 file_size=change.file_size or 0,
@@ -321,11 +349,16 @@ class SyncService:
         if not file_id:
             return
         
+        # For deleted files, new_hash should be the previous hash since file didn't change content
+        new_hash = change.new_hash
+        if change.change_type == ChangeType.DELETED and new_hash is None:
+            new_hash = change.old_hash
+        
         history = FileSyncHistory(
             file_id=file_id,
             sync_operation_id=sync_op.id,
             previous_hash=change.old_hash,
-            new_hash=change.new_hash,
+            new_hash=new_hash,
             change_type=change.change_type.value,
             synced_at=datetime.utcnow()
         )

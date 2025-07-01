@@ -41,6 +41,30 @@ def test_tenant_id() -> UUID:
     return UUID("110174a1-8e2f-47a1-af19-1478f1be07a8")
 
 @pytest.fixture
+def test_tenant_data():
+    """Provide test tenant data with environment field."""
+    return {
+        "id": UUID("110174a1-8e2f-47a1-af19-1478f1be07a8"),
+        "name": "test_tenant",
+        "slug": "test-tenant",
+        "environment": "test",
+        "plan_tier": "free",
+        "is_active": True
+    }
+
+@pytest.fixture
+def prod_tenant_data():
+    """Provide production tenant data."""
+    return {
+        "id": UUID("220285a2-9f4f-58c2-c159-2679f3df28c9"),
+        "name": "prod_tenant", 
+        "slug": "prod-tenant",
+        "environment": "production",
+        "plan_tier": "pro",
+        "is_active": True
+    }
+
+@pytest.fixture
 def test_user_id() -> UUID:
     """Provide a consistent test user ID."""
     return UUID("22028462-9f3e-48b2-b048-2568f2ce17b8")
@@ -65,7 +89,8 @@ def qdrant_config():
     return {
         "url": "http://localhost:6333",
         "timeout": 30,
-        "collection_prefix": "tenant_"
+        "collection_name": "documents",  # Single collection for multitenancy
+        "test_environment": "test"
     }
 
 @pytest.fixture

@@ -118,9 +118,9 @@ async def api_key_auth_middleware(request: Request, call_next):
                 }
             )
         
-        # Add tenant context to request state
-        request.state.tenant_id = tenant.id
-        request.state.tenant = tenant
+        # Add tenant context to request state (convert UUID to string for JSON serialization)
+        request.state.tenant_id = str(tenant.id)
+        request.state.tenant = tenant  # Keep the full tenant object
         request.state.tenant_slug = tenant.slug
         request.state.api_key = api_key
         
@@ -168,10 +168,10 @@ def get_current_tenant(request: Request):
 
 
 def get_current_tenant_id(request: Request):
-    """FastAPI dependency to get current tenant ID"""
+    """FastAPI dependency to get current tenant ID as string"""
     if not hasattr(request.state, 'tenant_id'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No authenticated tenant found"
         )
-    return request.state.tenant_id
+    return request.state.tenant_id  # Already a string

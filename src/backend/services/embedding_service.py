@@ -374,21 +374,26 @@ class EmbeddingService:
         self, 
         file_record: File, 
         chunks: List[DocumentChunk], 
-        embeddings: List[EmbeddingResult]
+        embeddings: List[EmbeddingResult],
+        environment: str = None
     ) -> List[EmbeddingChunk]:
         """
-        Store embeddings in database and vector store
+        Store embeddings in database and vector store with environment separation
         
         Args:
             file_record: File database record
             chunks: Document chunks
             embeddings: Generated embeddings
+            environment: Target environment (defaults to current)
             
         Returns:
             List[EmbeddingChunk]: Database records for chunks
         """
+        import os
+        
         chunk_records = []
-        collection_name = f"tenant_{file_record.tenant_id}_documents"
+        current_env = environment or os.getenv("RAG_ENVIRONMENT", "development")
+        collection_name = f"documents_{current_env}"  # Environment-specific collection
         
         # Initialize Qdrant client if not already done
         await self._ensure_qdrant_collection(collection_name)
@@ -467,11 +472,18 @@ class EmbeddingService:
             return
         
         try:
-            # Minimal payload - detailed metadata stays in PostgreSQL
+            # Get tenant environment from database
+            from src.backend.models.database import Tenant
+            tenant_result = await self.db.execute(select(Tenant).where(Tenant.id == file_record.tenant_id))
+            tenant = tenant_result.scalar_one_or_none()
+            environment = tenant.environment if tenant else 'production'
+            
+            # Enhanced payload with environment for multitenancy
             payload = {
                 "chunk_id": str(point_id),
                 "file_id": str(file_record.id),
                 "tenant_id": str(file_record.tenant_id),
+                "environment": environment,
                 "chunk_index": chunk.chunk_index,
                 "filename": file_record.filename
             }

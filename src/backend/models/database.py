@@ -51,6 +51,7 @@ class Tenant(BaseModel):
     auto_sync: Mapped[bool] = mapped_column(Boolean, default=True)
     sync_interval: Mapped[int] = mapped_column(Integer, default=60)
     status: Mapped[Optional[str]] = mapped_column(String(50), default='active')
+    environment: Mapped[str] = mapped_column(String(20), nullable=False, default='production')
     
     # API Key Authentication
     api_key: Mapped[Optional[str]] = mapped_column(String(64), unique=True)
@@ -67,9 +68,11 @@ class Tenant(BaseModel):
     # Constraints
     __table_args__ = (
         CheckConstraint("plan_tier IN ('free', 'pro', 'enterprise')", name='check_plan_tier'),
+        CheckConstraint("environment IN ('production', 'test', 'development', 'staging')", name='check_environment'),
         Index('idx_tenants_slug', 'slug'),
         Index('idx_tenants_active', 'is_active'),
-        Index('idx_tenants_api_key', 'api_key')
+        Index('idx_tenants_api_key', 'api_key'),
+        Index('idx_tenants_environment', 'environment')
     )
 
 class User(BaseModel):

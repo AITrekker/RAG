@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Init container script for database and system setup.
+Init container script for environment-aware database and system setup.
 
 This script runs as an init container before the main backend starts.
 It handles:
-1. Database table creation
-2. Admin tenant setup
-3. Basic system configuration
+1. Environment database creation (production, staging, test, development)
+2. Database table creation in current environment
+3. Admin tenant setup
+4. Credential management in .env
+5. Basic system configuration
 
 This script should complete successfully before the main backend container starts.
 """
@@ -14,8 +16,10 @@ This script should complete successfully before the main backend container start
 import os
 import sys
 import logging
+import asyncpg
+import asyncio
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List
 
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -24,6 +28,64 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Environment configuration
+ENVIRONMENTS = ["production", "staging", "test", "development"]
+CURRENT_ENVIRONMENT = os.getenv("RAG_ENVIRONMENT", "development")
+
+
+async def create_environment_databases() -> bool:
+    """Create all environment-specific databases."""
+    logger.info("🏗️ Creating environment-specific databases...")
+    
+    try:
+        # Get database credentials
+        postgres_user = os.getenv("POSTGRES_USER")
+        postgres_password = os.getenv("POSTGRES_PASSWORD")
+        
+        if not postgres_user or not postgres_password:
+            logger.error("❌ Missing POSTGRES_USER or POSTGRES_PASSWORD")
+            return False
+        
+        # Connect to default postgres database
+        conn = await asyncpg.connect(
+            host="postgres",  # Docker service name
+            port=5432,
+            database="postgres",
+            user=postgres_user,
+            password=postgres_password
+        )
+        
+        logger.info("✅ Connected to PostgreSQL for database creation")
+        
+        # Create each environment database
+        for env in ENVIRONMENTS:
+            db_name = f"rag_db_{env}"
+            
+            try:
+                # Check if database exists
+                result = await conn.fetchval(
+                    "SELECT 1 FROM pg_database WHERE datname = $1", db_name
+                )
+                
+                if result:
+                    logger.info(f"  ✅ {db_name} already exists")
+                else:
+                    # Create database
+                    await conn.execute(f'CREATE DATABASE {db_name} OWNER {postgres_user}')
+                    logger.info(f"  ✅ Created {db_name}")
+                    
+            except Exception as e:
+                logger.error(f"  ❌ Failed to create {db_name}: {e}")
+                await conn.close()
+                return False
+        
+        await conn.close()
+        logger.info("🎉 Environment databases setup complete!")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create environment databases: {e}")
+        return False
 
 def wait_for_dependencies() -> bool:
     """Wait for dependencies to be available."""
@@ -137,7 +199,7 @@ def create_admin_tenant_with_existing_credentials(admin_tenant_id: str, admin_ap
                     auto_sync=True,
                     sync_interval=300,
                     api_key=admin_api_key,
-                    api_key_hash=tenant_service._hash_api_key(admin_api_key),
+                    api_key_hash=tenant_service._generate_api_key_hash(admin_api_key),
                     api_key_name="System Generated"
                 )
                 
@@ -207,7 +269,7 @@ def create_admin_tenant_inline() -> bool:
 
 
 def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
-    """Update .env file with admin credentials."""
+    """Update .env file with admin credentials and environment information."""
     env_file = Path(".env")
     
     if not env_file.exists():
@@ -218,14 +280,17 @@ def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
     with open(env_file, 'r') as f:
         lines = f.readlines()
     
-    # Remove existing admin credentials
+    # Remove existing admin credentials and environment info
     cleaned_lines = []
     skip_next_empty = False
     
     for line in lines:
-        if line.strip().startswith('ADMIN_TENANT_ID=') or line.strip().startswith('ADMIN_API_KEY='):
+        if (line.strip().startswith('ADMIN_TENANT_ID=') or 
+            line.strip().startswith('ADMIN_API_KEY=') or
+            line.strip().startswith('RAG_ENVIRONMENT=') or
+            line.strip().startswith('DATABASE_URL_')):
             continue
-        elif line.strip() == '# Admin credentials (auto-generated)':
+        elif line.strip() in ['# Admin credentials (auto-generated)', '# Environment-specific database URLs']:
             skip_next_empty = True
             continue
         elif skip_next_empty and line.strip() == '':
@@ -235,21 +300,31 @@ def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
             cleaned_lines.append(line)
             skip_next_empty = False
     
-    # Add new admin credentials at the end
+    # Add new admin credentials and environment info at the end
     if cleaned_lines and not cleaned_lines[-1].endswith('\n'):
         cleaned_lines.append('\n')
+    
+    postgres_user = os.getenv("POSTGRES_USER")
+    postgres_password = os.getenv("POSTGRES_PASSWORD")
     
     cleaned_lines.extend([
         '# Admin credentials (auto-generated)\n',
         f'ADMIN_TENANT_ID={admin_tenant_id}\n',
-        f'ADMIN_API_KEY={admin_api_key}\n'
+        f'ADMIN_API_KEY={admin_api_key}\n',
+        f'RAG_ENVIRONMENT={CURRENT_ENVIRONMENT}\n',
+        '\n',
+        '# Environment-specific database URLs\n',
+        f'DATABASE_URL_PRODUCTION=postgresql://{postgres_user}:{postgres_password}@postgres:5432/rag_db_production\n',
+        f'DATABASE_URL_STAGING=postgresql://{postgres_user}:{postgres_password}@postgres:5432/rag_db_staging\n',
+        f'DATABASE_URL_TEST=postgresql://{postgres_user}:{postgres_password}@postgres:5432/rag_db_test\n',
+        f'DATABASE_URL_DEVELOPMENT=postgresql://{postgres_user}:{postgres_password}@postgres:5432/rag_db_development\n'
     ])
     
     # Write updated content
     with open(env_file, 'w') as f:
         f.writelines(cleaned_lines)
     
-    logger.info("✅ Admin credentials saved to .env file")
+    logger.info("✅ Admin credentials and environment URLs saved to .env file")
 
 
 def verify_setup() -> bool:
@@ -273,31 +348,41 @@ def verify_setup() -> bool:
 
 
 def main():
-    """Main init container function."""
-    logger.info("🚀 Starting init container setup...")
+    """Main init container function with environment support."""
+    logger.info("🚀 Starting environment-aware init container setup...")
+    logger.info(f"🌍 Target environment: {CURRENT_ENVIRONMENT}")
     
     # Step 1: Wait for external dependencies
     if not wait_for_dependencies():
         logger.error("❌ Init container failed: dependencies not available")
         sys.exit(1)
     
-    # Step 2: Create database tables
+    # Step 2: Create environment-specific databases
+    if not asyncio.run(create_environment_databases()):
+        logger.error("❌ Init container failed: environment database creation failed")
+        sys.exit(1)
+    
+    # Step 3: Create database tables in current environment
     if not create_database_tables():
         logger.error("❌ Init container failed: database table creation failed")
         sys.exit(1)
     
-    # Step 3: Setup admin tenant
+    # Step 4: Setup admin tenant
     if not setup_admin_tenant():
         logger.error("❌ Init container failed: admin tenant setup failed")
         sys.exit(1)
     
-    # Step 4: Verify setup
+    # Step 5: Verify setup
     if not verify_setup():
         logger.error("❌ Init container failed: setup verification failed")
         sys.exit(1)
     
-    logger.info("🎉 Init container setup completed successfully!")
-    logger.info("💡 Backend container can now start safely")
+    logger.info("🎉 Environment-aware init container setup completed successfully!")
+    logger.info(f"💡 Backend container can now start safely in {CURRENT_ENVIRONMENT} environment")
+    logger.info("📋 Environment databases created:")
+    for env in ENVIRONMENTS:
+        logger.info(f"  - rag_db_{env}")
+    logger.info(f"🔑 Admin credentials and environment URLs written to .env")
 
 
 if __name__ == "__main__":
