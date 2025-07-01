@@ -216,7 +216,7 @@ class TestAPIQuery:
         
         assert response.status_code == 400
         data = response.json()
-        assert "detail" in data
+        assert "error" in data
         print("✅ Empty query properly rejected")
     
     def test_query_unauthorized(self):

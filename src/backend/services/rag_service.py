@@ -14,6 +14,7 @@ from sqlalchemy import select
 from src.backend.models.database import File, EmbeddingChunk, Tenant
 from src.backend.services.file_service import FileService
 from src.backend.config.settings import get_settings
+from src.backend.config.rag_prompts import rag_prompts, PromptConfig
 
 settings = get_settings()
 
@@ -88,23 +89,27 @@ class RAGService:
                 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
                 import torch
                 
-                # Use a model suitable for question answering
-                model_name = "distilgpt2"  # Smaller, faster model good for text generation
+                # Get LLM configuration from settings
+                llm_config = settings.get_rag_llm_config()
+                model_name = llm_config["model_name"]
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
                 
                 print(f"🧠 Loading LLM model: {model_name} on {device}")
+                print(f"🎛️  Config: temp={llm_config['temperature']}, top_p={llm_config['top_p']}, top_k={llm_config['top_k']}")
                 
-                # Create a text generation pipeline
+                # Create a text generation pipeline with configurable settings
                 self._llm_model = pipeline(
                     "text-generation",
                     model=model_name,
                     device=0 if device == 'cuda' else -1,
                     torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
-                    max_length=300,
+                    max_length=llm_config["max_length"],
                     truncation=True,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9,
+                    do_sample=llm_config["do_sample"],
+                    temperature=llm_config["temperature"],
+                    top_p=llm_config["top_p"],
+                    top_k=llm_config["top_k"],
+                    repetition_penalty=llm_config["repetition_penalty"],
                     pad_token_id=50256  # GPT-2 EOS token
                 )
                 
@@ -147,9 +152,10 @@ class RAGService:
         self, 
         query: str, 
         tenant_id: UUID,
-        max_sources: int = 5,
-        confidence_threshold: float = 0.7,
-        metadata_filters: Optional[Dict[str, Any]] = None
+        max_sources: Optional[int] = None,
+        confidence_threshold: Optional[float] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
+        prompt_template: str = "default"
     ) -> RAGResponse:
         """
         Process a RAG query with retrieval and generation
@@ -165,6 +171,13 @@ class RAGService:
             RAGResponse: Generated response with sources
         """
         start_time = datetime.utcnow()
+        
+        # Get configuration defaults
+        retrieval_config = settings.get_rag_retrieval_config()
+        if max_sources is None:
+            max_sources = retrieval_config["max_sources"]
+        if confidence_threshold is None:
+            confidence_threshold = retrieval_config["confidence_threshold"]
         
         # Step 1: Generate query embedding
         query_embedding = await self._generate_query_embedding(query)
@@ -184,7 +197,7 @@ class RAGService:
         ][:max_sources]
         
         # Step 4: Generate answer using LLM
-        answer = await self._generate_answer(query, filtered_results)
+        answer = await self._generate_answer(query, filtered_results, prompt_template)
         
         # Step 5: Calculate processing time
         end_time = datetime.utcnow()
@@ -342,23 +355,20 @@ class RAGService:
     async def _generate_answer(
         self, 
         query: str, 
-        search_results: List[SearchResult]
+        search_results: List[SearchResult],
+        template_name: str = "default"
     ) -> str:
         """Generate answer using LLM based on retrieved context"""
         if not search_results:
             return "I couldn't find relevant information to answer your question."
         
-        # Build context from search results
-        context_parts = []
-        for i, result in enumerate(search_results):
-            context_parts.append(f"[Source {i+1} - {result.filename}]: {result.content}")
-        
-        context = "\n\n".join(context_parts)
+        # Build context from search results using configuration
+        context = PromptConfig.format_context_sources(search_results)
         
         if self._llm_model is not None:
             # Use actual LLM if available
             try:
-                prompt = self._build_rag_prompt(query, context)
+                prompt = self._build_rag_prompt(query, context, template_name)
                 answer = await self._generate_llm_response(prompt)
                 return answer
             except Exception as e:
@@ -367,22 +377,9 @@ class RAGService:
         # Fallback: Create a structured response based on context
         return self._generate_fallback_answer(query, search_results)
     
-    def _build_rag_prompt(self, query: str, context: str) -> str:
-        """Build a structured prompt for RAG"""
-        return f"""You are a helpful AI assistant. Based on the provided context, answer the user's question accurately and concisely.
-
-Context:
-{context}
-
-Question: {query}
-
-Instructions:
-- Answer based ONLY on the provided context
-- If the context doesn't contain enough information, say so
-- Be specific and cite which sources support your answer
-- Keep your response focused and relevant
-
-Answer:"""
+    def _build_rag_prompt(self, query: str, context: str, template_name: str = "default") -> str:
+        """Build a structured prompt for RAG using configurable templates"""
+        return rag_prompts.build_prompt(query, context, template_name)
     
     async def _generate_llm_response(self, prompt: str) -> str:
         """Generate response using LLM model"""
@@ -394,32 +391,26 @@ Answer:"""
             import asyncio
             
             def generate_text():
-                # Generate response with the loaded model
+                # Get generation parameters from configuration
+                llm_config = settings.get_rag_llm_config()
+                
+                # Generate response with configurable parameters
                 response = self._llm_model(
                     prompt,
-                    max_new_tokens=150,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9,
-                    repetition_penalty=1.1,
+                    max_new_tokens=llm_config["max_new_tokens"],
+                    do_sample=llm_config["do_sample"],
+                    temperature=llm_config["temperature"],
+                    top_p=llm_config["top_p"],
+                    top_k=llm_config["top_k"],
+                    repetition_penalty=llm_config["repetition_penalty"],
                     return_full_text=False,  # Only return the generated part
-                    clean_up_tokenization_spaces=True
+                    clean_up_tokenization_spaces=True,
+                    early_stopping=llm_config["early_stopping"]
                 )
                 
                 if response and len(response) > 0:
                     generated_text = response[0]['generated_text'].strip()
-                    
-                    # Clean up the response
-                    lines = generated_text.split('\n')
-                    clean_lines = []
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith('Context:') and not line.startswith('Question:'):
-                            clean_lines.append(line)
-                        if len(clean_lines) >= 5:  # Limit response length
-                            break
-                    
-                    return '\n'.join(clean_lines) if clean_lines else generated_text[:200]
+                    return self._clean_generated_response(generated_text)
                 
                 return "Unable to generate response."
             
@@ -432,6 +423,53 @@ Answer:"""
         except Exception as e:
             print(f"⚠️ LLM generation error: {e}")
             return f"Error generating response: {str(e)}"
+    
+    def _clean_generated_response(self, generated_text: str) -> str:
+        """Clean up generated response using configuration settings"""
+        response_config = settings.get_rag_response_config()
+        
+        # Remove prompt artifacts if configured
+        if response_config["remove_prompt_artifacts"]:
+            stop_phrases = [
+                'CONTEXT FROM COMPANY DOCUMENTS:',
+                'USER QUESTION:',
+                'INSTRUCTIONS:',
+                'PROFESSIONAL ANSWER:',
+                'TECHNICAL ANSWER:',
+                'EXECUTIVE SUMMARY:',
+                'Question:',
+                'Context:',
+                'Answer:'
+            ]
+            
+            for stop_phrase in stop_phrases:
+                if stop_phrase in generated_text:
+                    generated_text = generated_text.split(stop_phrase)[0].strip()
+        
+        # Split into sentences and clean up
+        sentences = generated_text.replace('\n', ' ').split('. ')
+        clean_sentences = []
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            
+            # Check minimum length and content quality
+            if (sentence and 
+                len(sentence) >= response_config["min_sentence_length"] and 
+                not sentence.lower().startswith(('context', 'question', 'instruction', 'answer'))):
+                
+                # Ensure proper punctuation if configured
+                if response_config["ensure_punctuation"]:
+                    if not sentence.endswith(('.', '!', '?')):
+                        sentence += '.'
+                
+                clean_sentences.append(sentence)
+            
+            # Limit to configured max sentences
+            if len(clean_sentences) >= response_config["max_sentences"]:
+                break
+        
+        return ' '.join(clean_sentences) if clean_sentences else generated_text[:300]
     
     def _generate_fallback_answer(self, query: str, search_results: List[SearchResult]) -> str:
         """Generate a fallback structured answer when LLM is not available"""

@@ -68,7 +68,36 @@ class Settings(BaseSettings):
     embedding_device: str = Field(default="cpu", env="EMBEDDING_DEVICE")
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
-    # LLM settings
+    # RAG/LLM settings - Comprehensive configuration for iterative tuning
+    rag_llm_model: str = Field(
+        default="gpt2-medium", 
+        env="RAG_LLM_MODEL",
+        description="LLM model for answer generation. Options: gpt2-medium, gpt2-large, microsoft/DialoGPT-medium"
+    )
+    rag_max_length: int = Field(default=512, env="RAG_MAX_LENGTH")
+    rag_max_new_tokens: int = Field(default=200, env="RAG_MAX_NEW_TOKENS")
+    rag_temperature: float = Field(default=0.3, env="RAG_TEMPERATURE", description="Lower = more focused, higher = more creative")
+    rag_top_p: float = Field(default=0.85, env="RAG_TOP_P", description="Nucleus sampling parameter")
+    rag_top_k: int = Field(default=40, env="RAG_TOP_K", description="Limit vocabulary for coherence")
+    rag_repetition_penalty: float = Field(default=1.3, env="RAG_REPETITION_PENALTY")
+    rag_early_stopping: bool = Field(default=True, env="RAG_EARLY_STOPPING")
+    rag_do_sample: bool = Field(default=True, env="RAG_DO_SAMPLE")
+    rag_enable_quantization: bool = Field(default=True, env="RAG_ENABLE_QUANTIZATION")
+    rag_cache_dir: str = Field(default=str(CACHE_DIR / "transformers"), env="RAG_CACHE_DIR")
+    
+    # RAG Retrieval settings
+    rag_max_sources: int = Field(default=5, env="RAG_MAX_SOURCES", description="Max source documents to retrieve")
+    rag_confidence_threshold: float = Field(default=0.3, env="RAG_CONFIDENCE_THRESHOLD")
+    rag_max_context_length: int = Field(default=2000, env="RAG_MAX_CONTEXT_LENGTH", description="Max characters in context")
+    rag_source_preview_length: int = Field(default=200, env="RAG_SOURCE_PREVIEW_LENGTH")
+    
+    # RAG Response quality settings
+    rag_max_sentences: int = Field(default=4, env="RAG_MAX_SENTENCES", description="Max sentences in response")
+    rag_min_sentence_length: int = Field(default=10, env="RAG_MIN_SENTENCE_LENGTH")
+    rag_remove_prompt_artifacts: bool = Field(default=True, env="RAG_REMOVE_PROMPT_ARTIFACTS")
+    rag_ensure_punctuation: bool = Field(default=True, env="RAG_ENSURE_PUNCTUATION")
+    
+    # Legacy LLM settings (for backwards compatibility)
     llm_model: str = Field(
         default="google/flan-t5-base", 
         env="LLM_MODEL"
@@ -113,8 +142,42 @@ class Settings(BaseSettings):
             "batch_size": self.embedding_batch_size
         }
     
+    def get_rag_llm_config(self) -> dict:
+        """Get RAG LLM configuration for answer generation."""
+        return {
+            "model_name": self.rag_llm_model,
+            "max_length": self.rag_max_length,
+            "max_new_tokens": self.rag_max_new_tokens,
+            "temperature": self.rag_temperature,
+            "top_p": self.rag_top_p,
+            "top_k": self.rag_top_k,
+            "repetition_penalty": self.rag_repetition_penalty,
+            "early_stopping": self.rag_early_stopping,
+            "do_sample": self.rag_do_sample,
+            "enable_quantization": self.rag_enable_quantization,
+            "cache_dir": self.rag_cache_dir
+        }
+    
+    def get_rag_retrieval_config(self) -> dict:
+        """Get RAG retrieval configuration."""
+        return {
+            "max_sources": self.rag_max_sources,
+            "confidence_threshold": self.rag_confidence_threshold,
+            "max_context_length": self.rag_max_context_length,
+            "source_preview_length": self.rag_source_preview_length
+        }
+    
+    def get_rag_response_config(self) -> dict:
+        """Get RAG response quality configuration."""
+        return {
+            "max_sentences": self.rag_max_sentences,
+            "min_sentence_length": self.rag_min_sentence_length,
+            "remove_prompt_artifacts": self.rag_remove_prompt_artifacts,
+            "ensure_punctuation": self.rag_ensure_punctuation
+        }
+    
     def get_llm_config(self) -> dict:
-        """Get LLM service configuration."""
+        """Get legacy LLM service configuration."""
         return {
             "model_name": self.llm_model,
             "max_length": self.llm_max_length,

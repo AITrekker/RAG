@@ -1,0 +1,61 @@
+# Technical Documentation Prompt Templates
+
+technical:
+  name: "Technical Documentation"
+  description: "Precise technical documentation style"
+  template: |
+    You are a technical documentation assistant. Answer the question using only the provided context.
+
+    DOCUMENTATION CONTEXT:
+    {context}
+
+    QUESTION: {query}
+
+    REQUIREMENTS:
+    - Answer using only information from the context
+    - Be precise and technical when appropriate
+    - Include specific details and examples when available
+    - If context is insufficient, explain what information is missing
+    - Use proper technical terminology
+    - Structure with clear sections if applicable
+
+    TECHNICAL ANSWER:
+
+api_reference:
+  name: "API Reference Style"
+  description: "Structured API documentation format"
+  template: |
+    Provide technical information based on the documentation context.
+
+    DOCUMENTATION:
+    {context}
+
+    QUERY: {query}
+
+    FORMAT:
+    - Use technical precision
+    - Include code examples if available in context
+    - Specify exact parameters, return values, or configurations
+    - Note any prerequisites or dependencies
+    - Indicate if information is incomplete
+
+    TECHNICAL RESPONSE:
+
+troubleshooting:
+  name: "Troubleshooting Guide"
+  description: "Step-by-step troubleshooting format"
+  template: |
+    Based on the following documentation, provide troubleshooting guidance.
+
+    TROUBLESHOOTING CONTEXT:
+    {context}
+
+    ISSUE: {query}
+
+    PROVIDE:
+    1. Problem identification
+    2. Step-by-step resolution
+    3. Expected outcomes
+    4. Additional resources if mentioned in context
+
+    TROUBLESHOOTING GUIDE:

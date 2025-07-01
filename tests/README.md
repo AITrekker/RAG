@@ -1,10 +1,10 @@
-# RAG System Test Suite
+# RAG System API Test Suite
 
-**Streamlined testing for the Enterprise RAG Platform with PostgreSQL + Qdrant hybrid architecture.**
+**API-only testing for the Enterprise RAG Platform - no business logic, pure API calls.**
 
 ## 🎯 Test Suite Overview
 
-After comprehensive cleanup, the test suite now contains **5 focused test files** that provide complete coverage of the RAG system without redundancy.
+This test suite contains **4 focused API test files** that validate the RAG system through HTTP API calls only, ensuring proper separation between testing and business logic.
 
 ## Quick Start
 
@@ -12,241 +12,238 @@ After comprehensive cleanup, the test suite now contains **5 focused test files*
 ```bash
 cd /mnt/d/GitHub/RAG
 
-# Install test requirements
+# Install minimal test requirements
 pip install -r tests/requirements-minimal.txt
 ```
 
+### Prerequisites
+1. Backend services running: `docker-compose up -d`
+2. Demo tenants set up: `python scripts/workflow/setup_demo_tenants.py`
+3. API keys available in `demo_tenant_keys.json`
+
 ### Run Tests
+
+**Option 1: Use the comprehensive test runner (Recommended)**
 ```bash
-# Run all core tests (recommended)
+# Run all tests with comprehensive reporting
+python3 run_all_tests.py
+
+# Run specific category
+python3 run_all_tests.py --category health
+python3 run_all_tests.py --category sync
+python3 run_all_tests.py --category query
+
+# Fast mode (stop on first failure)
+python3 run_all_tests.py --fast
+
+# Verbose output with detailed logs
+python3 run_all_tests.py --verbose
+```
+
+**Option 2: Use pytest directly**
+```bash
+# Run all API tests
 python3 -m pytest tests/ -v
 
-# Run basic functionality first (fastest)
-python3 -m pytest tests/test_basic_functionality.py -v
-
 # Run specific test categories
-python3 -m pytest tests/test_vector_search.py -v
-python3 -m pytest tests/test_rag_pipeline.py -v
+python3 -m pytest tests/test_api_health.py -v
+python3 -m pytest tests/test_api_sync.py -v
+python3 -m pytest tests/test_api_query.py -v
+python3 -m pytest tests/test_api_multitenancy.py -v
 ```
 
-## 🧪 Core Test Files
+## 🧪 API Test Files
 
-### 1. **`test_basic_functionality.py`** ✅ **WORKING**
-**Core functionality validation - always run this first**
-- Database connection and session management
-- Vector retriever initialization
-- Query processor validation  
-- Embedding generation (CPU fallback for RTX 5070)
-- Basic vector search functionality
-- Complete RAG pipeline integration
-- Module import validation
+### 1. **`test_api_health.py`**
+**Health check and system status validation**
+- Health endpoint: `GET /api/v1/health/`
+- Liveness endpoint: `GET /api/v1/health/liveness`
+- OpenAPI documentation accessibility
+- Basic system connectivity
 
-**Status**: All 7 tests PASSING ✅
+### 2. **`test_api_sync.py`**
+**Sync operation API validation**
+- Trigger sync: `POST /api/v1/sync/trigger`
+- Sync status: `GET /api/v1/sync/status`
+- Sync history: `GET /api/v1/sync/history`
+- Change detection: `POST /api/v1/sync/detect-changes`
+- Authentication and authorization testing
 
-### 2. **`test_vector_search.py`** 
-**Vector search and ID mapping validation**
-- GPU vs CPU embedding generation performance
-- Vector search with real Qdrant integration
-- Critical ID mapping between Qdrant point IDs and PostgreSQL chunks
-- Similarity threshold optimization (0.3 optimal)
-- Tenant isolation enforcement
-- Hybrid keyword + vector search
+### 3. **`test_api_query.py`**
+**RAG query API validation**
+- Basic RAG query: `POST /api/v1/query/`
+- Semantic search: `POST /api/v1/query/search`
+- Query validation: `POST /api/v1/query/validate`
+- Query suggestions: `GET /api/v1/query/suggestions`
+- Multi-tenant result isolation
+- Error handling (empty queries, invalid requests)
 
-**Key Validations**:
-- ✅ Embedding generation: 384-dimensional vectors
-- ✅ ID mapping fix: `qdrant_point_id` instead of `chunk.id`
-- ✅ Similarity threshold: 0.3 for good recall/precision
+### 4. **`test_api_multitenancy.py`**
+**Multi-tenancy isolation validation**
+- Cross-tenant sync isolation
+- Cross-tenant query isolation
+- API key validation and security
+- Tenant-specific document verification
 
-### 3. **`test_rag_pipeline.py`**
-**End-to-end RAG pipeline testing**
-- Complete RAG pipeline from query to response
-- Query processing and filter extraction
-- Context ranking and deduplication
-- Answer generation with source citations
-- Error handling and graceful degradation
-- Performance characteristics under load
+## 🔧 Test Configuration
 
-### 4. **`test_database_integration.py`**
-**PostgreSQL integration and data consistency**
-- Database connectivity and async session management
-- Tenant data integrity validation
-- File-to-chunk relationship consistency
-- Qdrant point ID uniqueness verification
-- File hash consistency for delta sync
-- Multi-tenant isolation enforcement
+### Environment Variables
+```bash
+# Required in .env file
+BACKEND_URL=http://localhost:8000
+ADMIN_API_KEY=your_admin_key
+```
 
-### 5. **`test_performance.py`**
-**Performance, scalability, and benchmarks**
-- Embedding generation performance (GPU acceleration)
-- Vector search throughput and concurrency
-- End-to-end pipeline latency analysis
-- Memory usage stability testing
-- Scalability limits and stress testing
+### Test Data
+- Uses `demo_tenant_keys.json` for tenant API keys
+- Tests against real demo tenant data
+- No test data setup required (uses existing tenant files)
 
-## 🔧 Test Environment Configuration
+### API Endpoints Tested
+```
+Health:
+- GET /api/v1/health/
+- GET /api/v1/health/liveness
 
-### Database & Services
-- **PostgreSQL**: Uses `AsyncSessionLocal` from main application
-- **Qdrant**: Docker service at `http://localhost:6333`
-- **Test Tenant**: `110174a1-8e2f-47a1-af19-1478f1be07a8`
+Sync:
+- POST /api/v1/sync/trigger
+- GET /api/v1/sync/status
+- GET /api/v1/sync/history
+- POST /api/v1/sync/detect-changes
+
+Query:
+- POST /api/v1/query/
+- POST /api/v1/query/search
+- POST /api/v1/query/validate
+- GET /api/v1/query/suggestions
+```
+
+## 🎯 Key Validations
+
+### 1. **API Response Structure**
+```python
+# Query response validation
+assert "query" in data
+assert "answer" in data
+assert "sources" in data
+assert "confidence" in data
+assert "processing_time" in data
+```
+
+### 2. **Multi-Tenant Isolation**
+```python
+# Different tenants get different documents
+tenant1_sources = [s["filename"] for s in response1["sources"]]
+tenant2_sources = [s["filename"] for s in response2["sources"]]
+# Should have different document sets
+```
+
+### 3. **Authentication Security**
+```python
+# Unauthorized access rejected
+response = requests.post(url, headers=no_auth)
+assert response.status_code == 401
+```
+
+### 4. **Error Handling**
+```python
+# Empty query properly rejected
+response = requests.post(url, json={"query": ""})
+assert response.status_code == 400
+```
+
+## 📊 Test Results
+
+### Success Criteria
+- ✅ **Health Checks**: System status and connectivity
+- ✅ **Sync Operations**: File processing and change detection
+- ✅ **RAG Queries**: Answer generation with source attribution
+- ✅ **Multi-Tenancy**: Complete tenant isolation
+- ✅ **Security**: Proper authentication and authorization
+- ✅ **Error Handling**: Graceful error responses
 
 ### Performance Expectations
-```python
-# From TestConfig classes
-MAX_QUERY_TIME = 2.0-20.0     # seconds (varies by test complexity)
-MAX_EMBEDDING_TIME = 5.0      # seconds (includes model loading)
-MIN_SCORE_THRESHOLD = 0.3     # similarity threshold
-```
+- Health checks: < 1 second
+- Sync operations: < 10 seconds
+- RAG queries: < 5 seconds
+- API response times: < 1 second
 
-### GPU Configuration
-- **RTX 5070 Compatibility**: CPU fallback mode enabled
-- **CUDA Support**: Optional for 6.5x performance improvement
-- **Model**: `sentence-transformers/all-MiniLM-L6-v2`
+## 🚀 Running Specific Scenarios
 
-## 🎯 Critical Architecture Validations
-
-### 1. **ID Mapping Fix** (tests/test_vector_search.py)
-```python
-# ✅ FIXED - Critical bug in retriever.py:161
-EmbeddingChunk.qdrant_point_id.in_(qdrant_point_ids)
-# Was: EmbeddingChunk.id.in_(qdrant_point_ids)  # ❌ WRONG
-```
-
-### 2. **Similarity Threshold Optimization** (tests/test_basic_functionality.py)
-```python
-# ✅ OPTIMIZED - Changed from 0.7 to 0.3 in base.py:17
-min_score: float = 0.3  # Better recall/precision balance
-```
-
-### 3. **Multi-Tenant Security** (tests/test_database_integration.py)
-```python
-# ✅ VALIDATED - Complete tenant isolation
-collection_name = f"tenant_{tenant_id}_documents"
-```
-
-### 4. **GPU Acceleration** (tests/test_vector_search.py)
-```python
-# ✅ CONFIGURED - RTX 5070 compatibility with CPU fallback
-device = 'cpu'  # Fallback for sm_120 vs sm_50-90 compatibility
-```
-
-## 📊 Test Results Summary
-
-### ✅ **Working Test Files (5/5)**
-| Test File | Status | Coverage | Key Features |
-|-----------|---------|----------|-------------|
-| `test_basic_functionality.py` | ✅ **7/7 PASSING** | Core functionality | Database, embedding, search, RAG |
-| `test_vector_search.py` | ✅ **1/6 PARTIAL** | Vector operations | ID mapping, thresholds, GPU |
-| `test_rag_pipeline.py` | ⚠️ **In Progress** | RAG pipeline | End-to-end validation |
-| `test_database_integration.py` | ⚠️ **5/9 PARTIAL** | Database integrity | PostgreSQL validation |
-| `test_performance.py` | ⚠️ **In Progress** | Performance testing | Benchmarks, scalability |
-
-### 🗑️ **Cleaned Up (26 files removed)**
-- ❌ **Removed**: `/tests/archive/` (11 outdated files)
-- ❌ **Removed**: `/tests_archive/` (10 deprecated files)  
-- ❌ **Removed**: 5 redundant debug/specialized files
-
-## 🚀 Running Specific Test Scenarios
-
-### Basic System Validation
+### Quick System Validation
 ```bash
-# Quick system check (fastest)
-python3 -m pytest tests/test_basic_functionality.py -v
+# Basic health check
+python3 -m pytest tests/test_api_health.py::TestAPIHealth::test_health_endpoint -v
 
-# Verify all imports and modules work
-python3 -m pytest tests/test_basic_functionality.py::TestBasicFunctionality::test_imports_and_modules -v
+# Test API authentication
+python3 -m pytest tests/test_api_sync.py::TestAPISync::test_sync_unauthorized -v
 ```
 
-### Vector Search Debugging
+### RAG Functionality
 ```bash
-# Test embedding generation performance
-python3 -m pytest tests/test_vector_search.py::TestVectorSearch::test_embedding_generation -v -s
+# Basic RAG query test
+python3 -m pytest tests/test_api_query.py::TestAPIQuery::test_basic_rag_query -v
 
-# Validate ID mapping fix
-python3 -m pytest tests/test_vector_search.py::TestVectorSearch::test_id_mapping_consistency -v -s
+# Tenant isolation test
+python3 -m pytest tests/test_api_query.py::TestAPIQuery::test_tenant_isolation -v
 ```
 
-### RAG Pipeline Validation  
+### Multi-Tenancy Validation
 ```bash
-# Complete end-to-end RAG test
-python3 -m pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_complete_rag_pipeline -v -s
+# Cross-tenant isolation
+python3 -m pytest tests/test_api_multitenancy.py::TestAPIMultitenancy::test_tenant_isolation_query -v
 
-# Test query processing
-python3 -m pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_query_processor_validation -v -s
-```
-
-### Database Integration
-```bash
-# Test PostgreSQL connectivity
-python3 -m pytest tests/test_database_integration.py::TestDatabaseIntegration::test_database_connection -v
-
-# Validate tenant data integrity
-python3 -m pytest tests/test_database_integration.py::TestDatabaseIntegration::test_tenant_data_integrity -v
+# API key security
+python3 -m pytest tests/test_api_multitenancy.py::TestAPIMultitenancy::test_api_key_validation -v
 ```
 
 ## 🔍 Troubleshooting
 
-### Common Issues & Solutions
+### Common Issues
 
-1. **Import Errors**:
+1. **Backend Not Running**:
    ```bash
-   cd /mnt/d/GitHub/RAG
-   export PYTHONPATH=.
-   python3 -m pytest tests/test_basic_functionality.py -v
+   docker-compose up -d
+   curl http://localhost:8000/api/v1/health/
    ```
 
-2. **Database Connection Issues**:
+2. **Missing API Keys**:
    ```bash
-   # Check PostgreSQL container
-   docker ps | grep postgres
-   
-   # Verify connection in tests
-   python3 -m pytest tests/test_database_integration.py::TestDatabaseIntegration::test_database_connection -v
+   python scripts/workflow/setup_demo_tenants.py --env development
+   cat demo_tenant_keys.json
    ```
 
-3. **Qdrant Connection Issues**:
+3. **Authentication Errors**:
    ```bash
-   # Check Qdrant container
-   docker ps | grep qdrant
-   
-   # Test vector search
-   python3 -m pytest tests/test_basic_functionality.py::TestBasicFunctionality::test_vector_search_basic -v
-   ```
-
-4. **GPU Not Detected**:
-   ```bash
-   # Check CUDA availability
-   python3 -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
-   
-   # Install CUDA PyTorch (optional)
-   pip install torch --index-url https://download.pytorch.org/whl/cu128
+   # Check API key format
+   python3 -c "
+   import json
+   with open('demo_tenant_keys.json') as f:
+       keys = json.load(f)
+   print(keys['tenant1']['api_key'])
+   "
    ```
 
 ### Debug Mode
 ```bash
-# Run with verbose output and full tracebacks
+# Verbose output with full details
 python3 -m pytest tests/ -v -s --tb=long
 
-# Run single test with debugging
-python3 -m pytest tests/test_basic_functionality.py::TestBasicFunctionality::test_rag_pipeline_basic -v -s --tb=long
+# Single test with debugging
+python3 -m pytest tests/test_api_query.py::TestAPIQuery::test_basic_rag_query -v -s
 ```
 
-## ✅ Success Criteria
+## ✅ Benefits of API-Only Testing
 
-The streamlined test suite validates:
-
-- ✅ **Core RAG Functionality**: All basic operations working
-- ✅ **Vector Search**: Relevant results with 0.53 avg similarity
-- ✅ **Database Integration**: PostgreSQL + Qdrant hybrid working
-- ✅ **Multi-Tenant Security**: Complete tenant isolation
-- ✅ **Performance**: Sub-second search, 3.6s end-to-end RAG
-- ✅ **Error Handling**: Graceful degradation
-- ✅ **GPU Compatibility**: RTX 5070 CPU fallback working
+- **Clear Separation**: No business logic mixed with tests
+- **True Integration**: Tests actual API endpoints users will call
+- **Environment Agnostic**: Works with any deployment (local, staging, production)
+- **Minimal Dependencies**: Only requires `requests`, `pytest`, and `python-dotenv`
+- **Fast Execution**: No heavy ML model loading in tests
+- **Realistic**: Tests the same paths external clients use
 
 ## 🎯 Bottom Line
 
-**The RAG system is fully functional and production-ready.** 
+**Pure API testing that validates the RAG system from the outside, exactly how it will be used in production.**
 
-This streamlined test suite provides comprehensive validation without redundancy. The 5 core test files cover all critical functionality and architectural components of the PostgreSQL + Qdrant hybrid RAG system.
-
-**Next Steps**: Continue fixing minor test configuration issues while maintaining the working core functionality that has been validated.
+This approach ensures the API contracts work correctly while keeping tests independent of internal implementation details.
