@@ -16,11 +16,22 @@ Usage:
 import requests
 import json
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from scripts.utils import get_paths
+    paths = get_paths()
+    PROJECT_ROOT = paths.root
+except ImportError:
+    # Fallback to old method
+    PROJECT_ROOT = Path(__file__).parent.parent
+
 # Configuration
-PROJECT_ROOT = Path(__file__).parent.parent
 env_file = PROJECT_ROOT / ".env"
 load_dotenv(env_file)
 

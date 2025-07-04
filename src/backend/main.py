@@ -16,6 +16,7 @@ from src.backend.config.settings import get_settings
 from src.backend.api.v1.routes import (
     health as health_routes,
     admin as admin_routes,
+    audit as audit_routes,
     setup as setup_routes,
     tenants as tenant_routes,
     auth as auth_routes,
@@ -145,17 +146,17 @@ app = FastAPI(
     openapi_url=f"{settings.api_v1_str}/openapi.json"
 )
 
-# Setup comprehensive error handling
-setup_exception_handlers(app)
-
-# Add middleware
+# Add CORS middleware FIRST - must be before other middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Setup comprehensive error handling
+setup_exception_handlers(app)
 
 app.middleware("http")(api_key_auth_middleware)
 app.middleware("http")(monitoring_middleware)
@@ -183,6 +184,7 @@ app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health",
 app.include_router(auth_routes.router, prefix=f"{settings.api_v1_str}/auth", tags=["Authentication"])
 app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
+app.include_router(audit_routes.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])
 app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
 
 # Service-based routes

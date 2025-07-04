@@ -127,14 +127,19 @@ def setup_admin_tenant() -> bool:
     
     try:
         # Check if .env already has admin credentials
+        logger.info("🔍 Checking for existing admin credentials in .env...")
         from dotenv import load_dotenv
         load_dotenv()
         
         admin_tenant_id = os.getenv("ADMIN_TENANT_ID")
         admin_api_key = os.getenv("ADMIN_API_KEY")
         
+        logger.info(f"📋 Found ADMIN_TENANT_ID: {'Yes' if admin_tenant_id else 'No'}")
+        logger.info(f"📋 Found ADMIN_API_KEY: {'Yes' if admin_api_key else 'No'}")
+        
         if admin_tenant_id and admin_api_key:
             # Verify the tenant actually exists in the database
+            logger.info(f"🔍 Verifying tenant {admin_tenant_id} exists in database...")
             if verify_admin_tenant_exists(admin_tenant_id):
                 logger.info("✅ Admin tenant verified in database")
                 return True
@@ -143,10 +148,15 @@ def setup_admin_tenant() -> bool:
                 return create_admin_tenant_with_existing_credentials(admin_tenant_id, admin_api_key)
         
         # Create admin tenant directly
-        return create_admin_tenant_inline()
+        logger.info("🏗️ No existing admin credentials found, creating new admin tenant...")
+        result = create_admin_tenant_inline()
+        logger.info(f"🎯 Admin tenant creation result: {result}")
+        return result
             
     except Exception as e:
         logger.error(f"❌ Failed to setup admin tenant: {e}")
+        import traceback
+        logger.error(f"🔥 Full traceback: {traceback.format_exc()}")
         return False
 
 
@@ -226,26 +236,41 @@ def create_admin_tenant_inline() -> bool:
     
     async def async_create_admin():
         try:
+            logger.info("🔧 Importing database and tenant service...")
             from src.backend.database import get_async_db
             from src.backend.services.tenant_service import TenantService
             
+            logger.info("🔧 Getting database connection...")
             # Create admin tenant
             async for db in get_async_db():
+                logger.info("🔧 Creating tenant service...")
                 tenant_service = TenantService(db)
                 
+                logger.info("🔍 Checking if admin tenant already exists...")
                 # Check if admin tenant already exists
                 existing_admin = await tenant_service.get_tenant_by_slug("admin")
                 if existing_admin:
                     logger.info(f"✅ Admin tenant already exists: {existing_admin.id}")
                     admin_tenant_id = str(existing_admin.id)
-                    admin_api_key = existing_admin.api_key
+                    
+                    # ALWAYS generate a fresh API key for security
+                    logger.info("🔑 Generating fresh admin API key for security...")
+                    import secrets
+                    admin_api_key = f"tenant_admin_{secrets.token_hex(16)}"
+                    
+                    # Update the tenant with the new API key
+                    await tenant_service.update_tenant_api_key(existing_admin.id, admin_api_key)
+                    logger.info("🔐 Admin API key regenerated successfully")
                 else:
+                    logger.info("🏗️ Creating new admin tenant...")
                     # Create new admin tenant
                     tenant_result = await tenant_service.create_tenant(
                         name="admin",
                         description="System administrator tenant"
                     )
+                    logger.info(f"🔧 Tenant creation result: {tenant_result}")
                     
+                    logger.info("🔍 Retrieving created admin tenant details...")
                     # Get the created tenant details
                     admin_tenant = await tenant_service.get_tenant_by_slug("admin")
                     admin_tenant_id = str(admin_tenant.id)
@@ -253,19 +278,33 @@ def create_admin_tenant_inline() -> bool:
                     
                     logger.info(f"✅ Admin tenant created: {admin_tenant_id}")
                 
+                logger.info("📝 Updating .env file with admin credentials...")
                 # Update .env file with admin credentials
                 update_env_file(admin_tenant_id, admin_api_key)
+                logger.info("✅ .env file updated successfully")
                 
                 break  # Only need first session
                 
+            logger.info("🎉 Admin tenant setup completed successfully")
             return True
             
         except Exception as e:
             logger.error(f"❌ Error creating admin tenant: {e}")
+            import traceback
+            logger.error(f"🔥 Full traceback: {traceback.format_exc()}")
             return False
     
     # Run the async function
-    return asyncio.run(async_create_admin())
+    try:
+        logger.info("🚀 Starting async admin tenant creation...")
+        result = asyncio.run(async_create_admin())
+        logger.info(f"🎯 Async admin tenant creation result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Error in async admin tenant creation: {e}")
+        import traceback
+        logger.error(f"🔥 Full traceback: {traceback.format_exc()}")
+        return False
 
 
 def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:

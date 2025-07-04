@@ -743,27 +743,6 @@ async def update_maintenance_mode(
     except Exception as e:
         raise handle_exception(e, endpoint="update_maintenance_mode")
 
-@router.get("/audit/events", response_model=List[SyncEventResponse])
-async def get_audit_events(
-    tenant_id: str = None,
-    limit: int = 100,
-    offset: int = 0,
-    current_tenant: dict = Depends(get_current_tenant),
-    audit_logger: AuditLogger = Depends(get_audit_logger),
-    tenant_service: TenantService = Depends(get_tenant_service)
-) -> List[SyncEventResponse]:
-    """
-    Retrieve audit events for a tenant (Admin only).
-    If tenant_id is not provided, returns all events.
-    """
-    logger.info(f"Fetching audit events for tenant {tenant_id if tenant_id else 'ALL'} (admin)")
-    events = audit_logger.get_events_for_tenant(
-        tenant_id=tenant_id,
-        limit=limit,
-        offset=offset
-    )
-    return [SyncEventResponse(**event) for event in events]
-
 # =============================================================================
 # SYNC MANAGEMENT (ADMIN)
 # =============================================================================

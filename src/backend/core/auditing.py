@@ -83,24 +83,43 @@ class AuditLogger:
 
     def get_events_for_tenant(
         self,
-        tenant_id: str,
+        tenant_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve audit events for a specific tenant from Qdrant.
+        Retrieve audit events for a specific tenant or all tenants from Qdrant.
 
         Args:
-            tenant_id: The ID of the tenant to get events for.
+            tenant_id: The ID of the tenant to get events for. If None, returns events for all tenants.
             limit: Maximum number of events to return.
             offset: Number of events to skip (for pagination).
 
         Returns:
-            List of audit event payloads.
+            List of audit event payloads with added 'id' and 'created_at' fields.
         """
         try:
-            collection_name = self._get_audit_collection_name(tenant_id)
+            if tenant_id:
+                # Get events for a specific tenant
+                collection_name = self._get_audit_collection_name(tenant_id)
+                return self._get_events_from_collection(collection_name, limit, offset, tenant_id)
+            else:
+                # Get events for all tenants (admin access)
+                return self._get_events_from_all_collections(limit, offset)
 
+        except Exception as e:
+            logger.error(f"Failed to retrieve audit events: {e}", exc_info=True)
+            return []
+
+    def _get_events_from_collection(
+        self,
+        collection_name: str,
+        limit: int,
+        offset: int,
+        tenant_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get events from a specific collection."""
+        try:
             # Scroll through points, sorted by timestamp
             scroll_result, _ = self.vector_store_manager.client.scroll(
                 collection_name=collection_name,
@@ -114,7 +133,13 @@ class AuditLogger:
                 )
             )
             
-            events = [hit.payload for hit in scroll_result]
+            events = []
+            for hit in scroll_result:
+                event = hit.payload.copy()
+                event["id"] = hit.id  # Add the point ID
+                event["created_at"] = event.get("timestamp", datetime.now(timezone.utc).isoformat())
+                events.append(event)
+            
             logger.debug(f"Retrieved {len(events)} audit events for tenant {tenant_id}")
             return events
 
@@ -124,7 +149,48 @@ class AuditLogger:
                 logger.warning(f"Audit collection for tenant {tenant_id} not found. Returning empty list.")
                 return []
             
-            logger.error(f"Failed to retrieve audit events from Qdrant for tenant {tenant_id}: {e}", exc_info=True)
+            logger.error(f"Failed to retrieve audit events from collection {collection_name}: {e}", exc_info=True)
+            return []
+
+    def _get_events_from_all_collections(self, limit: int, offset: int) -> List[Dict[str, Any]]:
+        """Get events from all tenant audit collections (admin access)."""
+        try:
+            # Get all collections
+            collections = self.vector_store_manager.client.get_collections()
+            audit_collections = [
+                col.name for col in collections.collections
+                if col.name.endswith("_audit_logs")
+            ]
+            
+            all_events = []
+            
+            # Collect events from all audit collections
+            for collection_name in audit_collections:
+                try:
+                    # Extract tenant_id from collection name
+                    tenant_id = collection_name.replace("tenant_", "").replace("_audit_logs", "")
+                    
+                    # Get events from this collection
+                    events = self._get_events_from_collection(collection_name, limit * 2, 0, tenant_id)
+                    all_events.extend(events)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to get events from collection {collection_name}: {e}")
+                    continue
+            
+            # Sort all events by timestamp (newest first)
+            all_events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            
+            # Apply pagination
+            start_idx = offset
+            end_idx = offset + limit
+            paginated_events = all_events[start_idx:end_idx]
+            
+            logger.debug(f"Retrieved {len(paginated_events)} audit events from {len(audit_collections)} collections")
+            return paginated_events
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve audit events from all collections: {e}", exc_info=True)
             return []
 
 

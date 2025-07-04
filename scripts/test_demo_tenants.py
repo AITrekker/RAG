@@ -16,21 +16,51 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from scripts.utils import get_paths, APIClient
+    paths = get_paths()
+    # Use validated API client for robust requests
+    use_validated_client = True
+except ImportError:
+    # Fallback if utils not available
+    print("⚠️ Using fallback path detection and basic HTTP client")
+    paths = None
+    use_validated_client = False
+
 BASE_URL = "http://localhost:8000"
 
 class DemoTenantTester:
     def __init__(self):
-        # Load API keys from the demo setup
-        keys_file = Path("demo_tenant_keys.json")
+        # Initialize API client with validation if available
+        if use_validated_client:
+            self.api_client = APIClient(BASE_URL, validate_requests=True)
+        else:
+            self.api_client = None
+        # Load API keys using robust path detection
+        if paths:
+            keys_file = paths.demo_keys_file
+        else:
+            # Fallback to old method
+            keys_file = Path(__file__).parent.parent / "demo_tenant_keys.json"
+            
         if not keys_file.exists():
             print("❌ demo_tenant_keys.json not found. Run setup_demo_tenants.py first.")
+            print(f"   Expected location: {keys_file}")
             sys.exit(1)
         
         with open(keys_file) as f:
             self.tenant_keys = json.load(f)
         
-        # Load admin key from .env
-        env_file = Path(".env")
+        # Load admin key using robust path detection
+        if paths:
+            env_file = paths.env_file
+        else:
+            # Fallback to old method
+            env_file = Path(__file__).parent.parent / ".env"
+        
         self.admin_key = None
         if env_file.exists():
             with open(env_file) as f:
@@ -41,7 +71,26 @@ class DemoTenantTester:
     
     async def test_api_endpoint(self, session: aiohttp.ClientSession, method: str, 
                                endpoint: str, api_key: str, data: Dict = None) -> Dict[str, Any]:
-        """Test a single API endpoint"""
+        """Test a single API endpoint with optional validation"""
+        # Use validated client if available
+        if self.api_client:
+            try:
+                if method.upper() == "GET":
+                    return await self.api_client.get(endpoint, api_key)
+                elif method.upper() == "POST":
+                    return await self.api_client.post(endpoint, api_key, data)
+                else:
+                    # Fallback to manual request for unsupported methods
+                    return await self._manual_request(session, method, endpoint, api_key, data)
+            except Exception as e:
+                print(f"⚠️ Validated request failed, falling back to manual: {e}")
+                return await self._manual_request(session, method, endpoint, api_key, data)
+        else:
+            return await self._manual_request(session, method, endpoint, api_key, data)
+    
+    async def _manual_request(self, session: aiohttp.ClientSession, method: str,
+                            endpoint: str, api_key: str, data: Dict = None) -> Dict[str, Any]:
+        """Manual HTTP request without validation"""
         url = f"{BASE_URL}{endpoint}"
         headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
         
@@ -114,7 +163,7 @@ class DemoTenantTester:
             print(f"⚠️ File listing failed: {files_result}")
         
         # Test health check  
-        health_result = await self.test_api_endpoint(session, "GET", "/api/v1/health/status", api_key)
+        health_result = await self.test_api_endpoint(session, "GET", "/api/v1/health/liveness", api_key)
         
         if health_result["status"] == 200:
             health = health_result["data"]

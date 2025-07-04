@@ -15,13 +15,16 @@ __pycache__
 venv/
 env/
 
-# Node.js
-node_modules/
+# Node.js (more specific patterns)
+**/node_modules/
+src/frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .npm
 .yarn-integrity
+package-lock.json
+yarn.lock
 
 # IDE and editor files
 .vscode/

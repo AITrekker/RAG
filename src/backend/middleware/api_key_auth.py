@@ -67,19 +67,29 @@ async def api_key_auth_middleware(request: Request, call_next):
     if is_public_endpoint(request.url.path):
         return await call_next(request)
     
+    # Allow OPTIONS requests for CORS preflight without authentication
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    
     try:
         # Extract API key from request
         api_key = extract_api_key(request)
         
         if not api_key:
             logger.warning(f"Missing API key for {request.url.path}")
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={
                     "error": "Missing API key",
                     "message": "Provide API key in X-API-Key header or Authorization: Bearer token"
                 }
             )
+            # Add CORS headers to error responses
+            origin = request.headers.get("origin")
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
         
         # Look up tenant by API key using service
         async for db in get_async_db():
@@ -89,13 +99,19 @@ async def api_key_auth_middleware(request: Request, call_next):
         
         if not tenant:
             logger.warning(f"Invalid API key attempted: {api_key[:20]}...")
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={
                     "error": "Invalid API key",
                     "message": "The provided API key is invalid or has been revoked"
                 }
             )
+            # Add CORS headers to error responses
+            origin = request.headers.get("origin")
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
         
         if not tenant.is_active:
             logger.warning(f"Inactive tenant attempted access: {tenant.slug}")

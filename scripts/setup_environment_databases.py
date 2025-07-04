@@ -13,8 +13,18 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from scripts.utils import get_paths
+    paths = get_paths()
+    PROJECT_ROOT = paths.root
+except ImportError:
+    # Fallback to old method
+    PROJECT_ROOT = Path(__file__).parent.parent
+
 # Load environment variables
-PROJECT_ROOT = Path(__file__).parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 ENVIRONMENTS = ["production", "staging", "test", "development"]

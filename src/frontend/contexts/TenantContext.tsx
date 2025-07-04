@@ -21,12 +21,35 @@ const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
 export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [tenant, setTenant] = useState<string | null>(() => localStorage.getItem('tenantId'));
-  const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem('apiKey'));
+  
+  // Auto-load admin API key from environment, fallback to localStorage
+  const getInitialApiKey = () => {
+    const envAdminKey = import.meta.env.VITE_ADMIN_API_KEY;
+    if (envAdminKey && envAdminKey !== 'your_admin_api_key_here') {
+      return envAdminKey;
+    }
+    return localStorage.getItem('apiKey');
+  };
+  
+  const [apiKey, setApiKey] = useState<string | null>(getInitialApiKey);
   const queryClient = useQueryClient();
 
   const { data: tenants = [], isLoading } = useQuery<TenantResponse[], ApiError>({
     queryKey: ['tenants'],
-    queryFn: TenantsService.getTenantsApiV1TenantsGet,
+    queryFn: async () => {
+      // Use the working auth/tenants endpoint instead of the generated client
+      const response = await fetch(`${OpenAPI.BASE}/api/v1/auth/tenants`, {
+        headers: {
+          'X-API-Key': apiKey!,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
+    },
+    enabled: !!apiKey, // Only run query when API key is available
   });
 
   useEffect(() => {

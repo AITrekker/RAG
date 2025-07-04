@@ -22,9 +22,18 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-# Determine paths
-SCRIPT_DIR = Path(__file__).parent.absolute()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
+# Add project root to Python path for imports
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+try:
+    from scripts.utils import get_paths
+    paths = get_paths()
+    PROJECT_ROOT = paths.root
+except ImportError:
+    # Fallback to old method
+    SCRIPT_DIR = Path(__file__).parent.absolute()
+    PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 class CleanupManager:
     def __init__(self, force: bool = False, quiet: bool = False):
@@ -149,6 +158,14 @@ class CleanupManager:
                 db_name = f"rag_db_{env}"
                 
                 # Drop and recreate database (separate commands to avoid transaction issues)
+                
+                # First, terminate all connections to the database
+                terminate_success = self.run_command([
+                    "docker", "exec", "rag_postgres", "psql", 
+                    "-U", postgres_user, "-d", "postgres", "-c",
+                    f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid();"
+                ], f"Terminating connections to {db_name}", check=False)
+                
                 drop_success = self.run_command([
                     "docker", "exec", "rag_postgres", "psql", 
                     "-U", postgres_user, "-d", "postgres", "-c",
@@ -282,11 +299,12 @@ class CleanupManager:
             self.log("Cleanup cancelled")
             return False
         
-        # Clean in order: containers -> database -> files -> credentials
-        if not self.cleanup_containers_with_caches(include_caches):
+        # Clean in order: database -> containers -> files -> credentials
+        # Database cleanup needs containers running, so do it first
+        if not self.cleanup_database(environment):
             success = False
         
-        if not self.cleanup_database(environment):
+        if not self.cleanup_containers_with_caches(include_caches):
             success = False
         
         if not self.cleanup_files(environment):

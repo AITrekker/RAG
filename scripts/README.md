@@ -1,306 +1,451 @@
-# RAG Platform Scripts Directory
+# RAG System Scripts
 
-**Streamlined scripts for the Enterprise RAG Platform with PostgreSQL + Qdrant hybrid architecture.**
-
-After comprehensive cleanup, this directory contains **20 focused scripts** that provide essential functionality without redundancy.
+This directory contains operational scripts for the RAG (Retrieval-Augmented Generation) system. All scripts use robust path detection and API validation to prevent brittleness from environment changes and API evolution.
 
 ## 🚀 Quick Start
 
-### Essential Scripts (Run These First)
 ```bash
-# 1. Initialize database and start services
-python scripts/startup.py
+# Install validation dependencies (recommended)
+pip install -r scripts/requirements-validation.txt
 
-# 2. Set up demo environment
-python scripts/setup_demo_tenants.py
+# Set up demo environment
+python scripts/workflow/setup_demo_tenants.py
 
-# 3. Test demo functionality
+# Test the system
 python scripts/test_demo_tenants.py
 
-# 4. Verify admin setup
-python scripts/verify_admin_setup.py
+# Validate all scripts
+python scripts/validate_all_scripts.py
 ```
 
 ## 📁 Script Categories
 
-### ⭐ **Core API Scripts (4)**
-Essential scripts for API management and tenant operations:
+### 🚀 **Workflow Scripts** (`workflow/`)
+Main operational scripts for system management.
 
-- **`config.py`** - Centralized configuration management
-  - Manages API keys, database connections, environment variables
-  - Required dependency for all other API scripts
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `setup_demo_tenants.py` | Create demo tenants and copy sample data | `python scripts/workflow/setup_demo_tenants.py --env test` |
+| `cleanup.py` | Clean up containers, databases, files | `python scripts/workflow/cleanup.py --all` |
 
-- **`api-demo.py`** - Demo environment management
-  - Creates/manages demo environments via admin API
-  - Generates demo_tenant_keys.json for authentication
+### 🧪 **Testing Scripts**
+Scripts for testing and validation.
 
-- **`api-tenant.py`** - Tenant CRUD operations  
-  - Create, read, update, delete tenant operations
-  - Uses current PostgreSQL + API architecture
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `test_demo_tenants.py` | Test demo tenant functionality | `python scripts/test_demo_tenants.py` |
+| `test_system.py` | Comprehensive system tests | `python scripts/test_system.py` |
+| `test_query.py` | Test RAG query functionality | `python scripts/test_query.py` |
+| `test_sync.py` | Test file sync operations | `python scripts/test_sync.py` |
+| `test_api_key.py` | Test API key functionality | `python scripts/test_api_key.py` |
+| `test_hot_reload.py` | Test hot reload capabilities | `python scripts/test_hot_reload.py` |
+| `test_tenants.py` | Test tenant operations | `python scripts/test_tenants.py` |
 
-- **`startup.py`** - Application initialization
-  - Database seeding, service health checks
-  - Essential for application startup
+### 🔧 **System Management**
+Database and system administration scripts.
 
-### 🏗️ **Setup & Demo Scripts (4)**
-Scripts for environment setup and demo management:
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `delta-sync.py` | Run delta sync for all tenants | `python scripts/delta-sync.py` |
+| `setup_environment_databases.py` | Create environment databases | `python scripts/setup_environment_databases.py` |
+| `verify_admin_setup.py` | Verify admin tenant setup | `python scripts/verify_admin_setup.py` |
+| `verify_admin_setup_simple.py` | Simple admin verification | `python scripts/verify_admin_setup_simple.py` |
+| `inspect-db.py` | Database inspection utility | `python scripts/inspect-db.py` |
 
-- **`setup_demo_tenants.py`** - Demo tenant creation
-  - Creates demo tenants with sample company documents
-  - PostgreSQL-compatible, current architecture
+### 🔍 **Debugging & Analysis**
+Diagnostic and debugging utilities.
 
-- **`test_demo_tenants.py`** - Demo functionality testing
-  - Tests demo tenant functionality via real API endpoints
-  - Validates end-to-end demo workflow
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `debug-tenants.py` | Debug tenant configurations | `python scripts/debug-tenants.py` |
+| `api_rebuild.py` | Rebuild API components | `python scripts/api_rebuild.py` |
+| `config.py` | Configuration management | `python scripts/config.py` |
+| `rag_config_manager.py` | RAG configuration manager | `python scripts/rag_config_manager.py` |
 
-- **`verify_admin_setup.py`** - Comprehensive admin verification
-  - Database connectivity, API access validation
-  - Complete system health check
+### 🛡️ **Security & Validation** (`utils/`, `security/`)
+Validation and security tools.
 
-- **`verify_admin_setup_simple.py`** - Simple admin verification  
-  - File-based verification without database dependencies
-  - Good fallback verification method
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `validate_all_scripts.py` | Comprehensive script validation | `python scripts/validate_all_scripts.py` |
+| `security/secret_scanner.py` | Scan for exposed secrets | `python scripts/security/secret_scanner.py` |
 
-### 🗄️ **Database & Infrastructure (3)**
-Database initialization and maintenance:
+### 🏗️ **Platform-Specific** 
+Platform-specific build and utility scripts.
 
-- **`init_db.sql`** - PostgreSQL schema initialization
-  - Complete database schema for hybrid architecture
-  - Run this first for new installations
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `build-backend.ps1` | Backend build (PowerShell) | `./scripts/build-backend.ps1` |
+| `api-demo.py` | Demo API operations | `python scripts/api-demo.py` |
+| `api-tenant.py` | Tenant API operations | `python scripts/api-tenant.py` |
 
-- **`add_api_keys.sql`** - API key migration
-  - Adds API key columns to existing tenant tables
-  - Migration script for existing databases
+## 🔬 Validation System
 
-- **`delta-sync.py`** - File synchronization
-  - Hybrid PostgreSQL + Qdrant file synchronization
-  - Core sync functionality for document processing
+### **API Validation**
+All scripts now include robust API validation to prevent brittleness:
 
-### 🔧 **Utilities & Debug (6)**
-Development and debugging utilities:
+```python
+# Example: Using validated API client
+from scripts.utils import APIClient
 
-- **`debug-tenants.py`** - Tenant debugging
-  - Tenant troubleshooting and API key recovery
-  - Current service layer integration
+client = APIClient()
+response = await client.get("/api/v1/auth/tenants", api_key)
+```
 
-- **`rename-tenants.py`** - Directory renaming
-  - Cross-platform tenant directory renaming utility
-  - Consolidated from multiple platform-specific scripts
+### **Contract Testing**
+Monitor API changes and detect breaking changes:
 
-- **`test_api_key.py`** - API key testing
-  - API key validation and testing utility
-  - Moved from root directory
+```bash
+# Save current API as baseline
+python scripts/utils/contract_tester.py --save-baseline
 
-- **`test_system.py`** - System integration testing
-  - Comprehensive system integration tests
-  - Moved from root directory
+# Check for breaking changes
+python scripts/utils/contract_tester.py --check-compatibility
+```
 
-- **`test_tenants.py`** - Tenant testing
-  - Tenant-specific testing utilities
-  - Moved from root directory
+### **Comprehensive Validation**
+Validate all scripts against current API:
 
-- **`api_rebuild.py`** - Minimal API testing server
-  - Lightweight FastAPI server for testing
-  - Moved from root directory
+```bash
+# Full validation suite
+python scripts/validate_all_scripts.py
 
-### 🏗️ **Build & Platform (3)**
-Build and platform-specific scripts:
+# Save API baseline for future comparisons
+python scripts/validate_all_scripts.py --save-baseline
 
-- **`build-backend.ps1`** - Backend build script (PowerShell)
-  - Windows PowerShell build automation
-  - Platform-specific but maintained
+# Test live endpoints
+python scripts/validate_all_scripts.py --test-endpoints
 
-- **`run_frontend.ps1`** - Frontend launcher (PowerShell)  
-  - Windows PowerShell frontend startup
-  - Platform-specific but useful for Windows development
+# Check API compatibility
+python scripts/validate_all_scripts.py --check-compat
+```
 
-## 🧹 **Cleanup Summary**
+## 🛠️ Utilities (`utils/`)
 
-### **Before Cleanup**: 60+ scripts
-### **After Cleanup**: 20 focused scripts  
-### **Reduction**: 67% fewer scripts
+### **Path Management**
+Robust project root detection eliminates path dependency issues:
 
-### **Removed Categories**:
-- ❌ **14 archived scripts** (outdated architecture)
-- ❌ **20+ deprecated scripts** (old Qdrant-only system)
-- ❌ **15+ redundant scripts** (duplicate functionality)
-- ❌ **5+ broken scripts** (non-functional endpoints)
+```python
+from scripts.utils import get_paths
 
-### **Consolidated**:
-- 🔄 **3 rename scripts** → 1 cross-platform script
-- 🔄 **Multiple test scripts** → focused testing utilities
-- 🔄 **Platform variations** → kept essential platform-specific tools
+paths = get_paths()
+PROJECT_ROOT = paths.root
+config_dir = paths.config
+uploads_dir = paths.uploads
+```
 
-## 📋 **Usage Examples**
+### **API Validation**
+Prevent script brittleness from API evolution:
+
+```python
+from scripts.utils import APIValidator, validated_api_call
+
+# Validate endpoint exists
+validator = APIValidator()
+await validator.validate_endpoint_exists("GET", "/api/v1/auth/tenants")
+
+# Decorator for automatic validation
+@validated_api_call("GET", "/api/v1/auth/tenants")
+async def get_tenants():
+    pass
+```
+
+### **Contract Testing**
+Monitor API compatibility over time:
+
+```python
+from scripts.utils import APIContractTester
+
+tester = APIContractTester()
+changes = await tester.check_compatibility_with_baseline()
+```
+
+### **Validated HTTP Client**
+Robust API client with automatic validation:
+
+```python
+from scripts.utils import APIClient
+
+# Client with request validation
+client = APIClient(validate_requests=True)
+response = await client.post("/api/v1/query", api_key, {"query": "test"})
+
+# Automatic fallback on validation failure
+response = await client.get("/api/v1/files", api_key)
+```
+
+## ⚙️ Environment Setup
+
+### **Dependencies**
+```bash
+# Core dependencies (included in main requirements.txt)
+pip install python-dotenv requests asyncio
+
+# Validation dependencies (optional but recommended)
+pip install -r scripts/requirements-validation.txt
+```
+
+### **Environment Variables**
+Scripts automatically load from `.env` file:
+
+```bash
+# Database credentials
+POSTGRES_USER=rag_user
+POSTGRES_PASSWORD=your_password
+
+# Admin credentials (auto-generated)
+ADMIN_TENANT_ID=auto-generated-uuid
+ADMIN_API_KEY=auto-generated-key
+
+# Backend URL (optional)
+BACKEND_URL=http://localhost:8000
+```
+
+### **Validation Dependencies**
+For enhanced script validation (optional):
+
+```bash
+# Install additional validation tools
+pip install aiohttp>=3.8.0 jsonschema>=4.0.0
+```
+
+## 📋 Common Workflows
 
 ### **Initial Setup**
 ```bash
-# 1. Initialize database schema
-psql -U rag_user -d rag_db -f scripts/init_db.sql
+# 1. Start containers
+docker-compose up -d
 
-# 2. Start application with health checks
-python scripts/startup.py
+# 2. Set up demo environment
+python scripts/workflow/setup_demo_tenants.py --env development
 
-# 3. Create demo environment
-python scripts/setup_demo_tenants.py
-
-# 4. Verify everything works
+# 3. Test the system
 python scripts/test_demo_tenants.py
+
+# 4. Run delta sync to process files
+python scripts/delta-sync.py
 ```
 
-### **Tenant Management**
+### **Development Workflow**
 ```bash
-# List all tenants
-python scripts/api-tenant.py --list
+# 1. Validate scripts before changes
+python scripts/validate_all_scripts.py --save-baseline
 
-# Create new tenant
-python scripts/api-tenant.py --create --name "New Company" --slug "newco"
+# 2. Make your changes...
 
-# Update tenant
-python scripts/api-tenant.py --update --id "tenant-uuid" --name "Updated Name"
+# 3. Validate after changes
+python scripts/validate_all_scripts.py --check-compat
 
-# Delete tenant
-python scripts/api-tenant.py --delete --id "tenant-uuid"
+# 4. Test specific functionality
+python scripts/test_query.py
 ```
 
-### **Demo Management**
+### **Production Deployment**
 ```bash
-# Setup demo environment
-python scripts/api-demo.py --setup
+# 1. Validate all scripts
+python scripts/validate_all_scripts.py
 
-# Reset demo environment  
-python scripts/api-demo.py --reset
+# 2. Set up production environment
+python scripts/workflow/setup_demo_tenants.py --env production
 
-# Get demo status
-python scripts/api-demo.py --status
-```
-
-### **Debugging & Maintenance**
-```bash
-# Debug tenant issues
-python scripts/debug-tenants.py --tenant-id "uuid"
-
-# Verify admin setup
-python scripts/verify_admin_setup.py
-
-# Test API connectivity
-python scripts/test_api_key.py
-
-# Run system integration tests
+# 3. Verify system health
 python scripts/test_system.py
 ```
 
-### **File Synchronization**
+### **Cleanup & Reset**
 ```bash
-# Run delta sync for specific tenant
-python scripts/delta-sync.py --tenant-id "uuid"
+# Clean everything (interactive)
+python scripts/workflow/cleanup.py
 
-# Full resync
-python scripts/delta-sync.py --full-sync
+# Clean specific environment
+python scripts/workflow/cleanup.py --env test
 
-# Monitor sync status
-python scripts/delta-sync.py --status
+# Force cleanup without prompts
+python scripts/workflow/cleanup.py --all --force
 ```
 
-## 🔧 **Configuration**
+## 🎯 Best Practices
 
-### **Environment Variables**
-All scripts use centralized configuration via `config.py`:
+### **🛡️ Robust Scripts**
+- All scripts use project path detection via `scripts.utils.get_paths()`
+- API calls use validation when available, graceful fallback when not
+- Error handling with informative messages
+- Environment-specific configurations
 
+### **🔍 API Validation**
+- Validate endpoints before making requests
+- Use validated HTTP client for robust API calls
+- Monitor for breaking changes with contract testing
+- Save API baselines before making changes
+
+### **🧪 Testing**
+- Test scripts against live API endpoints
+- Validate script endpoints against OpenAPI schema
+- Use demo tenants for safe testing
+- Check compatibility before deployment
+
+### **🔧 Error Handling**
+Scripts provide helpful error messages:
+
+```bash
+❌ Missing database credentials in .env file
+   Required: POSTGRES_USER, POSTGRES_PASSWORD
+   
+💡 Run scripts/workflow/setup_demo_tenants.py first to set up directories
+
+⚠️ Using fallback path detection (validation utilities not available)
+```
+
+## 🔧 Troubleshooting
+
+### **Common Issues**
+
+**Script can't find project root:**
+```bash
+# The path detection should handle this automatically
+# If issues persist, check for marker files:
+ls docker-compose.yml Makefile CLAUDE.md .git
+```
+
+**API validation not working:**
+```bash
+# Install validation dependencies
+pip install aiohttp jsonschema
+
+# Check backend is running
+curl http://localhost:8000/api/v1/health/liveness
+```
+
+**Missing API keys:**
+```bash
+# Generate demo tenant keys
+python scripts/workflow/setup_demo_tenants.py
+
+# Check admin keys in .env
+grep ADMIN_API_KEY .env
+```
+
+**Database connection issues:**
+```bash
+# Start containers
+docker-compose up -d
+
+# Check container status
+docker ps
+
+# Initialize databases
+python scripts/setup_environment_databases.py
+```
+
+### **Debug Mode**
+Most scripts support verbose output for troubleshooting.
+
+## 📁 File Structure
+
+```
+scripts/
+├── README.md                           # This file
+├── requirements-validation.txt         # Validation dependencies
+├── validate_all_scripts.py            # Comprehensive validation
+│
+├── workflow/                           # Main operational scripts
+│   ├── setup_demo_tenants.py          # Demo environment setup
+│   └── cleanup.py                     # System cleanup
+│
+├── utils/                              # Utility modules
+│   ├── __init__.py                     # Module exports
+│   ├── project_paths.py               # Robust path detection
+│   ├── api_validator.py               # OpenAPI validation
+│   ├── contract_tester.py             # API compatibility testing
+│   └── script_validator.py            # Script validation framework
+│
+├── security/                           # Security tools
+│   ├── secret_scanner.py              # Secret detection
+│   ├── setup_security.sh              # Security setup
+│   └── pre_commit_security.sh         # Pre-commit hooks
+│
+└── [individual scripts]                # Testing, management, and utility scripts
+```
+
+## 🚀 Key Features
+
+### **Robust Path Detection**
+- Automatic project root detection using marker files
+- No more hardcoded relative paths
+- Works from any directory in the project
+
+### **API Validation System** 
+- Validates endpoints against OpenAPI schema
+- Detects breaking changes between API versions
+- Prevents script brittleness from API evolution
+
+### **Graceful Fallbacks**
+- Scripts work even without validation dependencies
+- Informative error messages when dependencies missing
+- Progressive enhancement pattern
+
+### **Environment Safety**
+- Environment-specific configurations
+- Safe cleanup operations with confirmations
+- Multi-environment support (dev, test, staging, prod)
+
+## 💡 Advanced Usage
+
+### **Custom Validation Rules**
 ```python
-# Database connection
-DATABASE_URL = "postgresql://rag_user:rag_password@localhost:5432/rag_db"
+from scripts.utils import APIValidator
 
-# API endpoints
-API_BASE_URL = "http://localhost:8000"
-ADMIN_API_KEY = "your-admin-api-key"
+validator = APIValidator()
 
-# Qdrant connection
-QDRANT_URL = "http://localhost:6333"
+# Custom endpoint validation
+@validator.custom_rule
+def validate_tenant_access(endpoint, api_key):
+    # Your custom validation logic
+    pass
 ```
 
-### **Dependencies**
-Scripts require the main application dependencies:
+### **Script Health Monitoring**
 ```bash
-pip install -r requirements.txt
+# Monitor script health in CI/CD
+python scripts/validate_all_scripts.py --check-compat
+if [ $? -ne 0 ]; then
+    echo "⚠️ Breaking API changes detected"
+    exit 1
+fi
 ```
 
-### **Authentication**
-Most scripts require admin API key authentication:
-- Set `ADMIN_API_KEY` environment variable
-- Or configure in `config.py`
-- Generate keys via tenant management
+### **API Evolution Tracking**
+```bash
+# Track API changes over time
+python scripts/utils/contract_tester.py --save-current api_v1.2.0.json
+python scripts/utils/contract_tester.py --compare api_v1.1.0.json api_v1.2.0.json
+```
 
-## 🎯 **Architecture Alignment**
+## 🎯 Migration from Old Scripts
 
-All remaining scripts are **fully compatible** with the current PostgreSQL + Qdrant hybrid architecture:
+The new validation system provides backward compatibility while adding robustness:
 
-✅ **PostgreSQL Integration**: All database operations use PostgreSQL  
-✅ **API-First**: Scripts use REST API endpoints, not direct database access  
-✅ **Multi-Tenant**: Complete tenant isolation and security  
-✅ **Hybrid Vector Store**: Qdrant for vectors, PostgreSQL for metadata  
-✅ **Modern Patterns**: Current service interfaces and dependencies  
+### **Before (Brittle)**
+```python
+import requests
+response = requests.get("http://localhost:8000/api/v1/auth/tenants")
+# Fails silently if endpoint changes
+```
 
-## 🔒 **Security**
+### **After (Robust)**
+```python
+from scripts.utils import APIClient
+client = APIClient()
+response = await client.get("/api/v1/auth/tenants", api_key)
+# Validates endpoint exists, provides helpful errors
+```
 
-### **API Key Management**
-- Admin API keys required for most operations
-- Keys stored in environment variables or config
-- No hardcoded credentials in scripts
+## 📚 Additional Documentation
 
-### **Tenant Isolation**
-- All operations respect tenant boundaries
-- Multi-tenant security enforced
-- No cross-tenant data access
+- **Validation System**: [`../docs/SCRIPT_VALIDATION.md`](../docs/SCRIPT_VALIDATION.md)
+- **API Documentation**: http://localhost:8000/docs (FastAPI Swagger)
+- **Architecture**: [`../docs/Architecture.md`](../docs/Architecture.md)
 
-### **Safe Operations**
-- Scripts use official API endpoints
-- No direct database manipulation (except schema initialization)
-- Proper error handling and validation
+---
 
-## 🚀 **Development Workflow**
-
-### **New Installation**
-1. Run `scripts/init_db.sql` to create schema
-2. Run `scripts/startup.py` to initialize services
-3. Run `scripts/setup_demo_tenants.py` to create demo data
-4. Run `scripts/test_demo_tenants.py` to verify functionality
-
-### **Daily Development**
-1. Use `scripts/api-tenant.py` for tenant management
-2. Use `scripts/debug-tenants.py` for troubleshooting
-3. Use `scripts/delta-sync.py` for file synchronization
-4. Use `scripts/verify_admin_setup.py` for health checks
-
-### **Testing & Validation**
-1. Use `scripts/test_*.py` for specific component testing
-2. Use `scripts/api_rebuild.py` for lightweight API testing
-3. Use verification scripts for system health
-
-## 📊 **Script Status**
-
-| Script | Status | Architecture | Purpose |
-|--------|--------|--------------|---------|
-| `config.py` | ✅ Active | Current | Configuration management |
-| `api-demo.py` | ✅ Active | Current | Demo environment |
-| `api-tenant.py` | ✅ Active | Current | Tenant operations |
-| `startup.py` | ✅ Active | Current | Application initialization |
-| `setup_demo_tenants.py` | ✅ Active | Current | Demo setup |
-| `test_demo_tenants.py` | ✅ Active | Current | Demo testing |
-| `verify_admin_setup.py` | ✅ Active | Current | Admin verification |
-| `init_db.sql` | ✅ Active | Current | Database schema |
-| `delta-sync.py` | ✅ Active | Current | File synchronization |
-| `debug-tenants.py` | ✅ Active | Current | Debugging utility |
-
-All scripts are **production-ready** and aligned with the current PostgreSQL + Qdrant hybrid architecture.
-
-## 🎯 **Next Steps**
-
-The streamlined scripts directory provides all essential functionality for:
-- ✅ **Initial setup and configuration**
-- ✅ **Tenant and demo management**  
-- ✅ **Testing and validation**
-- ✅ **Debugging and maintenance**
-- ✅ **File synchronization and processing**
-
-**Result**: Clean, focused, and production-ready script collection that supports the full RAG platform lifecycle.
+**Need help?** Check individual script files for detailed usage information and examples. Most scripts include `--help` options and comprehensive error messages.

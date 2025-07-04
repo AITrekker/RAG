@@ -18,11 +18,22 @@ import requests
 import json
 import os
 import argparse
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from scripts.utils import get_paths
+    paths = get_paths()
+    PROJECT_ROOT = paths.root
+except ImportError:
+    # Fallback to old method
+    PROJECT_ROOT = Path(__file__).parent.parent
+
 # Configuration
-PROJECT_ROOT = Path(__file__).parent.parent
 env_file = PROJECT_ROOT / ".env"
 load_dotenv(env_file)
 
@@ -31,7 +42,10 @@ ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
 def get_tenant_api_key():
     """Try to get tenant API key from demo file, fallback to admin key."""
-    tenant_keys_file = PROJECT_ROOT / "demo_tenant_keys.json"
+    if 'paths' in locals():
+        tenant_keys_file = paths.demo_keys_file
+    else:
+        tenant_keys_file = PROJECT_ROOT / "demo_tenant_keys.json"
     
     if tenant_keys_file.exists():
         try:

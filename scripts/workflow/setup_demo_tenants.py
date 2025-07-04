@@ -24,9 +24,17 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
-# Determine paths
-SCRIPT_DIR = Path(__file__).parent.absolute()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+try:
+    from scripts.utils import get_paths
+    paths = get_paths()
+    PROJECT_ROOT = paths.root
+except ImportError:
+    # Fallback to old method
+    SCRIPT_DIR = Path(__file__).parent.absolute()
+    PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from .env file."""

@@ -21,9 +21,16 @@ from dotenv import load_dotenv
 # Set NLTK data path for Docker environment
 os.environ['NLTK_DATA'] = '/tmp/nltk_data'
 
-# Add the project root to Python path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from scripts.utils import get_paths
+    paths = get_paths()
+    PROJECT_ROOT = paths.root
+except ImportError:
+    # Fallback to old method
+    PROJECT_ROOT = Path(__file__).parent.parent
 
 # Setup DATABASE_URL for local vs Docker execution
 def setup_database_url():
@@ -91,7 +98,7 @@ async def get_tenant_directories() -> List[UUID]:
     Returns:
         List of tenant UUIDs found in upload directories
     """
-    uploads_path = Path("data/uploads")
+    uploads_path = PROJECT_ROOT / "data" / "uploads"
     tenant_ids = []
     
     if not uploads_path.exists():

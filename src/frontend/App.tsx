@@ -18,6 +18,7 @@ function App() {
     setActiveView(view);
   };
 
+
   // If there's no API key, force the user to configure one.
   if (!apiKey) {
     return (
