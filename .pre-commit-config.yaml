@@ -1,0 +1,79 @@
+# Pre-commit configuration for RAG Platform Security
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  # Secret detection
+  - repo: local
+    hooks:
+      - id: secret-scanner
+        name: RAG Platform Secret Scanner
+        entry: python3 scripts/security/secret_scanner.py --pre-commit
+        language: system
+        stages: [commit]
+        pass_filenames: false
+        
+  # Prevent common dangerous files
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+      - id: forbid-new-submodules
+      
+  # Environment file protection
+  - repo: local
+    hooks:
+      - id: env-file-check
+        name: Prevent .env file commits
+        entry: bash -c 'if git diff --cached --name-only | grep -E "\.env$|\.env\." | grep -v "\.env\.example$"; then echo "❌ .env files detected in commit"; exit 1; fi'
+        language: system
+        stages: [commit]
+        pass_filenames: false
+
+  # Additional secret detection with detect-secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: [
+          '--baseline', '.secrets.baseline',
+          '--exclude-files', 'node_modules/.*',
+          '--exclude-files', '\.venv/.*',
+          '--exclude-files', '\.git/.*',
+          '--exclude-files', 'package-lock\.json',
+          '--exclude-files', 'yarn\.lock'
+        ]
+
+  # Python security
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: ['-r', 'src/backend/', '-f', 'json', '-o', 'bandit-report.json']
+        additional_dependencies: ['bandit[toml]']
+
+  # Code quality (helps catch hardcoded values)
+  - repo: https://github.com/psf/black
+    rev: 23.3.0
+    hooks:
+      - id: black
+        language_version: python3
+        files: '^src/backend/.*\.py$'
+
+  # TypeScript/JavaScript security
+  - repo: local
+    hooks:
+      - id: eslint-security
+        name: ESLint Security Rules
+        entry: bash -c 'cd src/frontend && npm run lint:security'
+        language: system
+        files: '\.(js|ts|tsx)$'
+        require_serial: true
+
+# Global configuration
+default_language_version:
+  python: python3
