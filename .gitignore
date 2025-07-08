@@ -24,6 +24,7 @@ test_env/
 .idea/
 .cursor/
 .claude/
+.local/
 CLAUDE.md
 .DS_Store
 Thumbs.db
@@ -42,6 +43,13 @@ tasks
 
 # Ignore local-only Docker override
 docker-compose.override.yml
+
+# API keys and secrets
+demo_tenant_keys.json
+demo_admin_keys.json
+*_api_keys.json
+*.secret
+*.key
 
 # ===================================================================
 # Frontend (Node.js) - Updated for both npm and yarn

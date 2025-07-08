@@ -3,7 +3,6 @@ import { useTenant } from './contexts/TenantContext';
 import { MainLayout } from './components/Layout/MainLayout';
 import { QueryInterface } from './components/Query/QueryInterface';
 import { AuditLogViewer } from './components/Audit/AuditLogViewer';
-import { ApiKeyModal } from './components/ApiKeyModal';
 import { SyncDashboard } from './components/Sync/SyncDashboard';
 import { AnalyticsDashboard } from './components/Analytics/AnalyticsDashboard';
 import { Toaster } from "@/components/ui/toaster";
@@ -13,18 +12,24 @@ type ActiveView = 'search' | 'sync' | 'audit' | 'analytics';
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('search');
-  const { apiKey, tenant } = useTenant();
+  const { tenantApiKey, tenant, tenants, isLoading } = useTenant();
 
   const handleViewChange = (view: ActiveView) => {
     setActiveView(view);
   };
 
-
-  // If there's no API key, force the user to configure one.
-  if (!apiKey) {
+  // Show loading state while tenants are being loaded
+  if (isLoading) {
     return (
       <>
-        <ApiKeyModal />
+        <MainLayout>
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading tenants...</p>
+            </div>
+          </div>
+        </MainLayout>
         <Toaster />
       </>
     );
@@ -79,7 +84,19 @@ function App() {
           </nav>
         </div>
         <div className="bg-white rounded-lg shadow-md p-6 min-h-[400px]">
-          {tenant ? renderContent() : <div className="text-center text-gray-500">Please select a tenant to begin.</div>}
+          {tenants.length === 0 ? (
+            <div className="text-center text-gray-500 py-12">
+              <h3 className="text-lg font-medium mb-2">No Tenants Available</h3>
+              <p>No tenants have been provisioned yet. Please contact your administrator.</p>
+            </div>
+          ) : tenant ? (
+            renderContent()
+          ) : (
+            <div className="text-center text-gray-500 py-12">
+              <h3 className="text-lg font-medium mb-2">No Tenant Selected</h3>
+              <p>Please select a tenant from the dropdown to begin.</p>
+            </div>
+          )}
         </div>
       </MainLayout>
       <Toaster />

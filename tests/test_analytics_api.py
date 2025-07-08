@@ -43,7 +43,23 @@ def load_test_api_keys():
         }
 
 VALID_API_KEYS = load_test_api_keys()
-ADMIN_API_KEY = "test_admin_api_key"
+
+def load_admin_api_key():
+    """Load admin API key from .env file"""
+    import os
+    from pathlib import Path
+    
+    env_file = Path(__file__).parent.parent / ".env"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                if line.startswith("ADMIN_API_KEY="):
+                    return line.split("=", 1)[1].strip()
+    
+    # Fallback for testing
+    return os.getenv("ADMIN_API_KEY", "test_admin_api_key")
+
+ADMIN_API_KEY = load_admin_api_key()
 
 # Helper function to make authenticated requests
 def make_auth_request(method, endpoint, api_key=VALID_API_KEYS["tenant1"], **kwargs):

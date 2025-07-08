@@ -122,34 +122,41 @@ def create_database_tables() -> bool:
 
 
 def setup_admin_tenant() -> bool:
-    """Setup admin tenant if it doesn't exist."""
+    """Setup admin tenant with always-fresh API key."""
     logger.info("👤 Setting up admin tenant...")
     
     try:
-        # Check if .env already has admin credentials
-        logger.info("🔍 Checking for existing admin credentials in .env...")
+        # Always generate a new admin API key for security
+        logger.info("🔑 Generating fresh admin API key...")
+        import secrets
+        new_admin_api_key = f"tenant_admin_{secrets.token_hex(20)}"
+        
+        # Check if admin tenant already exists in database
         from dotenv import load_dotenv
         load_dotenv()
         
         admin_tenant_id = os.getenv("ADMIN_TENANT_ID")
-        admin_api_key = os.getenv("ADMIN_API_KEY")
+        logger.info(f"📋 Found existing ADMIN_TENANT_ID: {'Yes' if admin_tenant_id else 'No'}")
         
-        logger.info(f"📋 Found ADMIN_TENANT_ID: {'Yes' if admin_tenant_id else 'No'}")
-        logger.info(f"📋 Found ADMIN_API_KEY: {'Yes' if admin_api_key else 'No'}")
-        
-        if admin_tenant_id and admin_api_key:
-            # Verify the tenant actually exists in the database
+        if admin_tenant_id:
+            # Admin tenant ID exists, verify in database and update key
             logger.info(f"🔍 Verifying tenant {admin_tenant_id} exists in database...")
             if verify_admin_tenant_exists(admin_tenant_id):
-                logger.info("✅ Admin tenant verified in database")
-                return True
+                logger.info("✅ Admin tenant found in database, updating API key...")
+                if update_admin_tenant_api_key(admin_tenant_id, new_admin_api_key):
+                    logger.info("✅ Admin tenant API key updated successfully")
+                    update_env_file(admin_tenant_id, new_admin_api_key)
+                    return True
+                else:
+                    logger.error("❌ Failed to update admin tenant API key")
+                    return False
             else:
-                logger.info("⚠️ Admin credentials exist but tenant not found in database, recreating...")
-                return create_admin_tenant_with_existing_credentials(admin_tenant_id, admin_api_key)
+                logger.info("⚠️ Admin tenant ID exists but not found in database, recreating...")
+                return create_admin_tenant_with_new_key(admin_tenant_id, new_admin_api_key)
         
-        # Create admin tenant directly
-        logger.info("🏗️ No existing admin credentials found, creating new admin tenant...")
-        result = create_admin_tenant_inline()
+        # No admin tenant ID, create new admin tenant
+        logger.info("🏗️ No existing admin tenant found, creating new admin tenant...")
+        result = create_admin_tenant_with_fresh_key(new_admin_api_key)
         logger.info(f"🎯 Admin tenant creation result: {result}")
         return result
             
@@ -307,6 +314,118 @@ def create_admin_tenant_inline() -> bool:
         return False
 
 
+def update_admin_tenant_api_key(admin_tenant_id: str, new_api_key: str) -> bool:
+    """Update existing admin tenant's API key in the database."""
+    try:
+        import asyncio
+        from src.backend.database import AsyncSessionLocal
+        from src.backend.models.database import Tenant
+        from sqlalchemy import select
+        from uuid import UUID
+        
+        async def update_key():
+            async with AsyncSessionLocal() as session:
+                # Find the admin tenant
+                result = await session.execute(
+                    select(Tenant).where(Tenant.id == UUID(admin_tenant_id))
+                )
+                tenant = result.scalar_one_or_none()
+                
+                if not tenant:
+                    logger.error(f"❌ Admin tenant {admin_tenant_id} not found in database")
+                    return False
+                
+                # Update the API key
+                tenant.api_key = new_api_key
+                await session.commit()
+                logger.info(f"✅ Updated API key for admin tenant {admin_tenant_id}")
+                return True
+        
+        return asyncio.run(update_key())
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to update admin tenant API key: {e}")
+        return False
+
+
+def create_admin_tenant_with_new_key(admin_tenant_id: str, new_api_key: str) -> bool:
+    """Create admin tenant with existing ID but new API key."""
+    try:
+        import asyncio
+        from src.backend.database import AsyncSessionLocal
+        from src.backend.models.database import Tenant
+        from uuid import UUID
+        
+        async def create_tenant():
+            async with AsyncSessionLocal() as session:
+                # Create admin tenant with existing ID
+                admin_tenant = Tenant(
+                    id=UUID(admin_tenant_id),
+                    name="admin",
+                    slug="admin",
+                    plan_tier="free",
+                    storage_limit_gb=10,
+                    max_users=5,
+                    is_active=True,
+                    api_key=new_api_key,
+                    api_key_name="Default Key"
+                )
+                
+                session.add(admin_tenant)
+                await session.commit()
+                logger.info(f"✅ Created admin tenant with ID {admin_tenant_id}")
+                return True
+        
+        result = asyncio.run(create_tenant())
+        if result:
+            update_env_file(admin_tenant_id, new_api_key)
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create admin tenant with new key: {e}")
+        return False
+
+
+def create_admin_tenant_with_fresh_key(new_api_key: str) -> bool:
+    """Create completely new admin tenant with fresh API key."""
+    try:
+        import asyncio
+        from src.backend.database import AsyncSessionLocal
+        from src.backend.models.database import Tenant
+        from uuid import uuid4
+        
+        async def create_tenant():
+            async with AsyncSessionLocal() as session:
+                # Create admin tenant with new ID
+                new_tenant_id = uuid4()
+                admin_tenant = Tenant(
+                    id=new_tenant_id,
+                    name="admin",
+                    slug="admin", 
+                    plan_tier="free",
+                    storage_limit_gb=10,
+                    max_users=5,
+                    is_active=True,
+                    api_key=new_api_key,
+                    api_key_name="Default Key"
+                )
+                
+                session.add(admin_tenant)
+                await session.commit()
+                logger.info(f"✅ Created new admin tenant with ID {new_tenant_id}")
+                return str(new_tenant_id)
+        
+        new_tenant_id = asyncio.run(create_tenant())
+        if new_tenant_id:
+            update_env_file(new_tenant_id, new_api_key)
+            return True
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create admin tenant with fresh key: {e}")
+        return False
+
+
 def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
     """Update .env file with admin credentials and environment information."""
     env_file = Path(".env")
@@ -364,6 +483,31 @@ def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
         f.writelines(cleaned_lines)
     
     logger.info("✅ Admin credentials and environment URLs saved to .env file")
+    
+    # Also write admin key to JSON file for frontend access
+    write_admin_config_json(admin_tenant_id, admin_api_key)
+
+
+def write_admin_config_json(admin_tenant_id: str, admin_api_key: str) -> None:
+    """Write admin configuration to JSON file for frontend access."""
+    import json
+    from datetime import datetime, timezone
+    
+    admin_config = {
+        "admin_tenant_id": admin_tenant_id,
+        "admin_api_key": admin_api_key,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source": "init_container"
+    }
+    
+    config_file = Path("demo_admin_keys.json")
+    
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(admin_config, f, indent=2)
+        logger.info("✅ Admin configuration saved to demo_admin_keys.json")
+    except Exception as e:
+        logger.error(f"❌ Failed to write admin config JSON: {e}")
 
 
 def verify_setup() -> bool:

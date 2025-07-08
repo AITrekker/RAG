@@ -57,19 +57,24 @@ def load_config() -> Dict[str, Any]:
         "backend_url": backend_url.rstrip("/")
     }
 
-def make_api_request(method: str, url: str, headers: Dict[str, str], data: Optional[Dict] = None) -> requests.Response:
+def make_api_request(method: str, url: str, headers: Dict[str, str], data: Optional[Dict] = None, timeout: int = 60) -> requests.Response:
     """Make HTTP API request with error handling."""
     try:
         if method.upper() == "GET":
-            response = requests.get(url, headers=headers, timeout=30)
+            response = requests.get(url, headers=headers, timeout=timeout)
         elif method.upper() == "POST":
-            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response = requests.post(url, headers=headers, json=data, timeout=timeout)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
             
         response.raise_for_status()
         return response
         
+    except requests.exceptions.Timeout:
+        print(f"❌ API request timed out after {timeout} seconds")
+        print(f"   URL: {url}")
+        print("   Try increasing timeout or check backend health")
+        sys.exit(1)
     except requests.exceptions.RequestException as e:
         print(f"❌ API request failed: {e}")
         if hasattr(e, 'response') and e.response is not None:
@@ -93,7 +98,7 @@ def initialize_database_schema(config: Dict[str, Any], environment: str) -> None
     print(f"✅ {result['message']}")
 
 def create_tenant_via_api(config: Dict[str, Any], tenant_name: str, description: str) -> Dict[str, Any]:
-    """Create tenant via API."""
+    """Create tenant via API with extended timeout for slow operations."""
     url = f"{config['backend_url']}/api/v1/admin/tenants"
     headers = {"X-API-Key": config["admin_api_key"]}
     data = {
@@ -103,7 +108,8 @@ def create_tenant_via_api(config: Dict[str, Any], tenant_name: str, description:
         "sync_interval": 60
     }
     
-    response = make_api_request("POST", url, headers, data)
+    # Use longer timeout for tenant creation as it can involve initialization
+    response = make_api_request("POST", url, headers, data, timeout=120)
     return response.json()
 
 def get_tenant_by_name(config: Dict[str, Any], tenant_name: str) -> Optional[Dict[str, Any]]:
@@ -148,40 +154,27 @@ def copy_demo_files(tenant_id: str, tenant_name: str) -> int:
     
     return files_copied
 
-def get_tenant_api_key_from_db(tenant_id: str) -> Optional[str]:
-    """Get tenant API key directly from database."""
+def regenerate_tenant_api_key(config: Dict[str, Any], tenant_id: str) -> Optional[str]:
+    """Regenerate API key for existing tenant."""
     try:
-        # Import here to avoid circular imports
-        import asyncio
-        import os
-        import sys
-        from dotenv import load_dotenv
+        # Regenerate API key via admin API
+        url = f"{config['backend_url']}/api/v1/admin/tenants/{tenant_id}/api-keys"
+        headers = {"X-API-Key": config["admin_api_key"]}
+        data = {
+            "name": "Demo Key",
+        }
         
-        # Add project root to Python path
-        sys.path.insert(0, str(PROJECT_ROOT))
+        response = make_api_request("POST", url, headers, data, timeout=30)
+        result = response.json()
         
-        # Set up database connection
-        load_dotenv()
-        os.environ['DATABASE_URL'] = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/rag_db"
+        return result.get("api_key")
         
-        async def get_key():
-            from src.backend.database import AsyncSessionLocal
-            from sqlalchemy import select, text
-            
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(text('''
-                    SELECT api_key FROM tenants WHERE id = :tenant_id
-                '''), {"tenant_id": tenant_id})
-                row = result.fetchone()
-                return row.api_key if row else None
-        
-        return asyncio.run(get_key())
     except Exception as e:
-        print(f"⚠️ Could not get API key from database: {e}")
+        print(f"⚠️ Could not regenerate API key: {e}")
         return None
 
-def setup_demo_tenants(config: Dict[str, Any], environment: str) -> Dict[str, str]:
-    """Setup demo tenants via API calls."""
+def setup_demo_tenants(config: Dict[str, Any], environment: str) -> tuple[Dict[str, str], Dict[str, Dict]]:
+    """Setup demo tenants via API calls with improved error handling."""
     print("\n=== Setting Up Demo Tenants ===")
     
     tenant_configs = [
@@ -191,112 +184,208 @@ def setup_demo_tenants(config: Dict[str, Any], environment: str) -> Dict[str, st
     ]
     
     api_keys = {}
+    tenant_data = {}  # Store tenant ID and info for JSON file generation
     
     for config_item in tenant_configs:
         tenant_name = config_item["name"]
         print(f"\n--- Setting up {tenant_name} ---")
         
-        # Check if tenant exists
-        tenant = get_tenant_by_name(config, tenant_name)
-        
-        if not tenant:
-            # Create tenant via API
-            tenant = create_tenant_via_api(config, tenant_name, config_item["description"])
-            print(f"✓ Created tenant: {tenant['name']}")
-            api_key = tenant.get("api_key", "")
-        else:
-            print(f"✓ Found existing tenant: {tenant['name']}")
-            # For existing tenants, get API key from database
-            api_key = get_tenant_api_key_from_db(tenant["id"])
-            if not api_key:
-                print(f"  ⚠️ Could not retrieve API key for existing tenant")
-                api_key = "*** UNABLE TO RETRIEVE ***"
-        
-        api_keys[tenant_name] = api_key
-        
-        print(f"  - Tenant ID: {tenant['id']}")
-        print(f"  - API Key: {api_key[:20]}..." if api_key and len(api_key) > 20 else f"  - API Key: {api_key}")
-        
-        # Copy demo files
-        files_copied = copy_demo_files(tenant["id"], tenant_name)
-        if files_copied > 0:
-            print(f"  - Demo files: {files_copied} files copied")
-        else:
-            print(f"  - ⚠️ No demo files found for {tenant_name}")
+        try:
+            # Check if tenant exists
+            tenant = get_tenant_by_name(config, tenant_name)
+            
+            if not tenant:
+                # Create tenant via API
+                print(f"⏳ Creating tenant {tenant_name}...")
+                tenant = create_tenant_via_api(config, tenant_name, config_item["description"])
+                print(f"✓ Created tenant: {tenant['name']}")
+                # New tenants get their own API key from creation
+                api_key = tenant.get("api_key", "")
+            else:
+                print(f"✓ Found existing tenant: {tenant['name']}")
+                # For existing tenants, use admin API key (has access to all tenants)
+                print(f"⏳ Using admin API key for existing tenant...")
+                api_key = config["admin_api_key"]
+                print(f"  ✓ Admin API key provides access to all tenants")
+            
+            api_keys[tenant_name] = api_key
+            tenant_data[tenant_name] = {
+                "id": tenant["id"],
+                "name": tenant["name"],
+                "slug": tenant.get("slug", tenant_name)
+            }
+            
+            print(f"  - Tenant ID: {tenant['id']}")
+            print(f"  - API Key: {api_key[:20]}..." if api_key and len(api_key) > 20 else f"  - API Key: {api_key}")
+            
+            # Copy demo files
+            files_copied = copy_demo_files(tenant["id"], tenant_name)
+            if files_copied > 0:
+                print(f"  - Demo files: {files_copied} files copied")
+            else:
+                print(f"  - ⚠️ No demo files found for {tenant_name}")
+                
+        except Exception as e:
+            print(f"❌ Failed to setup {tenant_name}: {e}")
+            # Continue with other tenants instead of failing completely
+            api_keys[tenant_name] = "*** SETUP FAILED ***"
+            tenant_data[tenant_name] = {"id": "unknown", "name": tenant_name, "slug": tenant_name}
+            continue
     
-    return api_keys
+    return api_keys, tenant_data
 
-def save_api_keys(api_keys: Dict[str, str], environment: str) -> None:
-    """Save API keys to JSON file."""
+def save_api_keys(api_keys: Dict[str, str], environment: str, tenant_data: Dict[str, Dict] = None) -> None:
+    """Save API keys to JSON file using tenant IDs as keys."""
     keys_file = PROJECT_ROOT / "demo_tenant_keys.json"
     
-    # Create structured format
+    # Create structured format using tenant IDs
     tenant_keys = {}
     for tenant_name, api_key in api_keys.items():
-        tenant_keys[tenant_name] = {
-            "api_key": api_key,
-            "slug": tenant_name,
-            "description": f"Demo {tenant_name} with company documents ({environment})"
-        }
+        # Get tenant ID from tenant_data if available
+        tenant_id = None
+        if tenant_data and tenant_name in tenant_data:
+            tenant_id = tenant_data[tenant_name].get("id")
+        
+        if tenant_id:
+            tenant_keys[tenant_id] = {
+                "api_key": api_key,
+                "slug": tenant_name,
+                "description": f"Demo {tenant_name} with company documents ({environment})"
+            }
+        else:
+            # Fallback to tenant name as key
+            tenant_keys[tenant_name] = {
+                "api_key": api_key,
+                "slug": tenant_name,
+                "description": f"Demo {tenant_name} with company documents ({environment})"
+            }
     
     try:
         with open(keys_file, 'w') as f:
             json.dump(tenant_keys, f, indent=2)
         print(f"✓ API keys saved to {keys_file}")
+        
+        # Also copy to frontend public directory if it exists
+        frontend_public = PROJECT_ROOT / "src" / "frontend" / "public"
+        if frontend_public.exists():
+            frontend_keys_file = frontend_public / "demo_tenant_keys.json"
+            shutil.copy2(keys_file, frontend_keys_file)
+            print(f"✓ API keys copied to frontend: {frontend_keys_file}")
+            
     except Exception as e:
         print(f"✗ Failed to save API keys: {e}")
 
+def cleanup_resources():
+    """Clean up any lingering resources."""
+    try:
+        # Force garbage collection to cleanup any remaining async resources
+        import gc
+        gc.collect()
+        
+        # Close any remaining event loops
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.stop()
+        except RuntimeError:
+            pass  # No loop running
+            
+    except Exception as e:
+        print(f"⚠️ Cleanup warning: {e}")
+
+def validate_setup(config: Dict[str, Any]) -> bool:
+    """Validate that the backend is accessible before starting setup."""
+    try:
+        print("🔍 Validating backend connection...")
+        url = f"{config['backend_url']}/api/v1/health/liveness"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        print("✓ Backend is accessible")
+        return True
+    except Exception as e:
+        print(f"❌ Backend validation failed: {e}")
+        print("   Make sure containers are running: docker-compose up -d")
+        return False
+
 def main():
-    """Main entry point."""
+    """Main entry point with improved error handling and cleanup."""
     parser = argparse.ArgumentParser(description='Setup demo tenants via API calls')
     parser.add_argument('--env', choices=['production', 'staging', 'test', 'development'],
                        default='test', help='Target environment (default: test)')
+    parser.add_argument('--skip-validation', action='store_true',
+                       help='Skip backend validation (use with caution)')
     args = parser.parse_args()
     
     print("🚀 Demo Tenants Setup (API-based)")
     print("=" * 50)
     
-    # Load configuration
-    config = load_config()
-    print(f"🌍 Target Environment: {args.env}")
-    print(f"🖥️ Backend URL: {config['backend_url']}")
-    
     try:
+        # Load configuration
+        config = load_config()
+        print(f"🌍 Target Environment: {args.env}")
+        print(f"🖥️ Backend URL: {config['backend_url']}")
+        
+        # Step 0: Validate backend connection
+        if not args.skip_validation:
+            if not validate_setup(config):
+                sys.exit(1)
+        
         # Step 1: Initialize database schema for target environment
         initialize_database_schema(config, args.env)
         
         # Step 2: Setup demo tenants
-        api_keys = setup_demo_tenants(config, args.env)
+        api_keys, tenant_data = setup_demo_tenants(config, args.env)
         
-        # Step 3: Save API keys
-        save_api_keys(api_keys, args.env)
+        # Check if any tenants failed
+        failed_tenants = [name for name, key in api_keys.items() if "FAILED" in key or "UNABLE" in key]
+        successful_tenants = [name for name, key in api_keys.items() if "FAILED" not in key and "UNABLE" not in key]
+        
+        # Step 3: Save API keys (only if we have some successful tenants)
+        if successful_tenants:
+            save_api_keys(api_keys, args.env, tenant_data)
         
         # Success summary
         print("\n" + "=" * 50)
-        print("🎉 Demo Setup Complete!")
-        print(f"✅ Database schema initialized for {args.env}")
-        print(f"✅ {len(api_keys)} demo tenants configured")
-        print(f"✅ API keys saved to demo_tenant_keys.json")
+        if successful_tenants:
+            print("🎉 Demo Setup Complete!")
+            print(f"✅ Database schema initialized for {args.env}")
+            print(f"✅ {len(successful_tenants)} demo tenants configured successfully")
+            if failed_tenants:
+                print(f"⚠️ {len(failed_tenants)} tenant(s) failed: {', '.join(failed_tenants)}")
+            print(f"✅ API keys saved to demo_tenant_keys.json")
+        else:
+            print("❌ Setup failed - no tenants were configured successfully")
+            sys.exit(1)
         
         print("\n🔑 Quick Reference:")
         print(f"Admin API Key: {config['admin_api_key'][:20]}...")
         for tenant_name, api_key in api_keys.items():
-            print(f"{tenant_name}: {api_key[:20]}...")
+            if "FAILED" not in api_key and "UNABLE" not in api_key:
+                print(f"{tenant_name}: {api_key[:20]}...")
         
         print("\n🧪 Test Commands:")
         print("# Test admin access:")
         print(f"curl -H 'X-API-Key: {config['admin_api_key']}' {config['backend_url']}/api/v1/auth/tenants")
-        print("\n# Test tenant access:")
-        first_key = list(api_keys.values())[0]
-        print(f"curl -H 'X-API-Key: {first_key}' {config['backend_url']}/api/v1/files")
+        
+        if successful_tenants:
+            print("\n# Test tenant access:")
+            first_successful_key = next(key for key in api_keys.values() if "FAILED" not in key and "UNABLE" not in key)
+            print(f"curl -H 'X-API-Key: {first_successful_key}' {config['backend_url']}/api/v1/files")
         
         print("\n📋 Next Steps:")
         print("1. Run: python scripts/test_demo_tenants.py")
         print("2. Or test manually with the API keys above")
         
+    except KeyboardInterrupt:
+        print("\n⏹️ Setup interrupted by user")
+        sys.exit(1)
     except Exception as e:
         print(f"\n❌ Setup failed: {e}")
         sys.exit(1)
+    finally:
+        # Always cleanup resources
+        cleanup_resources()
 
 if __name__ == "__main__":
     main()
