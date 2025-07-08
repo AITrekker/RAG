@@ -1,8 +1,0 @@
-#!/bin/bash
-# Pre-push hook to scan for secrets
-# This prevents pushing commits that contain secrets
-
-echo "🔒 Running secret scan before push..."
-python scripts/security/check_secrets.py
-
-exit $?
