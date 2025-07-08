@@ -38,12 +38,15 @@ TEST_CATEGORIES = {
     "query": ["tests/test_api_query.py"],
     "multitenancy": ["tests/test_api_multitenancy.py"],
     "templates": ["tests/test_api_templates.py"],
+    "analytics": ["tests/test_analytics_simple.py", "tests/test_analytics_api.py"],
     "all": [
         "tests/test_api_health.py",
         "tests/test_api_sync.py", 
         "tests/test_api_query.py",
         "tests/test_api_multitenancy.py",
-        "tests/test_api_templates.py"
+        "tests/test_api_templates.py",
+        "tests/test_analytics_simple.py",
+        "tests/test_analytics_api.py"
     ]
 }
 
@@ -196,7 +199,9 @@ def run_test_category(category: str, verbose: bool = False, fast: bool = False) 
     except (subprocess.CalledProcessError, FileNotFoundError):
         python_cmd = "python"
     
+    # Ensure we're in the right directory for imports
     cmd = [python_cmd, "-m", "pytest"] + test_files
+    cmd.extend(["--rootdir=."])  # Set root directory explicitly
     
     if verbose:
         cmd.extend(["-v", "-s"])
@@ -380,7 +385,7 @@ def main():
     all_results = []
     
     if args.category == "all":
-        categories_to_run = ["health", "sync", "query", "multitenancy"]
+        categories_to_run = ["health", "sync", "query", "multitenancy", "analytics"]
     else:
         categories_to_run = [args.category]
     

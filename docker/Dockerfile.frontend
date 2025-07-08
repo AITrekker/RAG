@@ -1,4 +1,4 @@
-# Use Node.js LTS base image
+# Development Frontend Dockerfile
 FROM node:20-alpine
 
 # Set working directory
@@ -10,29 +10,32 @@ RUN apk add --no-cache \
     make \
     g++ \
     git \
-    wget
+    wget \
+    curl
+
+# Create non-root user early
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S react -u 1001 -G nodejs
 
 # Copy package files first for better caching
 COPY src/frontend/package*.json ./
+RUN chown -R react:nodejs /app
 
-# Install dependencies (use npm install to handle platform differences)
-RUN npm install --legacy-peer-deps
-
-# Copy source code
-COPY src/frontend .
-
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S react -u 1001 -G nodejs && \
-    chown -R react:nodejs /app
+# Switch to non-root user for npm operations
 USER react
+
+# Install dependencies with optimizations
+RUN npm install --legacy-peer-deps --prefer-offline --no-audit
+
+# Copy source code (this will be overridden by volume in development)
+COPY --chown=react:nodejs src/frontend .
 
 # Expose port for Vite dev server
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
+# Health check for Vite dev server
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:3000 || exit 1
 
-# Start development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"] 
+# Start development server with hot reloading
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000", "--clearScreen", "false"] 

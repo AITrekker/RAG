@@ -1,0 +1,39 @@
+# Production docker-compose configuration
+# Use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  # Production Frontend
+  frontend:
+    build:
+      dockerfile: docker/Dockerfile.frontend.prod  # Use production Dockerfile
+    volumes: []  # No source code mounting in production
+    environment:
+      - NODE_ENV=production
+      - VITE_API_BASE_URL=${API_BASE_URL:-http://localhost:8000/api/v1}
+    restart: unless-stopped
+
+  # Production Backend
+  backend:
+    volumes:
+      # Remove source code mounting, keep only data volumes
+      - ./documents:/app/documents:ro
+      - ./cache:/app/cache
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - huggingface_cache:/home/app/.cache/huggingface
+      - transformers_cache:/home/app/.cache/transformers
+    environment:
+      - RELOAD_ON_CHANGE=False
+      - LOG_LEVEL=INFO
+      - NODE_ENV=production
+    restart: unless-stopped
+    command: uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  # Production Database
+  postgres:
+    restart: unless-stopped
+    
+  # Production Vector DB
+  qdrant:
+    restart: unless-stopped

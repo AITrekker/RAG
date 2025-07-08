@@ -22,7 +22,8 @@ from src.backend.api.v1.routes import (
     auth as auth_routes,
     files as file_routes,
     sync as sync_routes,
-    query as query_routes
+    query as query_routes,
+    analytics as analytics_routes
 )
 from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
@@ -191,6 +192,7 @@ app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants"
 app.include_router(file_routes.router, prefix=f"{settings.api_v1_str}/files", tags=["Files"])
 app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
 app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
+app.include_router(analytics_routes.router, prefix=f"{settings.api_v1_str}/analytics", tags=["Analytics"])
 
 @app.get("/", include_in_schema=False)
 async def root():

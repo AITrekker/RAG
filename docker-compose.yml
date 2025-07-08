@@ -111,25 +111,32 @@ services:
     command: uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
 
 
-#  # Frontend Service
-#  frontend:
-#    container_name: rag_frontend
-#    build:
-#      context: .
-#      dockerfile: docker/Dockerfile.frontend
-#    ports:
-#      - "3000:3000"
-#    volumes:
-#      - ./src/frontend:/app
-#      - /app/node_modules
-#    environment:
-#      - NODE_ENV=development
-#      - VITE_API_BASE_URL=http://localhost:8000/api/v1
-#    networks:
-#      - rag_network
-#    depends_on:
-#      backend:
-#        condition: service_healthy
+  # Frontend Service
+  frontend:
+    container_name: rag_frontend
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src/frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1
+      - VITE_HMR_PORT=3000
+    networks:
+      - rag_network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 networks:
   rag_network:

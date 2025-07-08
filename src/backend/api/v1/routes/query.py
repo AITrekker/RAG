@@ -2,39 +2,55 @@
 RAG Query API Routes - Using the new service architecture
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+import time
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Request
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
 from src.backend.dependencies import (
     get_current_tenant_dep,
-    get_rag_service_dep
+    get_rag_service_dep,
+    get_db
 )
 from src.backend.services.rag_service import RAGService
+from src.backend.services.analytics_service import AnalyticsService
 from src.backend.models.database import Tenant
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 
 
 @router.post("/")
 async def process_query(
-    request: Dict[str, Any],
+    request_data: Dict[str, Any],
+    request: Request,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: RAGService = Depends(get_rag_service_dep),
+    db: Session = Depends(get_db)
 ):
-    """Process a RAG query"""
+    """Process a RAG query with comprehensive analytics tracking"""
+    start_time = time.time()
+    analytics = AnalyticsService(db)
+    query_log = None
+    
     try:
-        query = request.get("query", "").strip()
+        query = request_data.get("query", "").strip()
         if not query:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Query cannot be empty"
             )
         
-        max_sources = request.get("max_sources", 5)
-        confidence_threshold = request.get("confidence_threshold", 0.7)
-        metadata_filters = request.get("metadata_filters")
+        max_sources = request_data.get("max_sources", 5)
+        confidence_threshold = request_data.get("confidence_threshold", 0.7)
+        metadata_filters = request_data.get("metadata_filters")
         
+        # Get request context for analytics
+        ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        session_id = request.headers.get("x-session-id")
+        
+        # Process the query
         response = await rag_service.process_query(
             query=query,
             tenant_id=current_tenant.id,
@@ -42,6 +58,57 @@ async def process_query(
             confidence_threshold=confidence_threshold,
             metadata_filters=metadata_filters
         )
+        
+        # Calculate response time
+        end_time = time.time()
+        response_time_ms = int((end_time - start_time) * 1000)
+        
+        # Determine response type
+        response_type = "success"
+        if not response.answer or response.answer.lower().strip() in ["no answer", "no information found", ""]:
+            response_type = "no_answer"
+        elif response.confidence and response.confidence < confidence_threshold:
+            response_type = "low_confidence"
+        
+        # Log the query
+        query_log = analytics.log_query(
+            tenant_id=current_tenant.id,
+            query_text=query,
+            response_text=response.answer,
+            response_type=response_type,
+            response_time_ms=response_time_ms,
+            confidence_score=response.confidence,
+            sources_count=len(response.sources),
+            chunks_retrieved=len(response.sources),
+            session_id=session_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            embedding_model=response.embedding_model if hasattr(response, 'embedding_model') else 'all-MiniLM-L6-v2',
+            llm_model=response.model_used,
+            tokens_used=response.tokens_used,
+            embedding_time_ms=response.embedding_time if hasattr(response, 'embedding_time') else None,
+            search_time_ms=response.search_time if hasattr(response, 'search_time') else None,
+            llm_time_ms=response.llm_time if hasattr(response, 'llm_time') else None
+        )
+        
+        # Log document access for each source
+        for idx, source in enumerate(response.sources):
+            analytics.log_document_access(
+                query_log_id=query_log.id,
+                file_id=source.file_id,
+                tenant_id=current_tenant.id,
+                relevance_score=source.score,
+                rank_position=idx + 1,
+                chunks_used=1,
+                included_in_response=True
+            )
+        
+        # Update session activity if session_id provided
+        if session_id:
+            analytics.update_session_activity(session_id, query_count_increment=1)
+        
+        # Commit analytics data
+        analytics.commit()
         
         return {
             "query": response.query,
@@ -61,12 +128,47 @@ async def process_query(
             "confidence": response.confidence,
             "processing_time": response.processing_time,
             "model_used": response.model_used,
-            "tokens_used": response.tokens_used
+            "tokens_used": response.tokens_used,
+            "query_id": str(query_log.id) if query_log else None,
+            "response_type": response_type
         }
         
     except HTTPException:
+        # Log failed query if we got far enough to create a log entry
+        if query_log:
+            end_time = time.time()
+            response_time_ms = int((end_time - start_time) * 1000)
+            query_log.response_type = "error"
+            query_log.response_time_ms = response_time_ms
+            analytics.commit()
         raise
     except Exception as e:
+        # Log error query
+        try:
+            end_time = time.time()
+            response_time_ms = int((end_time - start_time) * 1000)
+            
+            ip_address = request.client.host if request.client else None
+            user_agent = request.headers.get("user-agent")
+            session_id = request.headers.get("x-session-id")
+            
+            analytics.log_query(
+                tenant_id=current_tenant.id,
+                query_text=request_data.get("query", ""),
+                response_text=None,
+                response_type="error",
+                response_time_ms=response_time_ms,
+                confidence_score=None,
+                sources_count=0,
+                chunks_retrieved=0,
+                session_id=session_id,
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+            analytics.commit()
+        except:
+            pass  # Don't let analytics errors mask the original error
+            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process query: {str(e)}"

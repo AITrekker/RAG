@@ -1,60 +1,146 @@
-# Enterprise RAG Platform
+# 🏢 Enterprise RAG Platform
 
-A production-ready Retrieval-Augmented Generation (RAG) platform designed for enterprise use cases with multi-tenant support, delta sync, and comprehensive metadata management.
+A production-ready, enterprise-grade Retrieval-Augmented Generation (RAG) platform designed for scalable document intelligence with comprehensive multi-tenant support, intelligent delta synchronization, and advanced ML capabilities.
 
-## 🚀 Features
+## ✨ Features
 
-- **Multi-tenant Architecture**: Isolated data and processing per tenant.
-- **Delta Sync**: Efficient document processing with hash-based change detection.
-- **Hybrid Storage**: PostgreSQL for metadata + Qdrant for vector embeddings.
-- **API-First Design**: RESTful API for all operations.
-- **Production Ready**: Init container pattern, health checks, and monitoring.
-- **Extensible**: Supports multiple document formats (PDF, HTML, TXT).
+### 🏗️ **Enterprise Architecture**
+- **🔒 Multi-tenant Isolation**: Complete data separation across database, vector store, and file system
+- **🔄 Intelligent Delta Sync**: Hash-based change detection with atomic transaction processing
+- **🗃️ Hybrid Storage Design**: PostgreSQL for metadata control plane + Qdrant for high-performance vector operations
+- **🌐 API-First Architecture**: Comprehensive RESTful API with OpenAPI documentation
+- **🚀 Production Ready**: Container orchestration, health checks, monitoring, and graceful degradation
+
+### 📄 **Document Processing**
+- **📚 Multi-Format Support**: PDF, DOCX, HTML, TXT, CSV with extensible processor architecture
+- **🧩 Smart Chunking**: Sentence-aware text splitting with configurable overlap and size
+- **🔍 Content Extraction**: Intelligent text extraction with fallback mechanisms
+- **📊 Metadata Enrichment**: Automatic file analysis, word counts, language detection
+
+### 🧠 **AI & Machine Learning**
+- **🎯 Advanced RAG Pipeline**: Query processing → Vector retrieval → Context ranking → LLM generation
+- **🚀 GPU Optimization**: RTX 5070 tuned with mixed precision and memory management
+- **🔀 Model Flexibility**: Configurable embedding models (sentence-transformers) and LLMs
+- **⚡ Performance Optimized**: Batch processing, caching, and async operations
+
+### 🔐 **Security & Compliance**
+- **🔑 API Key Authentication**: Stateless, secure tenant authentication
+- **👥 Role-Based Access**: Granular permissions and file sharing controls
+- **📋 Audit Trails**: Comprehensive operation tracking and sync history
+- **🛡️ Input Validation**: Robust security with sanitization and rate limiting
 
 ## ⚡ Quick Start
 
-This guide will get the entire platform running on your local machine with a single command.
+Get the entire enterprise platform running locally in under 5 minutes with our streamlined deployment process.
 
-### Prerequisites
-- Docker and Docker Compose
+### 📋 Prerequisites
+- **Docker** (24.0+) and **Docker Compose** (2.20+)
+- **8GB+ RAM** (for ML models and vector operations)
+- **2GB+ disk space** (for containers and model cache)
 
-### 1. Start the System
+### 🚀 One-Command Deployment
 
-Clone the repository and use Docker Compose to build and run the services:
+Clone and start the complete platform:
 
 ```bash
 git clone <repository-url>
-cd RAG
+cd rag
 docker-compose up -d
 ```
-This command starts the backend, frontend, PostgreSQL, and Qdrant services. The first time it runs, an `init` container will set up the database and create an admin user.
 
-### 2. Verify the Setup
+This orchestrates all services:
+- **🗄️ PostgreSQL**: Multi-tenant database with proper schemas
+- **🔍 Qdrant**: High-performance vector database  
+- **⚙️ Backend API**: FastAPI with comprehensive endpoints
+- **🖥️ Frontend UI**: React-based management interface
+- **🔧 Init Container**: Automatic database setup and admin user creation
 
-Check that all containers are running and healthy. It's normal for the `rag_init` container to show `Exited (0)` after its first successful run.
+### ✅ Verify Deployment
+
+Monitor container health and readiness:
 
 ```bash
+# Check all services are running
 docker-compose ps
-```
-Expected output:
-```
-NAME                STATUS              PORTS
-rag_backend         Up (healthy)        0.0.0.0:8000->8000/tcp
-rag_frontend        Up (running)        0.0.0.0:3000->3000/tcp
-rag_postgres        Up (healthy)        0.0.0.0:5432->5432/tcp
-rag_qdrant          Up (healthy)        0.0.0.0:6333->6333/tcp, 0.0.0.0:6334->6334/tcp
-rag_init            Exited (0)
-```
-You can also run the verification script to confirm the admin user was created correctly:
-```bash
+
+# View real-time logs
+docker-compose logs -f
+
+# Health check script
 python scripts/verify_admin_setup.py
 ```
 
-### 3. Access Services
+Expected healthy state:
+```
+NAME                STATUS              PORTS
+rag_backend         Up (healthy)        0.0.0.0:8000->8000/tcp
+rag_frontend        Up (healthy)        0.0.0.0:3000->3000/tcp  
+rag_postgres        Up (healthy)        0.0.0.0:5432->5432/tcp
+rag_qdrant          Up (healthy)        0.0.0.0:6333->6333/tcp
+rag_init            Exited (0)          # Normal after successful setup
+```
 
-- **Frontend UI**: [http://localhost:3000](http://localhost:3000)
-- **Backend API Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Qdrant Dashboard**: [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
+### 🌐 Access Your Platform
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **🖥️ Frontend Dashboard** | [localhost:3000](http://localhost:3000) | Main user interface |
+| **📚 API Documentation** | [localhost:8000/docs](http://localhost:8000/docs) | Interactive API explorer |
+| **🔍 Vector Database** | [localhost:6333/dashboard](http://localhost:6333/dashboard) | Qdrant management |
+| **🗄️ Database** | `localhost:5432` | PostgreSQL (external tools) |
+
+### 🎯 Quick Demo Setup
+
+Initialize with demo data:
+
+```bash
+# Create demo tenants with sample documents
+python scripts/workflow/setup_demo_tenants.py
+
+# Test the complete RAG pipeline
+python scripts/test_system.py
+
+# Try sample queries
+python demo_rag_queries.py
+```
+
+## 🛠️ Development Modes
+
+### 🖥️ **Frontend Development**
+
+The platform supports both **automatic container startup** and **manual debugging**:
+
+#### **Auto-Start Mode (Recommended)**
+```bash
+# Frontend starts automatically with hot reload
+docker-compose up -d
+# Frontend available at http://localhost:3000 with live updates
+```
+
+#### **Manual Debug Mode** 
+```bash
+# For debugging frontend issues
+make frontend-shell    # Enter container
+npm run dev            # Manual yarn/npm dev
+
+# Or directly:
+make frontend-yarn     # Run yarn dev in container
+```
+
+#### **Production Mode**
+```bash
+# Build and deploy production frontend (Nginx + optimized build)
+make up-prod
+```
+
+### 🔄 **Development Workflow**
+
+| Command | Purpose | Use Case |
+|---------|---------|----------|
+| `make up` | Start all services | Normal development |
+| `make frontend-dev` | Start only frontend | Frontend-only work |
+| `make frontend-logs` | View frontend logs | Debug frontend issues |
+| `make restart-frontend` | Restart frontend container | After config changes |
 
 ## 📚 Documentation
 

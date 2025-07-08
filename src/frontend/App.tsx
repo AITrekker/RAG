@@ -5,10 +5,11 @@ import { QueryInterface } from './components/Query/QueryInterface';
 import { AuditLogViewer } from './components/Audit/AuditLogViewer';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { SyncDashboard } from './components/Sync/SyncDashboard';
+import { AnalyticsDashboard } from './components/Analytics/AnalyticsDashboard';
 import { Toaster } from "@/components/ui/toaster";
 import './App.css';
 
-type ActiveView = 'search' | 'sync' | 'audit';
+type ActiveView = 'search' | 'sync' | 'audit' | 'analytics';
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>('search');
@@ -37,6 +38,8 @@ function App() {
         return <SyncDashboard />;
       case 'audit':
         return <AuditLogViewer />;
+      case 'analytics':
+        return <AnalyticsDashboard />;
       default:
         return null;
     }
@@ -57,6 +60,7 @@ function App() {
               { id: 'search', name: 'Search' },
               { id: 'sync', name: 'Sync' },
               { id: 'audit', name: 'Audit Log' },
+              { id: 'analytics', name: 'Analytics' },
             ].map((tab) => (
               <button
                 key={tab.id}

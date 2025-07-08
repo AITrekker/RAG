@@ -156,3 +156,17 @@ docker-compose.override.yaml
 secrets/
 .secrets/
 demo_tenant_keys.json
+
+# API Keys and Tokens (prevent accidental commits)
+*api_key*
+*secret*
+*token*
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
+
+# Exclude files with potential secrets
+**/*secret*
+**/*credential*
+**/*password*

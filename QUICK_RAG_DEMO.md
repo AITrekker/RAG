@@ -10,9 +10,11 @@
 
 | Tenant | API Key | Documents Available |
 |--------|---------|-------------------|
-| **tenant1** | `tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9` | company_overview.txt, meeting_notes.txt, product_specifications.txt |
-| **tenant2** | `tenant_tenant2_d576904945bf1a1f34e0cc080772d1af` | financial_report.txt, marketing_strategy.txt, team_handbook.txt |
-| **tenant3** | `tenant_tenant3_a343ca13dee8c2a151bf3f0cb19feb8b` | project_timeline.txt, technical_documentation.txt, user_manual.txt |
+| **tenant1** | `<tenant1_api_key>` | company_overview.txt, meeting_notes.txt, product_specifications.txt |
+| **tenant2** | `<tenant2_api_key>` | financial_report.txt, marketing_strategy.txt, team_handbook.txt |
+| **tenant3** | `<tenant3_api_key>` | project_timeline.txt, technical_documentation.txt, user_manual.txt |
+
+> **Note**: Get actual API keys from `demo_tenant_keys.json` after running setup
 
 ---
 
@@ -47,14 +49,14 @@ python demo_rag_queries.py --tenant tenant3 --workflow
 ### 1. Trigger Document Sync
 ```bash
 curl -X POST "http://localhost:8000/api/v1/sync/trigger" \
-  -H "X-API-Key: tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9" \
+  -H "X-API-Key: <tenant1_api_key>" \
   -H "Content-Type: application/json"
 ```
 
 ### 2. Ask a RAG Question
 ```bash
 curl -X POST "http://localhost:8000/api/v1/query/" \
-  -H "X-API-Key: tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9" \
+  -H "X-API-Key: <tenant1_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What is the company mission?",
@@ -66,7 +68,7 @@ curl -X POST "http://localhost:8000/api/v1/query/" \
 ### 3. Semantic Search
 ```bash
 curl -X POST "http://localhost:8000/api/v1/query/search" \
-  -H "X-API-Key: tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9" \
+  -H "X-API-Key: <tenant1_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "company products",
@@ -77,7 +79,7 @@ curl -X POST "http://localhost:8000/api/v1/query/search" \
 ### 4. Validate Query
 ```bash
 curl -X POST "http://localhost:8000/api/v1/query/validate" \
-  -H "X-API-Key: tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9" \
+  -H "X-API-Key: <tenant1_api_key>" \
   -H "Content-Type: application/json" \
   -d '{"query": "What is the company mission?"}'
 ```
@@ -85,7 +87,7 @@ curl -X POST "http://localhost:8000/api/v1/query/validate" \
 ### 5. Get Query Suggestions
 ```bash
 curl -X GET "http://localhost:8000/api/v1/query/suggestions?partial_query=company&max_suggestions=5" \
-  -H "X-API-Key: tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9"
+  -H "X-API-Key: <tenant1_api_key>"
 ```
 
 ---
@@ -98,7 +100,7 @@ import json
 
 # Configuration
 BACKEND_URL = "http://localhost:8000"
-API_KEY = "tenant_tenant1_a6eafcd4144ad2b42bd404c9069ea3d9"
+API_KEY = "<tenant1_api_key>"
 
 headers = {
     "X-API-Key": API_KEY,
