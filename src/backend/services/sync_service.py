@@ -110,7 +110,7 @@ class SyncService:
         fs_files = await self.file_service.scan_tenant_files(tenant_id)
         fs_file_map = {f['path']: f for f in fs_files}
         
-        # Get current files from database
+        # Get current files from database (hard delete means no deleted_at filter needed)
         db_files = await self.file_service.list_files(tenant_id, limit=10000)
         db_file_map = {f.file_path: f for f in db_files}
         
@@ -199,22 +199,137 @@ class SyncService:
         sync_plan: SyncPlan, 
         sync_op: SyncOperation
     ):
-        """Execute the actual file changes"""
+        """Execute the actual file changes with memory management"""
         
         print(f"🔍 DEBUG: _execute_file_changes called with {len(sync_plan.new_files)} new, {len(sync_plan.updated_files)} updated, {len(sync_plan.deleted_files)} deleted")
         
-        # Process new files
-        for change in sync_plan.new_files:
-            await self._process_new_file(change, sync_op)
+        # Process files in batches to manage memory usage
+        batch_size = 3  # Process 3 files at a time to prevent memory issues
         
-        # Process updated files
-        for change in sync_plan.updated_files:
-            await self._process_updated_file(change, sync_op)
+        # Process new files in batches
+        new_files = sync_plan.new_files
+        for i in range(0, len(new_files), batch_size):
+            batch = new_files[i:i + batch_size]
+            
+            for change in batch:
+                await self._process_new_file(change, sync_op)
+            
+            # Force garbage collection and GPU cleanup after each batch
+            await self._cleanup_memory()
         
-        # Process deleted files
-        for change in sync_plan.deleted_files:
-            print(f"🔍 DEBUG: Processing deleted file {change.file_path} with ID {change.file_id}")
-            await self._process_deleted_file(change, sync_op)
+        # Process updated files in batches
+        updated_files = sync_plan.updated_files
+        for i in range(0, len(updated_files), batch_size):
+            batch = updated_files[i:i + batch_size]
+            
+            for change in batch:
+                await self._process_updated_file(change, sync_op)
+            
+            # Force garbage collection and GPU cleanup after each batch
+            await self._cleanup_memory()
+        
+        # Process deleted files in batch for efficiency
+        if sync_plan.deleted_files:
+            await self._process_deleted_files_batch(sync_plan.deleted_files, sync_op)
+    
+    async def _cleanup_memory(self):
+        """Clean up memory and GPU cache"""
+        import gc
+        gc.collect()
+        
+        # Clear GPU cache if available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+        
+        # Commit database changes to free connection resources
+        await self.db.commit()
+    
+    async def _process_deleted_files_batch(self, deleted_files: List[FileChange], sync_op: SyncOperation):
+        """
+        Process multiple deleted files in batch for better performance - HARD DELETE
+        """
+        valid_file_ids = [change.file_id for change in deleted_files if change.file_id is not None]
+        
+        if not valid_file_ids:
+            return
+        
+        print(f"🗞️ Batch hard deleting {len(valid_file_ids)} files")
+        
+        try:
+            # Create sync history records BEFORE deletion (since we need file IDs)
+            for change in deleted_files:
+                if change.file_id:
+                    await self._create_sync_history(
+                        change.file_id, 
+                        sync_op, 
+                        change, 
+                        chunks_before=0,  # We don't have individual counts, but total is tracked
+                        chunks_after=0
+                    )
+            
+            # Bulk delete embeddings for all files at once
+            total_chunks_deleted = await self.embedding_service.delete_multiple_files_embeddings(valid_file_ids)
+            
+            # Track embedding metrics
+            sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + total_chunks_deleted
+            await self.db.flush()
+            
+            # HARD DELETE all file records in one query
+            from sqlalchemy import delete
+            await self.db.execute(
+                delete(File).where(File.id.in_(valid_file_ids))
+            )
+            
+            print(f"✓ Batch hard deleted {len(valid_file_ids)} files and {total_chunks_deleted} chunks")
+            
+        except Exception as e:
+            print(f"⚠️ Batch deletion failed: {e}, falling back to individual processing")
+            # Fallback to individual processing
+            for change in deleted_files:
+                try:
+                    await self._process_deleted_file(change, sync_op)
+                except Exception as e2:
+                    print(f"⚠️ Failed to process deleted file {change.file_id}: {e2}")
+                    continue
+    
+    async def cleanup_orphaned_embeddings(self, tenant_id: UUID) -> int:
+        """
+        Clean up orphaned embeddings for files that no longer exist
+        With hard deletes, this should find chunks with no corresponding file records
+        
+        Returns:
+            int: Number of orphaned chunks cleaned up
+        """
+        from src.backend.models.database import EmbeddingChunk
+        
+        # Find chunks that don't have corresponding file records (LEFT JOIN with NULL check)
+        result = await self.db.execute(
+            select(EmbeddingChunk.file_id)
+            .outerjoin(File, EmbeddingChunk.file_id == File.id)
+            .where(
+                EmbeddingChunk.tenant_id == tenant_id,
+                File.id.is_(None)  # No corresponding file record
+            )
+            .distinct()
+        )
+        
+        orphaned_file_ids = [row[0] for row in result.fetchall()]
+        
+        if not orphaned_file_ids:
+            print(f"✓ No orphaned embeddings found for tenant {tenant_id}")
+            return 0
+        
+        print(f"🧙 Found {len(orphaned_file_ids)} files with orphaned embeddings")
+        
+        # Use bulk delete for efficiency
+        chunks_deleted = await self.embedding_service.delete_multiple_files_embeddings(orphaned_file_ids)
+        
+        print(f"✓ Cleaned up {chunks_deleted} orphaned embedding chunks")
+        return chunks_deleted
     
     async def _process_new_file(self, change: FileChange, sync_op: SyncOperation):
         """Process a new file by creating record and scheduling for processing"""
@@ -224,7 +339,7 @@ class SyncService:
             if uploaded_by is None:
                 uploaded_by = await self.get_or_create_system_user()
             
-            # Create file record for discovered file
+            # With hard delete, we just create a new file record (no soft-delete conflicts)
             file_record = File(
                 tenant_id=sync_op.tenant_id,
                 uploaded_by=uploaded_by,
@@ -238,7 +353,7 @@ class SyncService:
             self.db.add(file_record)
             await self.db.flush()  # Get ID without committing
             
-            # Process the file immediately
+            # Process the file immediately with memory management
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
             chunk_records = await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
@@ -254,6 +369,9 @@ class SyncService:
             
             # Create sync history record with chunk metrics
             await self._create_sync_history(file_record.id, sync_op, change, chunks_before=0, chunks_after=chunks_created)
+            
+            # Clean up variables to free memory
+            del chunks, embeddings, chunk_records
             
         except Exception as e:
             if 'file_record' in locals():
@@ -289,7 +407,7 @@ class SyncService:
             # Delete old embeddings first - track how many were deleted
             chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
             
-            # Reprocess the file
+            # Reprocess the file with memory management
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
             chunk_records = await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
@@ -315,6 +433,9 @@ class SyncService:
             # Create sync history record with chunk metrics
             await self._create_sync_history(change.file_id, sync_op, change, chunks_before=chunks_deleted, chunks_after=chunks_created)
             
+            # Clean up variables to free memory
+            del chunks, embeddings, chunk_records
+            
         except Exception as e:
             # Mark file as failed
             await self.db.execute(
@@ -329,11 +450,14 @@ class SyncService:
             raise
     
     async def _process_deleted_file(self, change: FileChange, sync_op: SyncOperation):
-        """Process a deleted file by cleaning up records and embeddings"""
+        """Process a deleted file by cleaning up records and embeddings - HARD DELETE"""
         if not change.file_id:
             return
         
         try:
+            # Create sync history record BEFORE deletion (since we need file ID)
+            await self._create_sync_history(change.file_id, sync_op, change, chunks_before=0, chunks_after=0)
+            
             # Delete embeddings first - track how many were deleted
             chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
             
@@ -341,25 +465,19 @@ class SyncService:
             sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + chunks_deleted
             await self.db.flush()  # Ensure sync_op changes are persisted
             
-            # Soft delete file record
+            # HARD DELETE file record
+            from sqlalchemy import delete
             await self.db.execute(
-                update(File)
-                .where(File.id == change.file_id)
-                .values(
-                    deleted_at=datetime.utcnow(),
-                    sync_status='deleted'
-                )
+                delete(File).where(File.id == change.file_id)
             )
             
-            # Create sync history record with chunk metrics
-            await self._create_sync_history(change.file_id, sync_op, change, chunks_before=chunks_deleted, chunks_after=0)
+            print(f"✓ Hard deleted file {change.file_id} and {chunks_deleted} chunks")
             
         except Exception as e:
             # Log error but don't fail sync for cleanup issues
             print(f"🔍 DEBUG: Exception in _process_deleted_file for file {change.file_id}: {e}")
             import traceback
             traceback.print_exc()
-            await self._create_sync_history(change.file_id, sync_op, change, chunks_before=0, chunks_after=0)
     
     async def _create_sync_history(
         self, 
@@ -491,10 +609,13 @@ class SyncService:
             # Delete old embeddings if they exist
             await self.embedding_service.delete_file_embeddings(file_id)
             
-            # Process file
+            # Process file with memory management
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
             await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            
+            # Clean up variables to free memory
+            del chunks, embeddings
             
             # Mark file as completed
             await self.db.execute(

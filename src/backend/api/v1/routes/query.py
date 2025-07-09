@@ -71,7 +71,7 @@ async def process_query(
             response_type = "low_confidence"
         
         # Log the query
-        query_log = analytics.log_query(
+        query_log = await analytics.log_query(
             tenant_id=current_tenant.id,
             query_text=query,
             response_text=response.answer,
@@ -108,7 +108,7 @@ async def process_query(
             analytics.update_session_activity(session_id, query_count_increment=1)
         
         # Commit analytics data
-        analytics.commit()
+        await analytics.commit()
         
         return {
             "query": response.query,
@@ -140,7 +140,7 @@ async def process_query(
             response_time_ms = int((end_time - start_time) * 1000)
             query_log.response_type = "error"
             query_log.response_time_ms = response_time_ms
-            analytics.commit()
+            await analytics.commit()
         raise
     except Exception as e:
         # Log error query
@@ -152,7 +152,7 @@ async def process_query(
             user_agent = request.headers.get("user-agent")
             session_id = request.headers.get("x-session-id")
             
-            analytics.log_query(
+            await analytics.log_query(
                 tenant_id=current_tenant.id,
                 query_text=request_data.get("query", ""),
                 response_text=None,
@@ -165,7 +165,7 @@ async def process_query(
                 ip_address=ip_address,
                 user_agent=user_agent
             )
-            analytics.commit()
+            await analytics.commit()
         except:
             pass  # Don't let analytics errors mask the original error
             

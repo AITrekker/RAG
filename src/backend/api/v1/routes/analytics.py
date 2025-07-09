@@ -181,7 +181,7 @@ async def calculate_metrics_for_date(
     
     try:
         metrics = analytics.calculate_daily_metrics(tenant.id, target_date)
-        analytics.commit()
+        await analytics.commit()
         
         return {
             "message": f"Metrics calculated for {target_date}",
@@ -279,7 +279,7 @@ async def submit_query_feedback(
             relevance_rating=feedback.relevance_rating,
             completeness_rating=feedback.completeness_rating
         )
-        analytics.commit()
+        await analytics.commit()
         
         return {
             "message": "Feedback submitted successfully",

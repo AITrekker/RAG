@@ -71,17 +71,13 @@ class RAGService:
             
             print(f"✓ Qdrant client initialized: {settings.qdrant_host}:{settings.qdrant_port}")
             
-            # Initialize embedding model for query processing
+            # Use singleton embedding model from dependency injection
+            from src.backend.dependencies import get_embedding_model
             try:
-                from sentence_transformers import SentenceTransformer
-                import torch
-                
-                embedding_model = getattr(settings, 'embedding_model', 'all-MiniLM-L6-v2')
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                self._embedding_model = SentenceTransformer(embedding_model, device=device)
-                print(f"✓ Query embedding model initialized: {embedding_model} on {device}")
-            except ImportError:
-                print("⚠️ sentence-transformers not available for query embeddings")
+                self._embedding_model = get_embedding_model()
+                print(f"✓ Query embedding model initialized: {self._embedding_model}")
+            except Exception as e:
+                print(f"⚠️ Error getting embedding model: {e}")
                 self._embedding_model = None
             
             # Initialize LLM for answer generation
@@ -236,7 +232,9 @@ class RAGService:
         metadata_filters: Optional[Dict[str, Any]] = None
     ) -> List[SearchResult]:
         """Search for relevant chunks using vector similarity"""
-        collection_name = "documents"
+        import os
+        environment = os.getenv("RAG_ENVIRONMENT", "development")
+        collection_name = f"documents_{environment}"
         
         if self._qdrant_client is not None:
             try:

@@ -21,12 +21,20 @@ Usage:
 """
 
 import asyncio
-import functools
 import json
+import re
 import sys
+from typing import List, Dict, Any, Optional, Union, Callable
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable, Union
-import aiohttp
+from dataclasses import dataclass, field
+from functools import wraps
+import logging
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 # Add project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -254,7 +262,7 @@ class ScriptTester:
         
         return results
     
-    async def validate_script_endpoints(self, script_file: Path) -> List[str]:
+    async def validate_script_endpoints(self, script_file: Path) -> list[str]:
         """
         Parse a script file and validate all API endpoints it uses.
         

@@ -28,7 +28,7 @@ class AnalyticsService:
     # QUERY LOGGING & TRACKING
     # =============================================
     
-    def log_query(
+    async def log_query(
         self,
         tenant_id: UUID,
         query_text: str,
@@ -81,7 +81,7 @@ class AnalyticsService:
         )
         
         self.db.add(query_log)
-        self.db.flush()  # Get the ID without committing
+        await self.db.flush()  # Get the ID without committing
         
         return query_log
     
@@ -518,10 +518,10 @@ class AnalyticsService:
         """Generate a unique session ID"""
         return str(uuid4())
     
-    def commit(self):
+    async def commit(self):
         """Commit all pending database changes"""
         try:
-            self.db.commit()
+            await self.db.commit()
         except IntegrityError:
-            self.db.rollback()
+            await self.db.rollback()
             raise

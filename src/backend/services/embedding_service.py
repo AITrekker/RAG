@@ -296,14 +296,28 @@ class EmbeddingService:
         if self._model is not None:
             # Use real sentence-transformers model
             try:
+                import torch
+                
                 # Extract text content from chunks
                 texts = [chunk.content for chunk in chunks]
                 
-                # Generate embeddings in batch for efficiency
-                batch_embeddings = self._model.encode(texts, convert_to_tensor=False)
+                # Process in batches to manage memory efficiently
+                batch_size = min(32, len(texts))  # Limit batch size to prevent memory issues
+                all_embeddings = []
+                
+                for i in range(0, len(texts), batch_size):
+                    batch_texts = texts[i:i + batch_size]
+                    
+                    # Generate embeddings for this batch
+                    batch_embeddings = self._model.encode(batch_texts, convert_to_tensor=False)
+                    all_embeddings.extend(batch_embeddings)
+                    
+                    # Clear GPU cache after each batch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 
                 # Create embedding results
-                for i, (chunk, embedding) in enumerate(zip(chunks, batch_embeddings)):
+                for i, (chunk, embedding) in enumerate(zip(chunks, all_embeddings)):
                     embeddings.append(EmbeddingResult(
                         vector=embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding),
                         metadata={
@@ -317,6 +331,12 @@ class EmbeddingService:
                             'embedding_dimension': self._embedding_dimension
                         }
                     ))
+                
+                # Final cleanup
+                del all_embeddings
+                del texts
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 
                 print(f"✓ Generated {len(embeddings)} embeddings using {self.model_name}")
                 
@@ -502,30 +522,39 @@ class EmbeddingService:
         )
         chunks = result.scalars().all()
         
-        print(f"🔍 DEBUG: Found {len(chunks)} chunks to delete for file {file_id}")
-        
         if not chunks:
-            print(f"⚠️ No chunks found for file {file_id}")
             return 0
         
-        # Ensure Qdrant client is initialized before deletion
-        collection_name = chunks[0].collection_name if chunks else "documents_development"
-        await self._ensure_qdrant_collection(collection_name)
-        print(f"🔍 DEBUG: Qdrant client available: {self._qdrant_client is not None}")
-        
-        # Delete from Qdrant first
-        qdrant_deleted = 0
+        # Group chunks by collection for efficient batch deletion
+        chunks_by_collection = {}
         for chunk in chunks:
-            print(f"🔍 DEBUG: Deleting point {chunk.qdrant_point_id} from collection {chunk.collection_name}")
+            if chunk.collection_name not in chunks_by_collection:
+                chunks_by_collection[chunk.collection_name] = []
+            chunks_by_collection[chunk.collection_name].append(chunk)
+        
+        # Batch delete from Qdrant by collection
+        total_deleted = 0
+        for collection_name, collection_chunks in chunks_by_collection.items():
+            await self._ensure_qdrant_collection(collection_name)
+            
+            # Extract point IDs for batch deletion
+            point_ids = [str(chunk.qdrant_point_id) for chunk in collection_chunks]
+            
             try:
-                await self._delete_from_qdrant(chunk.qdrant_point_id, chunk.collection_name)
-                qdrant_deleted += 1
+                deleted_count = await self._batch_delete_from_qdrant(point_ids, collection_name)
+                total_deleted += deleted_count
+                print(f"✓ Batch deleted {deleted_count} points from collection {collection_name}")
             except Exception as e:
-                print(f"⚠️ Failed to delete point {chunk.qdrant_point_id} from Qdrant: {e}")
+                print(f"⚠️ Failed to batch delete from Qdrant collection {collection_name}: {e}")
+                # Fallback to individual deletion
+                for chunk in collection_chunks:
+                    try:
+                        await self._delete_from_qdrant(chunk.qdrant_point_id, collection_name)
+                        total_deleted += 1
+                    except Exception as e2:
+                        print(f"⚠️ Failed to delete point {chunk.qdrant_point_id}: {e2}")
         
-        print(f"🔍 DEBUG: Deleted {qdrant_deleted}/{len(chunks)} points from Qdrant")
-        
-        # Delete from PostgreSQL
+        # Delete from PostgreSQL in one query
         await self.db.execute(
             delete(EmbeddingChunk).where(EmbeddingChunk.file_id == file_id)
         )
@@ -534,9 +563,107 @@ class EmbeddingService:
         print(f"✓ Deleted {len(chunks)} embedding chunks for file {file_id}")
         return len(chunks)
     
+    async def delete_multiple_files_embeddings(self, file_ids: List[UUID]) -> int:
+        """
+        Delete all embeddings for multiple files in batch - much more efficient
+        
+        Args:
+            file_ids: List of file IDs to delete embeddings for
+            
+        Returns:
+            int: Total number of chunks deleted
+        """
+        if not file_ids:
+            return 0
+        
+        # Get all chunks for all files in one query
+        result = await self.db.execute(
+            select(EmbeddingChunk).where(EmbeddingChunk.file_id.in_(file_ids))
+        )
+        chunks = result.scalars().all()
+        
+        if not chunks:
+            return 0
+        
+        print(f"🗞️ Bulk deleting {len(chunks)} chunks for {len(file_ids)} files")
+        
+        # Group chunks by collection for efficient batch deletion
+        chunks_by_collection = {}
+        for chunk in chunks:
+            if chunk.collection_name not in chunks_by_collection:
+                chunks_by_collection[chunk.collection_name] = []
+            chunks_by_collection[chunk.collection_name].append(chunk)
+        
+        # Batch delete from Qdrant by collection
+        total_deleted = 0
+        for collection_name, collection_chunks in chunks_by_collection.items():
+            await self._ensure_qdrant_collection(collection_name)
+            
+            # Extract point IDs for batch deletion
+            point_ids = [str(chunk.qdrant_point_id) for chunk in collection_chunks]
+            
+            try:
+                deleted_count = await self._batch_delete_from_qdrant(point_ids, collection_name)
+                total_deleted += deleted_count
+                print(f"✓ Batch deleted {deleted_count} points from collection {collection_name}")
+            except Exception as e:
+                print(f"⚠️ Failed to batch delete from Qdrant collection {collection_name}: {e}")
+                # Continue with other collections even if one fails
+        
+        # Delete from PostgreSQL in one query for all files
+        await self.db.execute(
+            delete(EmbeddingChunk).where(EmbeddingChunk.file_id.in_(file_ids))
+        )
+        await self.db.commit()
+        
+        print(f"✓ Bulk deleted {len(chunks)} embedding chunks for {len(file_ids)} files")
+        return len(chunks)
+    
+    async def _batch_delete_from_qdrant(self, point_ids: List[str], collection_name: str) -> int:
+        """
+        Batch delete multiple points from Qdrant vector database
+        
+        Args:
+            point_ids: List of point IDs to delete
+            collection_name: Name of the collection
+            
+        Returns:
+            int: Number of points successfully deleted
+        """
+        if self._qdrant_client is None:
+            print("⚠️ Qdrant client not available, skipping vector deletion")
+            return 0
+        
+        if not point_ids:
+            return 0
+        
+        try:
+            from qdrant_client.models import PointIdsList
+            
+            # Batch delete up to 100 points at a time (Qdrant limit)
+            batch_size = 100
+            total_deleted = 0
+            
+            for i in range(0, len(point_ids), batch_size):
+                batch = point_ids[i:i + batch_size]
+                
+                self._qdrant_client.delete(
+                    collection_name=collection_name,
+                    points_selector=PointIdsList(points=batch)
+                )
+                
+                total_deleted += len(batch)
+                print(f"  Deleted batch of {len(batch)} points from {collection_name}")
+            
+            return total_deleted
+            
+        except Exception as e:
+            print(f"⚠️ Failed to batch delete from Qdrant: {e}")
+            raise
+    
     async def _delete_from_qdrant(self, point_id: UUID, collection_name: str):
         """
-        Delete point from Qdrant vector database
+        Delete single point from Qdrant vector database (fallback method)
         """
         if self._qdrant_client is None:
             print("⚠️ Qdrant client not available, skipping vector deletion")

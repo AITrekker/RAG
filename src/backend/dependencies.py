@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from functools import lru_cache
 
-from src.backend.database import get_async_db
+from src.backend.database import get_async_db, AsyncSessionLocal
 from src.backend.models.database import Tenant
 from src.backend.services.tenant_service import TenantService
 from src.backend.services.file_service import FileService
@@ -20,21 +20,33 @@ from src.backend.config.settings import get_settings
 # Database dependency
 async def get_db() -> AsyncSession:
     """Get database session"""
-    async for session in get_async_db():
-        yield session
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
 
-# Singleton embedding model dependency
-@lru_cache()
+# Singleton embedding model dependency with proper memory management
+@lru_cache(maxsize=1)
 def get_embedding_model():
     """Get singleton embedding model instance - cached across all requests"""
     try:
         from sentence_transformers import SentenceTransformer
+        import torch
         settings = get_settings()
         
         print(f"🤖 Loading embedding model: {settings.embedding_model}")
-        model = SentenceTransformer(settings.embedding_model)
-        print(f"✓ Embedding model loaded successfully")
+        
+        # Use GPU if available, otherwise CPU
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model = SentenceTransformer(settings.embedding_model, device=device)
+        
+        # Clear any existing CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        print(f"✓ Embedding model loaded successfully on {device}")
         return model
         
     except Exception as e:

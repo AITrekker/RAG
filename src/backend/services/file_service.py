@@ -88,8 +88,7 @@ class FileService:
         result = await self.db.execute(
             select(File).where(
                 File.id == file_id,
-                File.tenant_id == tenant_id,
-                File.deleted_at.is_(None)
+                File.tenant_id == tenant_id
             )
         )
         return result.scalar_one_or_none()
@@ -103,8 +102,7 @@ class FileService:
     ) -> List[File]:
         """List files for a tenant with pagination"""
         query = select(File).where(
-            File.tenant_id == tenant_id,
-            File.deleted_at.is_(None)
+            File.tenant_id == tenant_id
         )
         
         if sync_status:
@@ -171,19 +169,14 @@ class FileService:
         await self.db.commit()
     
     async def delete_file(self, tenant_id: UUID, file_id: UUID) -> bool:
-        """Soft delete a file"""
+        """Hard delete a file"""
         file_record = await self.get_file(tenant_id, file_id)
         if not file_record:
             return False
         
-        # Soft delete
+        # Hard delete
         await self.db.execute(
-            update(File)
-            .where(File.id == file_id)
-            .values(
-                deleted_at=datetime.utcnow(),
-                sync_status='deleted'
-            )
+            delete(File).where(File.id == file_id)
         )
         await self.db.commit()
         
@@ -229,8 +222,7 @@ class FileService:
         result = await self.db.execute(
             select(File).where(
                 File.tenant_id == tenant_id,
-                File.sync_status == status,
-                File.deleted_at.is_(None)
+                File.sync_status == status
             )
         )
         return result.scalars().all()

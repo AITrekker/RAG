@@ -24,13 +24,8 @@ os.environ['NLTK_DATA'] = '/tmp/nltk_data'
 # Add project root to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
-    from scripts.utils import get_paths
-    paths = get_paths()
-    PROJECT_ROOT = paths.root
-except ImportError:
-    # Fallback to old method
-    PROJECT_ROOT = Path(__file__).parent.parent
+# Use direct path method for now
+PROJECT_ROOT = Path(__file__).parent.parent
 
 # Setup DATABASE_URL for local vs Docker execution
 def setup_database_url():
@@ -185,10 +180,20 @@ async def run_tenant_sync(tenant_id: UUID, tenant_info: Dict[str, Any], system_u
     print(f"   Plan: {tenant_info['plan_tier']}")
     
     async with AsyncSessionLocal() as session:
-        # Initialize services
+        # Initialize services with singleton embedding model
         file_service = FileService(session)
-        embedding_service = EmbeddingService(session)
-        await embedding_service.initialize()
+        
+        # Get singleton embedding model to avoid multiple loads
+        try:
+            from src.backend.dependencies import get_embedding_model
+            embedding_model = get_embedding_model()
+            embedding_service = EmbeddingService(session, embedding_model)
+            print(f"  🤖 Using singleton embedding model")
+        except Exception as e:
+            print(f"  ⚠️ Failed to load embedding model: {e}")
+            embedding_service = EmbeddingService(session)
+            await embedding_service.initialize()
+        
         sync_service = SyncService(session, file_service, embedding_service)
         
         try:

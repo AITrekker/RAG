@@ -34,19 +34,31 @@ ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 # Test categories
 TEST_CATEGORIES = {
     "health": ["tests/test_api_health.py"],
-    "sync": ["tests/test_api_sync.py"], 
+    "sync": ["tests/test_api_sync.py", "tests/test_sync_service.py"], 
+    "embedding": ["tests/test_embedding_service.py"],
     "query": ["tests/test_api_query.py"],
+    "rag": ["tests/test_rag_comprehensive.py"],
     "multitenancy": ["tests/test_api_multitenancy.py"],
     "templates": ["tests/test_api_templates.py"],
     "analytics": ["tests/test_analytics_simple.py", "tests/test_analytics_api.py"],
+    "hard_delete": ["tests/test_hard_delete.py"],
+    "comprehensive": [
+        "tests/test_sync_service.py",
+        "tests/test_embedding_service.py", 
+        "tests/test_rag_comprehensive.py"
+    ],
     "all": [
         "tests/test_api_health.py",
         "tests/test_api_sync.py", 
+        "tests/test_sync_service.py",
+        "tests/test_embedding_service.py",
         "tests/test_api_query.py",
+        "tests/test_rag_comprehensive.py",
         "tests/test_api_multitenancy.py",
         "tests/test_api_templates.py",
         "tests/test_analytics_simple.py",
-        "tests/test_analytics_api.py"
+        "tests/test_analytics_api.py",
+        "tests/test_hard_delete.py"
     ]
 }
 
@@ -385,7 +397,7 @@ def main():
     all_results = []
     
     if args.category == "all":
-        categories_to_run = ["health", "sync", "query", "multitenancy", "analytics"]
+        categories_to_run = ["health", "sync", "embedding", "query", "rag", "multitenancy", "analytics"]
     else:
         categories_to_run = [args.category]
     

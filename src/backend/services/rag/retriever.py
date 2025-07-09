@@ -33,7 +33,9 @@ class VectorRetriever(RetrieverInterface):
             query_embedding = await self._generate_query_embedding(query.text)
             
             # Build Qdrant query with tenant filtering
-            collection_name = "documents"
+            import os
+            environment = os.getenv("RAG_ENVIRONMENT", "development")
+            collection_name = f"documents_{environment}"
             search_payload = self._build_search_payload(query, query_embedding)
             
             # Perform vector search

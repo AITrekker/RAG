@@ -18,8 +18,25 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 with open("demo_tenant_keys.json") as f:
     TENANT_KEYS = json.load(f)
 
-TENANT1_KEY = TENANT_KEYS["tenant1"]["api_key"]
-TENANT2_KEY = TENANT_KEYS["tenant2"]["api_key"]
+# Find tenant1 by slug
+TENANT1_KEY = None
+for tenant_id, tenant_data in TENANT_KEYS.items():
+    if tenant_data.get("slug") == "tenant1":
+        TENANT1_KEY = tenant_data["api_key"]
+        break
+
+if not TENANT1_KEY:
+    raise ValueError("Could not find tenant1 API key in demo_tenant_keys.json")
+
+# Find tenant2 by slug
+TENANT2_KEY = None
+for tenant_id, tenant_data in TENANT_KEYS.items():
+    if tenant_data.get("slug") == "tenant2":
+        TENANT2_KEY = tenant_data["api_key"]
+        break
+
+if not TENANT2_KEY:
+    raise ValueError("Could not find tenant2 API key in demo_tenant_keys.json")
 
 
 class TestAPIQuery:

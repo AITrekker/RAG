@@ -17,11 +17,16 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 with open("demo_tenant_keys.json") as f:
     TENANT_KEYS = json.load(f)
 
-ALL_TENANT_KEYS = [
-    TENANT_KEYS["tenant1"]["api_key"],
-    TENANT_KEYS["tenant2"]["api_key"],
-    TENANT_KEYS["tenant3"]["api_key"]
-]
+# Collect all tenant keys by slug
+ALL_TENANT_KEYS = []
+for tenant_slug in ["tenant1", "tenant2", "tenant3"]:
+    for tenant_id, tenant_data in TENANT_KEYS.items():
+        if tenant_data.get("slug") == tenant_slug:
+            ALL_TENANT_KEYS.append(tenant_data["api_key"])
+            break
+
+if len(ALL_TENANT_KEYS) != 3:
+    raise ValueError(f"Could not find all tenant keys. Found {len(ALL_TENANT_KEYS)}/3")
 
 
 class TestAPIMultitenancy:
