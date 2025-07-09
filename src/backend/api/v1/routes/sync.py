@@ -65,27 +65,6 @@ async def trigger_sync(
         )
 
 
-@router.get("/{sync_id}")
-async def get_sync(
-    sync_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_service: SyncService = Depends(get_sync_service_dep)
-):
-    """Get specific sync operation status - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Individual sync operation tracking not yet implemented",
-            "planned_features": [
-                "Sync operation details",
-                "Progress tracking",
-                "Error reporting"
-            ],
-            "status": "planned"
-        }
-    )
-
-
 @router.get("/status")
 async def get_sync_status(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
@@ -127,6 +106,9 @@ async def get_sync_history(
                 "files_added": op.files_added,
                 "files_updated": op.files_updated,
                 "files_deleted": op.files_deleted,
+                "chunks_created": op.chunks_created or 0,
+                "chunks_updated": op.chunks_updated or 0,
+                "chunks_deleted": op.chunks_deleted or 0,
                 "error_message": op.error_message
             }
             for op in operations
@@ -139,6 +121,27 @@ async def get_sync_history(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get sync history: {str(e)}"
         )
+
+
+@router.get("/{sync_id}")
+async def get_sync(
+    sync_id: str,
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_service: SyncService = Depends(get_sync_service_dep)
+):
+    """Get specific sync operation status - NOT IMPLEMENTED"""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "message": "Individual sync operation tracking not yet implemented",
+            "planned_features": [
+                "Sync operation details",
+                "Progress tracking",
+                "Error reporting"
+            ],
+            "status": "planned"
+        }
+    )
 
 
 @router.delete("/{sync_id}")

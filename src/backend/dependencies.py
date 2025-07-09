@@ -4,6 +4,7 @@ FastAPI Dependencies - Service injection and dependency management
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from functools import lru_cache
 
 from src.backend.database import get_async_db
 from src.backend.models.database import Tenant
@@ -13,6 +14,7 @@ from src.backend.services.embedding_service import EmbeddingService
 from src.backend.services.sync_service import SyncService
 from src.backend.services.rag_service import RAGService
 from src.backend.middleware.api_key_auth import get_current_tenant
+from src.backend.config.settings import get_settings
 
 
 # Database dependency
@@ -20,6 +22,24 @@ async def get_db() -> AsyncSession:
     """Get database session"""
     async for session in get_async_db():
         yield session
+
+
+# Singleton embedding model dependency
+@lru_cache()
+def get_embedding_model():
+    """Get singleton embedding model instance - cached across all requests"""
+    try:
+        from sentence_transformers import SentenceTransformer
+        settings = get_settings()
+        
+        print(f"🤖 Loading embedding model: {settings.embedding_model}")
+        model = SentenceTransformer(settings.embedding_model)
+        print(f"✓ Embedding model loaded successfully")
+        return model
+        
+    except Exception as e:
+        print(f"❌ Failed to load embedding model: {e}")
+        raise
 
 
 # Service dependencies
@@ -38,11 +58,12 @@ async def get_file_service_dep(
 
 
 async def get_embedding_service_dep(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    embedding_model = Depends(get_embedding_model)
 ) -> EmbeddingService:
-    """Get embedding service"""
-    service = EmbeddingService(db)
-    await service.initialize()
+    """Get embedding service with singleton model"""
+    service = EmbeddingService(db, embedding_model)
+    # No need to call initialize() since model is injected
     return service
 
 

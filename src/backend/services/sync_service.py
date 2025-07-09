@@ -238,14 +238,19 @@ class SyncService:
             # Process the file immediately
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
-            await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            chunk_records = await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            
+            # Track embedding metrics
+            chunks_created = len(chunk_records)
+            sync_op.chunks_created = (sync_op.chunks_created or 0) + chunks_created
+            await self.db.flush()  # Ensure sync_op changes are persisted
             
             # Update file status to synced
             file_record.sync_status = 'synced'
             file_record.sync_completed_at = datetime.utcnow()
             
-            # Create sync history record
-            await self._create_sync_history(file_record.id, sync_op, change)
+            # Create sync history record with chunk metrics
+            await self._create_sync_history(file_record.id, sync_op, change, chunks_before=0, chunks_after=chunks_created)
             
         except Exception as e:
             if 'file_record' in locals():
@@ -278,13 +283,20 @@ class SyncService:
             )
             file_record = result.scalar_one()
             
-            # Delete old embeddings first
-            deleted_count = await self.embedding_service.delete_file_embeddings(change.file_id)
+            # Delete old embeddings first - track how many were deleted
+            chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
             
             # Reprocess the file
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
-            await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            chunk_records = await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            
+            # Track embedding metrics - for updates, we delete old and create new
+            chunks_created = len(chunk_records)
+            sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + chunks_deleted
+            sync_op.chunks_created = (sync_op.chunks_created or 0) + chunks_created
+            sync_op.chunks_updated = (sync_op.chunks_updated or 0) + chunks_created  # New embeddings for updated file
+            await self.db.flush()  # Ensure sync_op changes are persisted
             
             # Update file status to synced
             await self.db.execute(
@@ -297,8 +309,8 @@ class SyncService:
                 )
             )
             
-            # Create sync history record
-            await self._create_sync_history(change.file_id, sync_op, change)
+            # Create sync history record with chunk metrics
+            await self._create_sync_history(change.file_id, sync_op, change, chunks_before=chunks_deleted, chunks_after=chunks_created)
             
         except Exception as e:
             # Mark file as failed
@@ -319,8 +331,12 @@ class SyncService:
             return
         
         try:
-            # Delete embeddings first
-            deleted_count = await self.embedding_service.delete_file_embeddings(change.file_id)
+            # Delete embeddings first - track how many were deleted
+            chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
+            
+            # Track embedding metrics
+            sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + chunks_deleted
+            await self.db.flush()  # Ensure sync_op changes are persisted
             
             # Soft delete file record
             await self.db.execute(
@@ -332,20 +348,22 @@ class SyncService:
                 )
             )
             
-            # Create sync history record
-            await self._create_sync_history(change.file_id, sync_op, change)
+            # Create sync history record with chunk metrics
+            await self._create_sync_history(change.file_id, sync_op, change, chunks_before=chunks_deleted, chunks_after=0)
             
         except Exception as e:
             # Log error but don't fail sync for cleanup issues
-            await self._create_sync_history(change.file_id, sync_op, change)
+            await self._create_sync_history(change.file_id, sync_op, change, chunks_before=0, chunks_after=0)
     
     async def _create_sync_history(
         self, 
         file_id: Optional[UUID], 
         sync_op: SyncOperation, 
-        change: FileChange
+        change: FileChange,
+        chunks_before: int = 0,
+        chunks_after: int = 0
     ):
-        """Create a sync history record"""
+        """Create a sync history record with chunk metrics"""
         if not file_id:
             return
         
@@ -360,6 +378,8 @@ class SyncService:
             previous_hash=change.old_hash,
             new_hash=new_hash,
             change_type=change.change_type.value,
+            chunks_before=chunks_before,
+            chunks_after=chunks_after,
             synced_at=datetime.utcnow()
         )
         self.db.add(history)

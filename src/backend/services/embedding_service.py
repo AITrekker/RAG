@@ -44,47 +44,35 @@ class EmbeddingResult:
 class EmbeddingService:
     """Service for document processing and embedding generation"""
     
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession, embedding_model=None):
         self.db = db_session
         self.model_name = settings.embedding_model
         self.chunk_size = settings.chunk_size
         self.chunk_overlap = settings.chunk_overlap
         
-        # TODO: Initialize embedding model when implemented
-        self._model = None
+        # Use provided model or fallback to None for mock mode
+        self._model = embedding_model
         self._tokenizer = None
+        
+        if self._model:
+            try:
+                self._embedding_dimension = self._model.get_sentence_embedding_dimension()
+                print(f"✓ Using singleton embedding model: {self.model_name}")
+                print(f"  - Dimension: {self._embedding_dimension}")
+                print(f"  - Device: {self._model.device}")
+            except Exception as e:
+                print(f"⚠️ Error getting model dimensions, using default: {e}")
+                self._embedding_dimension = 384  # Default for all-MiniLM-L6-v2
+        else:
+            print("⚠️ No embedding model provided, using mock embeddings")
+            self._embedding_dimension = 384  # Default for all-MiniLM-L6-v2
     
     async def initialize(self):
-        """Initialize embedding model and tokenizer"""
-        try:
-            from sentence_transformers import SentenceTransformer
-            
-            # Initialize the embedding model
-            self._model = SentenceTransformer(self.model_name)
-            self._tokenizer = self._model.tokenizer
-            
-            # Move to appropriate device if specified
-            device = getattr(settings, 'embedding_device', 'cpu')
-            if device != 'cpu':
-                self._model = self._model.to(device)
-            
-            self._embedding_dimension = self._model.get_sentence_embedding_dimension()
-            
-            print(f"✓ Embedding model initialized: {self.model_name}")
-            print(f"  - Dimension: {self._embedding_dimension}")
-            print(f"  - Device: {device}")
-            
-        except ImportError:
-            print("⚠️ sentence-transformers not available, using mock embeddings")
-            self._model = None
-            self._tokenizer = None
-            self._embedding_dimension = 384  # Default dimension for mock
-        except Exception as e:
-            print(f"⚠️ Failed to load embedding model: {e}")
-            print("  Using mock embeddings")
-            self._model = None
-            self._tokenizer = None
-            self._embedding_dimension = 384
+        """Initialize embedding model and tokenizer (deprecated - use dependency injection)"""
+        # This method is now deprecated since model is injected via constructor
+        if self._model is None:
+            print("⚠️ No embedding model available, using mock embeddings")
+        # No-op since model is now provided via dependency injection
     
     async def process_file(self, file_record: File) -> List[DocumentChunk]:
         """
@@ -514,9 +502,28 @@ class EmbeddingService:
         )
         chunks = result.scalars().all()
         
+        print(f"🔍 DEBUG: Found {len(chunks)} chunks to delete for file {file_id}")
+        
+        if not chunks:
+            print(f"⚠️ No chunks found for file {file_id}")
+            return 0
+        
+        # Ensure Qdrant client is initialized before deletion
+        collection_name = chunks[0].collection_name if chunks else "documents_development"
+        await self._ensure_qdrant_collection(collection_name)
+        print(f"🔍 DEBUG: Qdrant client available: {self._qdrant_client is not None}")
+        
         # Delete from Qdrant first
+        qdrant_deleted = 0
         for chunk in chunks:
-            await self._delete_from_qdrant(chunk.qdrant_point_id, chunk.collection_name)
+            print(f"🔍 DEBUG: Deleting point {chunk.qdrant_point_id} from collection {chunk.collection_name}")
+            try:
+                await self._delete_from_qdrant(chunk.qdrant_point_id, chunk.collection_name)
+                qdrant_deleted += 1
+            except Exception as e:
+                print(f"⚠️ Failed to delete point {chunk.qdrant_point_id} from Qdrant: {e}")
+        
+        print(f"🔍 DEBUG: Deleted {qdrant_deleted}/{len(chunks)} points from Qdrant")
         
         # Delete from PostgreSQL
         await self.db.execute(

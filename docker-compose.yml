@@ -50,6 +50,7 @@ services:
       - ./scripts:/app/scripts
       - ./data:/app/data
       - ./.env:/app/.env
+      - ./demo_admin_keys.json:/app/demo_admin_keys.json
       - huggingface_cache:/home/app/.cache/huggingface
       - transformers_cache:/home/app/.cache/transformers
     env_file:
@@ -84,7 +85,6 @@ services:
               capabilities: [gpu]
     volumes:
       - ./src/backend:/app/src/backend
-      - ./documents:/app/documents
       - ./cache:/app/cache
       - ./logs:/app/logs
       - ./data:/app/data
