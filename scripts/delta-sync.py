@@ -219,78 +219,12 @@ async def run_tenant_sync(tenant_id: UUID, tenant_info: Dict[str, Any], system_u
                 print(f"  ⚡ Executing sync...")
                 
                 try:
-                    # Process all changes (new, updated files)
-                    files_processed = 0
-                    files_failed = 0
+                    # Execute the sync plan using the service
+                    sync_operation = await sync_service.execute_sync_plan(sync_plan, system_user_id)
                     
-                    # Combine new and updated files for processing
-                    files_to_process = sync_plan.new_files + sync_plan.updated_files
-                    
-                    for change in files_to_process:
-                        try:
-                            from src.backend.models.database import File
-                            
-                            # For updated files, find and update the existing record
-                            if change.change_type.value == 'updated':
-                                # Find existing file record
-                                existing_file = await session.execute(
-                                    select(File).where(
-                                        File.tenant_id == tenant_id,
-                                        File.file_path == change.file_path,
-                                        File.deleted_at.is_(None)
-                                    )
-                                )
-                                file_record = existing_file.scalar_one_or_none()
-                                
-                                if file_record:
-                                    # Update existing record
-                                    file_record.file_hash = change.new_hash
-                                    file_record.file_size = change.file_size or 0
-                                    file_record.sync_status = 'pending'
-                                else:
-                                    # If not found, create new record
-                                    file_record = File(
-                                        tenant_id=tenant_id,
-                                        uploaded_by=system_user_id,
-                                        filename=Path(change.file_path).name,
-                                        file_path=change.file_path,
-                                        file_size=change.file_size or 0,
-                                        file_hash=change.new_hash,
-                                        sync_status='pending'
-                                    )
-                                    session.add(file_record)
-                            else:
-                                # Create new file record
-                                file_record = File(
-                                    tenant_id=tenant_id,
-                                    uploaded_by=system_user_id,
-                                    filename=Path(change.file_path).name,
-                                    file_path=change.file_path,
-                                    file_size=change.file_size or 0,
-                                    file_hash=change.new_hash,
-                                    sync_status='pending'
-                                )
-                                session.add(file_record)
-                            
-                            await session.flush()
-                            
-                            # Process through embedding pipeline
-                            chunks = await embedding_service.process_file(file_record)
-                            embeddings = await embedding_service.generate_embeddings(chunks)
-                            await embedding_service.store_embeddings(file_record, chunks, embeddings)
-                            
-                            # Mark as synced
-                            file_record.sync_status = 'synced'
-                            file_record.word_count = sum(chunk.token_count for chunk in chunks)
-                            
-                            files_processed += 1
-                            print(f"       ✅ Processed: {file_record.filename} ({len(chunks)} chunks)")
-                            
-                        except Exception as e:
-                            files_failed += 1
-                            print(f"       ❌ Failed: {change.file_path} - {e}")
-                    
-                    await session.commit()
+                    # Get results from sync operation
+                    files_processed = sync_operation.files_processed or 0
+                    files_failed = 0  # TODO: Track failed files in sync operation
                     
                     print(f"     Sync completed: {files_processed} processed, {files_failed} failed")
                     

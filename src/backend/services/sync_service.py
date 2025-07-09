@@ -201,6 +201,8 @@ class SyncService:
     ):
         """Execute the actual file changes"""
         
+        print(f"🔍 DEBUG: _execute_file_changes called with {len(sync_plan.new_files)} new, {len(sync_plan.updated_files)} updated, {len(sync_plan.deleted_files)} deleted")
+        
         # Process new files
         for change in sync_plan.new_files:
             await self._process_new_file(change, sync_op)
@@ -211,6 +213,7 @@ class SyncService:
         
         # Process deleted files
         for change in sync_plan.deleted_files:
+            print(f"🔍 DEBUG: Processing deleted file {change.file_path} with ID {change.file_id}")
             await self._process_deleted_file(change, sync_op)
     
     async def _process_new_file(self, change: FileChange, sync_op: SyncOperation):
@@ -353,6 +356,9 @@ class SyncService:
             
         except Exception as e:
             # Log error but don't fail sync for cleanup issues
+            print(f"🔍 DEBUG: Exception in _process_deleted_file for file {change.file_id}: {e}")
+            import traceback
+            traceback.print_exc()
             await self._create_sync_history(change.file_id, sync_op, change, chunks_before=0, chunks_after=0)
     
     async def _create_sync_history(
