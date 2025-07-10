@@ -16,6 +16,7 @@ from src.backend.core.embedding_manager import get_embedding_manager, EmbeddingM
 from src.backend.core.llm_service import get_llm_service
 from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 from src.backend.utils.monitoring import SystemMonitor
+from src.backend.database import get_pool_status, check_database_health
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Health"])
@@ -135,6 +136,38 @@ async def check_monitoring_health() -> ComponentStatus:
         logger.error(f"Monitoring health check failed: {e}", exc_info=True)
         return ComponentStatus(name="monitoring", status="unhealthy", details={"error": str(e)})
 
+async def check_database_health_status() -> ComponentStatus:
+    """Checks database connectivity and connection pool status."""
+    try:
+        # Check basic database health
+        is_db_healthy = await check_database_health()
+        
+        # Get pool statistics
+        pool_stats = get_pool_status()
+        
+        # Determine if pool is in good state
+        utilization = pool_stats["utilization_pct"]
+        is_pool_healthy = utilization < 85  # Warning threshold
+        
+        status = "healthy" if is_db_healthy and is_pool_healthy else "unhealthy"
+        
+        return ComponentStatus(
+            name="database",
+            status=status,
+            details={
+                "db_connectivity": is_db_healthy,
+                "pool_utilization_pct": utilization,
+                "connections_in_use": pool_stats["checkedout"],
+                "connections_checkedin": pool_stats["checkedin"],
+                "total_capacity": pool_stats["total_capacity"],
+                "pool_size": pool_stats["pool_size"],
+                "overflow": pool_stats["overflow"]
+            }
+        )
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}", exc_info=True)
+        return ComponentStatus(name="database", status="unhealthy", details={"error": str(e)})
+
 # --- API Endpoints ---
 
 @router.get("/", summary="Comprehensive Health Check", response_model=ComprehensiveHealthResponse)
@@ -142,7 +175,8 @@ async def comprehensive_health_check(
     vector_store_status: ComponentStatus = Depends(check_vector_store_health),
     embedding_service_status: ComponentStatus = Depends(check_embedding_service_health),
     llm_service_status: ComponentStatus = Depends(check_llm_service_health),
-    monitoring_status: ComponentStatus = Depends(check_monitoring_health)
+    monitoring_status: ComponentStatus = Depends(check_monitoring_health),
+    database_status: ComponentStatus = Depends(check_database_health_status)
 ):
     """
     Comprehensive health check for the entire system.
@@ -156,6 +190,7 @@ async def comprehensive_health_check(
     Returns overall system status and detailed component information.
     """
     components = [
+        database_status,
         vector_store_status,
         embedding_service_status,
         llm_service_status,
@@ -185,3 +220,28 @@ async def liveness_check():
     Does not check dependencies.
     """
     return {"status": "alive"}
+
+@router.get("/database", summary="Database Connection Pool Status", response_model=Dict[str, Any])
+async def database_pool_status():
+    """
+    Get detailed database connection pool status for monitoring and debugging.
+    """
+    try:
+        pool_stats = get_pool_status()
+        is_healthy = await check_database_health()
+        
+        return {
+            "database_healthy": is_healthy,
+            "pool_stats": pool_stats,
+            "recommendations": [
+                "Consider increasing pool size" if pool_stats["utilization_pct"] > 80 else "Pool size is adequate",
+                "Pool appears healthy" if pool_stats["checkedout"] < pool_stats["total_capacity"] else "Pool at capacity",
+                "Monitor for long-running queries" if pool_stats["checkedout"] > 20 else "Connection usage is normal"
+            ]
+        }
+    except Exception as e:
+        return {
+            "database_healthy": False,
+            "error": str(e),
+            "recommendations": ["Check database connectivity", "Restart database service if needed"]
+        }

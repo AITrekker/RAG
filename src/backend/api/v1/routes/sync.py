@@ -1,61 +1,110 @@
 """
-Sync Management API Routes - Using the new service architecture
+Sync Management API Routes - Using the enterprise-level sync operations manager
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from typing import List, Optional, Dict, Any
 from uuid import UUID
+from pydantic import BaseModel
 
 from src.backend.dependencies import (
     get_current_tenant_dep,
-    get_sync_service_dep
+    get_sync_service_dep,
+    get_db_session
 )
 from src.backend.services.sync_service import SyncService
+from src.backend.services.sync_operations_manager import SyncOperationsManager
 from src.backend.models.database import Tenant
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
+
+
+class SyncTriggerRequest(BaseModel):
+    force_full_sync: bool = False
+
+
+# Sync operations manager factory function below
+
+
+async def get_sync_operations_manager(
+    db_session: AsyncSession = Depends(get_db_session),
+    sync_service: SyncService = Depends(get_sync_service_dep)
+) -> SyncOperationsManager:
+    """Get sync operations manager - create fresh instance per request"""
+    return SyncOperationsManager(
+        db_session=db_session,
+        sync_service=sync_service
+    )
 
 
 @router.post("/")
 async def create_sync(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_service: SyncService = Depends(get_sync_service_dep)
+    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
 ):
-    """Create a new sync operation - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Individual sync operations not yet implemented",
-            "planned_features": [
-                "Sync ID tracking",
-                "Individual sync management",
-                "Sync operation cancellation"
-            ],
-            "status": "planned"
-        }
-    )
+    """Create a new sync operation"""
+    try:
+        force_full = request.get("force_full_sync", False)
+        result = await sync_manager.request_sync(
+            tenant_id=current_tenant.id,
+            force_full_sync=force_full,
+            triggered_by=None
+        )
+        
+        if result["status"] == "error":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["message"]
+            )
+        elif result["status"] == "conflict":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=result
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create sync: {str(e)}"
+        )
 
 
 @router.post("/trigger")
 async def trigger_sync(
+    request: SyncTriggerRequest,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_service: SyncService = Depends(get_sync_service_dep)
+    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
 ):
-    """Trigger a full sync for the authenticated tenant"""
+    """Trigger a sync operation with intelligent conflict resolution"""
     try:
-        sync_operation = await sync_service.trigger_full_sync(
+        result = await sync_manager.request_sync(
             tenant_id=current_tenant.id,
-            triggered_by=None  # Allow NULL for system-triggered syncs
+            force_full_sync=request.force_full_sync,
+            triggered_by=None
         )
         
-        return {
-            "sync_id": str(sync_operation.id),
-            "status": sync_operation.status,
-            "started_at": sync_operation.started_at.isoformat(),
-            "message": "Sync operation started successfully"
-        }
+        if result["status"] == "error":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["message"]
+            )
+        elif result["status"] == "conflict":
+            # Return conflict information instead of error
+            return {
+                **result,
+                "message": f"Sync already in progress. {result['message']}"
+            }
         
+        return result
+        
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -68,11 +117,11 @@ async def trigger_sync(
 @router.get("/status")
 async def get_sync_status(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_service: SyncService = Depends(get_sync_service_dep)
+    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
 ):
-    """Get current sync status for the authenticated tenant"""
+    """Get comprehensive sync status for the authenticated tenant"""
     try:
-        status_info = await sync_service.get_sync_status(current_tenant.id)
+        status_info = await sync_manager.get_sync_status(current_tenant.id)
         return status_info
         
     except Exception as e:
@@ -148,7 +197,7 @@ async def get_sync(
 async def delete_sync(
     sync_id: str,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_service: SyncService = Depends(get_sync_service_dep)
+    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
 ):
     """Cancel a sync operation - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -163,6 +212,27 @@ async def delete_sync(
             "status": "planned"
         }
     )
+
+
+@router.post("/cleanup")
+async def cleanup_stuck_syncs(
+    current_tenant: Tenant = Depends(get_current_tenant_dep),
+    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
+):
+    """Manually trigger cleanup of stuck sync operations"""
+    try:
+        cleanup_count = await sync_manager.cleanup_stuck_operations()
+        return {
+            "message": f"Cleanup completed",
+            "operations_cleaned": cleanup_count,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cleanup stuck syncs: {str(e)}"
+        )
 
 
 @router.post("/detect-changes")

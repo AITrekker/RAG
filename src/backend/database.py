@@ -60,20 +60,40 @@ sync_engine = create_engine(
     echo=settings.debug
 )
 
-# Async engine for application usage
+# Async engine for application usage with optimized pool settings
 async_engine = create_async_engine(
     current_db_url.replace("postgresql://", "postgresql+asyncpg://", 1),
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
-    pool_timeout=settings.db_pool_timeout,
-    pool_recycle=settings.db_pool_recycle,
+    pool_size=30,  # Increased from settings for better concurrency
+    max_overflow=50,  # Increased overflow for peak load
+    pool_timeout=10,  # Reduced timeout to fail fast
+    pool_recycle=1800,  # Recycle connections every 30 minutes
     pool_pre_ping=True,
-    echo=settings.debug
+    echo=False,  # Disable echo for performance
+    # Additional async-specific settings for better connection handling
+    connect_args={
+        "server_settings": {
+            "application_name": "rag_backend",
+        },
+        "command_timeout": 60,  # Add command timeout
+        "server_settings": {
+            "jit": "off",  # Disable JIT for faster connection startup
+        }
+    },
+    # Conservative connection handling to prevent session conflicts
+    pool_reset_on_return="rollback",
+    # Enable connection pool logging for debugging
+    logging_name="rag_pool",
+    # Use LIFO to reuse recent connections
+    pool_use_lifo=True
 )
 
-# Session factories
+# Session factories with improved configuration
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
-AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
+AsyncSessionLocal = async_sessionmaker(
+    async_engine, 
+    expire_on_commit=False,
+    class_=AsyncSession
+)
 
 # Environment-specific engine cache
 _environment_engines: Dict[str, any] = {}
@@ -140,12 +160,32 @@ def get_sync_db() -> Session:
         db.close()
 
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """Get asynchronous database session"""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+    """Get asynchronous database session with robust error handling and connection monitoring"""
+    session = None
+    try:
+        from sqlalchemy import text
+        session = AsyncSessionLocal()
+        # Set session timeout
+        await session.execute(text("SET statement_timeout = '300s'"))
+        yield session
+    except Exception as e:
+        if session:
+            try:
+                await session.rollback()
+            except Exception:
+                # Ignore rollback errors if session is already closed
+                pass
+        # Log connection pool stats during errors
+        pool = async_engine.pool
+        print(f"⚠️ DB Error - Pool stats: size={pool.size()}, checkedin={pool.checkedin()}, checkedout={pool.checkedout()}, overflow={pool.overflow()}")
+        raise e
+    finally:
+        if session:
+            try:
+                await session.close()
+            except Exception:
+                # Ignore close errors - session may already be closed or invalid
+                pass
 
 # =============================================
 # DATABASE INITIALIZATION
@@ -165,19 +205,51 @@ async def close_database():
     sync_engine.dispose()
     print("✅ Database connections closed")
 
+def get_pool_status() -> dict:
+    """Get current connection pool status for monitoring"""
+    pool = async_engine.pool
+    total_capacity = pool.size() + pool.overflow()
+    checkedout = pool.checkedout()
+    return {
+        "pool_size": pool.size(),
+        "checkedin": pool.checkedin(),
+        "checkedout": checkedout,
+        "overflow": pool.overflow(),
+        "total_capacity": total_capacity,
+        "utilization_pct": round((checkedout / total_capacity) * 100, 1) if total_capacity > 0 else 0
+    }
+
+async def force_pool_cleanup():
+    """Force cleanup of stale connections in the pool"""
+    try:
+        # Dispose and recreate the engine if pool is severely degraded
+        pool_stats = get_pool_status()
+        if pool_stats["utilization_pct"] > 90:
+            print(f"⚠️ High pool utilization ({pool_stats['utilization_pct']}%), forcing cleanup")
+            await async_engine.dispose()
+            print("✅ Pool cleanup completed")
+    except Exception as e:
+        print(f"⚠️ Pool cleanup failed: {e}")
+
 # =============================================
 # DATABASE HEALTH CHECK
 # =============================================
 
 async def check_database_health() -> bool:
-    """Check if database is healthy"""
+    """Check if database is healthy and report pool status"""
     try:
         from sqlalchemy import text
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
+            
+            # Report pool statistics
+            pool = async_engine.pool
+            print(f"📊 Pool status: size={pool.size()}, checkedin={pool.checkedin()}, checkedout={pool.checkedout()}, overflow={pool.overflow()}")
             return True
     except Exception as e:
+        pool = async_engine.pool
         print(f"❌ Database health check failed: {e}")
+        print(f"📊 Pool status during error: size={pool.size()}, checkedin={pool.checkedin()}, checkedout={pool.checkedout()}, overflow={pool.overflow()}")
         return False
 
 # =============================================
@@ -185,7 +257,7 @@ async def check_database_health() -> bool:
 # =============================================
 
 async def run_in_transaction(func, *args, **kwargs):
-    """Run function in database transaction"""
+    """Run function in database transaction with new session"""
     async with AsyncSessionLocal() as session:
         try:
             async with session.begin():
@@ -195,6 +267,56 @@ async def run_in_transaction(func, *args, **kwargs):
         except Exception as e:
             await session.rollback()
             raise e
+
+
+async def run_in_session_transaction(session: AsyncSession, func, *args, **kwargs):
+    """Run function in database transaction with existing session"""
+    try:
+        async with session.begin():
+            result = await func(*args, **kwargs)
+            await session.commit()
+            return result
+    except Exception as e:
+        try:
+            await session.rollback()
+        except Exception:
+            # Ignore rollback errors if session is already closed
+            pass
+        raise e
+
+async def safe_session_cleanup(session: AsyncSession):
+    """Safely clean up a session with error handling"""
+    try:
+        if session.is_active:
+            await session.close()
+    except Exception:
+        # Ignore cleanup errors - session may already be closed
+        pass
+
+
+class TransactionManager:
+    """Context manager for database transactions"""
+    
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self._transaction = None
+        self._should_manage_transaction = True
+    
+    async def __aenter__(self):
+        # Check if session is already in a transaction
+        if self.session.in_transaction():
+            self._should_manage_transaction = False
+            return self.session
+        else:
+            self._transaction = await self.session.begin()
+            return self.session
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._should_manage_transaction and self._transaction:
+            if exc_type is not None:
+                await self._transaction.rollback()
+            else:
+                await self._transaction.commit()
 
 # =============================================
 # DEVELOPMENT HELPERS
@@ -240,5 +362,9 @@ async def startup_database_checks():
     
     # Initialize if needed
     await init_database()
+    
+    # Report initial pool status
+    pool_stats = get_pool_status()
+    print(f"📊 Initial pool status: {pool_stats['checkedout']}/{pool_stats['total_capacity']} connections")
     
     print("✅ Database startup checks completed")

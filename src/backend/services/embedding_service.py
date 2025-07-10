@@ -44,7 +44,7 @@ class EmbeddingResult:
 class EmbeddingService:
     """Service for document processing and embedding generation"""
     
-    def __init__(self, db_session: AsyncSession, embedding_model=None):
+    def __init__(self, db_session: AsyncSession, embedding_model=None, qdrant_client=None):
         self.db = db_session
         self.model_name = settings.embedding_model
         self.chunk_size = settings.chunk_size
@@ -53,6 +53,9 @@ class EmbeddingService:
         # Use provided model or fallback to None for mock mode
         self._model = embedding_model
         self._tokenizer = None
+        
+        # Use injected Qdrant client
+        self._qdrant_client = qdrant_client
         
         if self._model:
             try:
@@ -165,18 +168,50 @@ class EmbeddingService:
         file_record: File
     ) -> List[DocumentChunk]:
         """
-        Split text into chunks for embedding with smart sentence-aware chunking
+        Split text into chunks for embedding with LlamaIndex semantic chunking
         """
         chunks = []
-        chunk_size = self.chunk_size
-        overlap = self.chunk_overlap
         
         # Clean and normalize text
         text = text.strip()
         if not text:
             return chunks
         
-        # Try sentence-aware chunking first
+        # Try LlamaIndex semantic chunking first
+        try:
+            from .document_processing.llamaindex_chunker import create_tenant_chunker
+            
+            # Create tenant-isolated chunker
+            chunker = await create_tenant_chunker(file_record.tenant_id)
+            
+            # Use LlamaIndex semantic chunking with tenant isolation
+            llamaindex_chunks = await chunker.chunk_text(
+                text=text,
+                file_id=file_record.id,
+                filename=file_record.filename,
+                metadata={
+                    'file_path': file_record.file_path,
+                    'mime_type': file_record.mime_type,
+                    'file_size': file_record.file_size
+                }
+            )
+            
+            # Convert LlamaIndex chunks to our DocumentChunk format
+            for llamaindex_chunk in llamaindex_chunks:
+                chunk = DocumentChunk(
+                    content=llamaindex_chunk.content,
+                    chunk_index=llamaindex_chunk.chunk_index,
+                    metadata=llamaindex_chunk.metadata
+                )
+                chunks.append(chunk)
+            
+            print(f"✓ LlamaIndex semantic chunking: {len(chunks)} chunks generated")
+            return chunks
+            
+        except Exception as e:
+            print(f"⚠️ LlamaIndex chunking failed: {e}, falling back to sentence-aware chunking")
+        
+        # Fallback to sentence-aware chunking
         try:
             import os
             import nltk
@@ -201,7 +236,7 @@ class EmbeddingService:
             
             for sentence in sentences:
                 # If adding this sentence would exceed chunk size and we have content
-                if len(current_chunk) + len(sentence) > chunk_size and current_chunk:
+                if len(current_chunk) + len(sentence) > self.chunk_size and current_chunk:
                     # Save current chunk
                     if current_chunk.strip():
                         chunk = DocumentChunk(
@@ -210,6 +245,7 @@ class EmbeddingService:
                             metadata={
                                 'file_id': str(file_record.id),
                                 'filename': file_record.filename,
+                                'tenant_id': str(file_record.tenant_id),
                                 'start_char': current_start,
                                 'end_char': current_start + len(current_chunk),
                                 'chunking_method': 'sentence-aware'
@@ -219,8 +255,8 @@ class EmbeddingService:
                         chunk_index += 1
                     
                     # Start new chunk with overlap
-                    if overlap > 0 and current_chunk:
-                        overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
+                    if self.chunk_overlap > 0 and current_chunk:
+                        overlap_text = current_chunk[-self.chunk_overlap:] if len(current_chunk) > self.chunk_overlap else current_chunk
                         current_chunk = overlap_text + " " + sentence
                         current_start = current_start + len(current_chunk) - len(overlap_text) - len(sentence) - 1
                     else:
@@ -238,6 +274,7 @@ class EmbeddingService:
                     metadata={
                         'file_id': str(file_record.id),
                         'filename': file_record.filename,
+                        'tenant_id': str(file_record.tenant_id),
                         'start_char': current_start,
                         'end_char': current_start + len(current_chunk),
                         'chunking_method': 'sentence-aware'
@@ -286,7 +323,7 @@ class EmbeddingService:
     
     async def generate_embeddings(self, chunks: List[DocumentChunk]) -> List[EmbeddingResult]:
         """
-        Generate embeddings for document chunks
+        Generate embeddings for document chunks with optimized GPU batch processing
         """
         if not chunks:
             return []
@@ -294,25 +331,38 @@ class EmbeddingService:
         embeddings = []
         
         if self._model is not None:
-            # Use real sentence-transformers model
+            # Use real sentence-transformers model with optimized batch processing
             try:
                 import torch
                 
                 # Extract text content from chunks
                 texts = [chunk.content for chunk in chunks]
                 
-                # Process in batches to manage memory efficiently
-                batch_size = min(32, len(texts))  # Limit batch size to prevent memory issues
+                # Optimize batch size based on GPU memory and text length
+                batch_size = self._calculate_optimal_batch_size(texts)
                 all_embeddings = []
                 
+                print(f"🚀 Processing {len(texts)} chunks in batches of {batch_size}")
+                
+                # Process all batches in parallel where possible
+                batch_tasks = []
                 for i in range(0, len(texts), batch_size):
                     batch_texts = texts[i:i + batch_size]
+                    batch_tasks.append(self._process_embedding_batch(batch_texts, i // batch_size))
+                
+                # Execute batches with controlled concurrency
+                max_concurrent_batches = 2  # Limit concurrent GPU operations
+                for i in range(0, len(batch_tasks), max_concurrent_batches):
+                    concurrent_batch = batch_tasks[i:i + max_concurrent_batches]
+                    batch_results = await asyncio.gather(*concurrent_batch, return_exceptions=True)
                     
-                    # Generate embeddings for this batch
-                    batch_embeddings = self._model.encode(batch_texts, convert_to_tensor=False)
-                    all_embeddings.extend(batch_embeddings)
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            print(f"⚠️ Batch processing failed: {result}")
+                            continue
+                        all_embeddings.extend(result)
                     
-                    # Clear GPU cache after each batch
+                    # Clear GPU cache between concurrent batches
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                 
@@ -338,7 +388,7 @@ class EmbeddingService:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 
-                print(f"✓ Generated {len(embeddings)} embeddings using {self.model_name}")
+                print(f"✓ Generated {len(embeddings)} embeddings using {self.model_name} with optimized batching")
                 
             except Exception as e:
                 print(f"⚠️ Error generating embeddings: {e}")
@@ -349,6 +399,95 @@ class EmbeddingService:
             embeddings = self._generate_mock_embeddings(chunks)
         
         return embeddings
+    
+    def _calculate_optimal_batch_size(self, texts: List[str]) -> int:
+        """
+        Calculate optimal batch size based on GPU memory and text characteristics
+        """
+        try:
+            import torch
+            
+            # Base batch size from environment config
+            env_batch_size = int(settings.batch_size) if hasattr(settings, 'batch_size') else 32
+            
+            # Adjust based on GPU memory if available
+            if torch.cuda.is_available():
+                gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                
+                # Calculate average text length
+                avg_text_length = sum(len(text) for text in texts) / len(texts) if texts else 512
+                
+                # Adjust batch size based on GPU memory and text length
+                if gpu_memory_gb >= 16:  # High-end GPU
+                    if avg_text_length <= 256:
+                        batch_size = min(128, env_batch_size * 4)
+                    elif avg_text_length <= 512:
+                        batch_size = min(64, env_batch_size * 2)
+                    else:
+                        batch_size = min(32, env_batch_size)
+                elif gpu_memory_gb >= 8:  # Mid-range GPU
+                    if avg_text_length <= 256:
+                        batch_size = min(64, env_batch_size * 2)
+                    elif avg_text_length <= 512:
+                        batch_size = min(32, env_batch_size)
+                    else:
+                        batch_size = min(16, env_batch_size // 2)
+                else:  # Low-end GPU
+                    batch_size = min(16, env_batch_size // 2)
+                
+                print(f"🎯 Optimized batch size: {batch_size} (GPU: {gpu_memory_gb:.1f}GB, avg_text_len: {avg_text_length:.0f})")
+                return batch_size
+            else:
+                # CPU fallback
+                return min(16, env_batch_size // 2)
+                
+        except Exception as e:
+            print(f"⚠️ Error calculating batch size: {e}, using default")
+            return 32
+
+    def _get_current_collection_name(self) -> str:
+        """Get the current environment collection name (ignores stored collection_name)"""
+        import os
+        current_env = os.getenv("RAG_ENVIRONMENT", "development")
+        return f"documents_{current_env}"
+    
+    async def _process_embedding_batch(self, batch_texts: List[str], batch_index: int) -> List:
+        """
+        Process a single batch of embeddings asynchronously
+        """
+        try:
+            import torch
+            
+            # Run embedding generation in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            
+            def generate_batch():
+                with torch.no_grad():  # Disable gradient computation for inference
+                    # Enable mixed precision for RTX 5070 if available
+                    if torch.cuda.is_available() and hasattr(torch.cuda, 'amp'):
+                        with torch.cuda.amp.autocast():
+                            return self._model.encode(
+                                batch_texts, 
+                                convert_to_tensor=False,
+                                show_progress_bar=False,
+                                batch_size=len(batch_texts)  # Process entire batch at once
+                            )
+                    else:
+                        return self._model.encode(
+                            batch_texts, 
+                            convert_to_tensor=False,
+                            show_progress_bar=False,
+                            batch_size=len(batch_texts)
+                        )
+            
+            batch_embeddings = await loop.run_in_executor(None, generate_batch)
+            print(f"  ✓ Batch {batch_index + 1}: {len(batch_texts)} embeddings")
+            
+            return batch_embeddings
+            
+        except Exception as e:
+            print(f"⚠️ Error processing batch {batch_index + 1}: {e}")
+            raise
     
     def _generate_mock_embeddings(self, chunks: List[DocumentChunk]) -> List[EmbeddingResult]:
         """Generate mock embeddings for testing when model is not available"""
@@ -386,7 +525,7 @@ class EmbeddingService:
         environment: str = None
     ) -> List[EmbeddingChunk]:
         """
-        Store embeddings in database and vector store with environment separation
+        Store embeddings in database and vector store with optimized bulk operations
         
         Args:
             file_record: File database record
@@ -398,6 +537,7 @@ class EmbeddingService:
             List[EmbeddingChunk]: Database records for chunks
         """
         import os
+        from sqlalchemy import insert
         
         chunk_records = []
         current_env = environment or os.getenv("RAG_ENVIRONMENT", "development")
@@ -406,65 +546,198 @@ class EmbeddingService:
         # Initialize Qdrant client if not already done
         await self._ensure_qdrant_collection(collection_name)
         
+        # Prepare bulk data for both PostgreSQL and Qdrant
+        postgres_bulk_data = []
+        qdrant_points = []
+        
         for chunk, embedding in zip(chunks, embeddings):
             # Generate unique point ID for Qdrant
             point_id = uuid4()
             
-            # Store in Qdrant vector database
-            await self._store_in_qdrant(point_id, embedding.vector, chunk, file_record, collection_name)
+            # Prepare PostgreSQL bulk insert data
+            postgres_bulk_data.append({
+                'id': uuid4(),
+                'file_id': file_record.id,
+                'tenant_id': file_record.tenant_id,
+                'chunk_index': chunk.chunk_index,
+                'chunk_content': chunk.content,
+                'chunk_hash': chunk.hash,
+                'token_count': chunk.token_count,
+                'qdrant_point_id': point_id,
+                'collection_name': collection_name,
+                'embedding_model': self.model_name,
+                'processed_at': datetime.utcnow()
+            })
             
-            # Store metadata in PostgreSQL
-            chunk_record = EmbeddingChunk(
-                file_id=file_record.id,
-                tenant_id=file_record.tenant_id,
-                chunk_index=chunk.chunk_index,
-                chunk_content=chunk.content,
-                chunk_hash=chunk.hash,
-                token_count=chunk.token_count,
-                qdrant_point_id=point_id,
-                collection_name=collection_name,
-                embedding_model=self.model_name,
-                processed_at=datetime.utcnow()
-            )
-            
-            self.db.add(chunk_record)
-            chunk_records.append(chunk_record)
+            # Prepare Qdrant bulk upsert data
+            qdrant_points.append({
+                'id': str(point_id),
+                'vector': embedding.vector,
+                'payload': await self._prepare_qdrant_payload(point_id, chunk, file_record, current_env)
+            })
         
-        await self.db.commit()
+        # Bulk insert into PostgreSQL
+        try:
+            await self.db.execute(
+                insert(EmbeddingChunk).values(postgres_bulk_data)
+            )
+            await self.db.commit()
+            
+            # Convert bulk data to EmbeddingChunk objects for return
+            for data in postgres_bulk_data:
+                chunk_record = EmbeddingChunk(
+                    id=data['id'],
+                    file_id=data['file_id'],
+                    tenant_id=data['tenant_id'],
+                    chunk_index=data['chunk_index'],
+                    chunk_content=data['chunk_content'],
+                    chunk_hash=data['chunk_hash'],
+                    token_count=data['token_count'],
+                    qdrant_point_id=data['qdrant_point_id'],
+                    collection_name=data['collection_name'],
+                    embedding_model=data['embedding_model'],
+                    processed_at=data['processed_at']
+                )
+                chunk_records.append(chunk_record)
+            
+            print(f"✓ Bulk inserted {len(postgres_bulk_data)} chunks into PostgreSQL")
+            
+        except Exception as e:
+            print(f"⚠️ Bulk PostgreSQL insert failed: {e}")
+            await self.db.rollback()
+            # Fallback to individual inserts
+            for chunk, embedding in zip(chunks, embeddings):
+                point_id = uuid4()
+                chunk_record = EmbeddingChunk(
+                    file_id=file_record.id,
+                    tenant_id=file_record.tenant_id,
+                    chunk_index=chunk.chunk_index,
+                    chunk_content=chunk.content,
+                    chunk_hash=chunk.hash,
+                    token_count=chunk.token_count,
+                    qdrant_point_id=point_id,
+                    collection_name=collection_name,
+                    embedding_model=self.model_name,
+                    processed_at=datetime.utcnow()
+                )
+                self.db.add(chunk_record)
+                chunk_records.append(chunk_record)
+            await self.db.commit()
+        
+        # Bulk upsert into Qdrant
+        await self._bulk_store_in_qdrant(qdrant_points, collection_name)
+        
         return chunk_records
     
     async def _ensure_qdrant_collection(self, collection_name: str):
         """Ensure Qdrant collection exists for the tenant"""
-        if not hasattr(self, '_qdrant_client') or self._qdrant_client is None:
-            try:
-                from qdrant_client import QdrantClient
-                from qdrant_client.models import Distance, VectorParams
+        if self._qdrant_client is None:
+            print("⚠️ Qdrant client not available")
+            return
+        
+        try:
+            from qdrant_client.models import Distance, VectorParams
+            
+            # Check if collection exists, create if not
+            collections = self._qdrant_client.get_collections().collections
+            collection_names = [col.name for col in collections]
+            
+            if collection_name not in collection_names:
+                self._qdrant_client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(
+                        size=self._embedding_dimension,
+                        distance=Distance.COSINE
+                    )
+                )
+                print(f"✓ Created Qdrant collection: {collection_name}")
+            
+        except Exception as e:
+            print(f"⚠️ Failed to setup Qdrant collection: {e}")
+    
+    async def _prepare_qdrant_payload(
+        self, 
+        point_id: UUID, 
+        chunk: DocumentChunk, 
+        file_record: File,
+        environment: str
+    ) -> Dict[str, Any]:
+        """Prepare standardized payload for Qdrant storage with consistent tenant isolation"""
+        return {
+            # Core identifiers for filtering
+            "chunk_id": str(point_id),
+            "file_id": str(file_record.id),
+            "tenant_id": str(file_record.tenant_id),
+            "environment": environment,
+            
+            # Chunk-specific data
+            "chunk_index": chunk.chunk_index,
+            "chunk_hash": chunk.hash,
+            "token_count": chunk.token_count,
+            
+            # File metadata for search and filtering
+            "filename": file_record.filename,
+            "file_path": file_record.file_path,
+            "file_size": file_record.file_size,
+            "mime_type": file_record.mime_type,
+            
+            # Processing metadata
+            "embedding_model": self.model_name,
+            "processed_at": datetime.utcnow().isoformat(),
+            
+            # Nested metadata for backward compatibility
+            "metadata": {
+                "file_path": file_record.file_path,
+                "filename": file_record.filename,
+                "chunk_index": chunk.chunk_index,
+                "file_id": str(file_record.id),
+                "tenant_id": str(file_record.tenant_id)
+            }
+        }
+    
+    async def _bulk_store_in_qdrant(
+        self, 
+        qdrant_points: List[Dict[str, Any]], 
+        collection_name: str
+    ):
+        """Store embeddings in Qdrant vector database using bulk operations"""
+        if self._qdrant_client is None:
+            print("⚠️ Qdrant client not available, skipping vector storage")
+            return
+        
+        if not qdrant_points:
+            return
+        
+        try:
+            # Process in batches to avoid memory issues and API limits
+            batch_size = 100  # Qdrant recommended batch size
+            total_stored = 0
+            
+            for i in range(0, len(qdrant_points), batch_size):
+                batch = qdrant_points[i:i + batch_size]
                 
-                self._qdrant_client = QdrantClient(
-                    host=settings.qdrant_host,
-                    port=settings.qdrant_port
+                # Bulk upsert batch
+                self._qdrant_client.upsert(
+                    collection_name=collection_name,
+                    points=batch
                 )
                 
-                # Check if collection exists, create if not
-                collections = self._qdrant_client.get_collections().collections
-                collection_names = [col.name for col in collections]
-                
-                if collection_name not in collection_names:
-                    self._qdrant_client.create_collection(
+                total_stored += len(batch)
+                print(f"  ✓ Bulk stored batch {i//batch_size + 1}: {len(batch)} points to Qdrant")
+            
+            print(f"✓ Successfully bulk stored {total_stored} points to Qdrant collection: {collection_name}")
+            
+        except Exception as e:
+            print(f"⚠️ Failed to bulk store in Qdrant: {e}")
+            # Fallback to individual storage
+            for point in qdrant_points:
+                try:
+                    self._qdrant_client.upsert(
                         collection_name=collection_name,
-                        vectors_config=VectorParams(
-                            size=self._embedding_dimension,
-                            distance=Distance.COSINE
-                        )
+                        points=[point]
                     )
-                    print(f"✓ Created Qdrant collection: {collection_name}")
-                
-            except ImportError:
-                print("⚠️ qdrant-client not available")
-                self._qdrant_client = None
-            except Exception as e:
-                print(f"⚠️ Failed to setup Qdrant collection: {e}")
-                self._qdrant_client = None
+                except Exception as e2:
+                    print(f"⚠️ Failed to store individual point: {e2}")
     
     async def _store_in_qdrant(
         self, 
@@ -474,7 +747,7 @@ class EmbeddingService:
         file_record: File,
         collection_name: str
     ):
-        """Store embedding in Qdrant vector database"""
+        """Store embedding in Qdrant vector database (legacy method for individual storage)"""
         if self._qdrant_client is None:
             print("⚠️ Qdrant client not available, skipping vector storage")
             return
@@ -527,10 +800,8 @@ class EmbeddingService:
         
         # Group chunks by collection for efficient batch deletion
         chunks_by_collection = {}
-        for chunk in chunks:
-            if chunk.collection_name not in chunks_by_collection:
-                chunks_by_collection[chunk.collection_name] = []
-            chunks_by_collection[chunk.collection_name].append(chunk)
+        current_collection = self._get_current_collection_name()
+        chunks_by_collection[current_collection] = chunks
         
         # Batch delete from Qdrant by collection
         total_deleted = 0
@@ -589,10 +860,8 @@ class EmbeddingService:
         
         # Group chunks by collection for efficient batch deletion
         chunks_by_collection = {}
-        for chunk in chunks:
-            if chunk.collection_name not in chunks_by_collection:
-                chunks_by_collection[chunk.collection_name] = []
-            chunks_by_collection[chunk.collection_name].append(chunk)
+        current_collection = self._get_current_collection_name()
+        chunks_by_collection[current_collection] = chunks
         
         # Batch delete from Qdrant by collection
         total_deleted = 0

@@ -27,9 +27,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
-    from scripts.utils import get_paths
-    paths = get_paths()
-    PROJECT_ROOT = paths.root
+    from scripts.utils.project_paths import get_project_root
+    PROJECT_ROOT = get_project_root()
 except ImportError:
     # Fallback to old method
     SCRIPT_DIR = Path(__file__).parent.absolute()

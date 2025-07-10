@@ -46,39 +46,31 @@ class RAGResponse:
 class RAGService:
     """Service for RAG query processing and retrieval"""
     
-    def __init__(self, db_session: AsyncSession, file_service: FileService):
+    def __init__(self, db_session: AsyncSession, file_service: FileService, qdrant_client=None, embedding_model=None):
         self.db = db_session
         self.file_service = file_service
         
+        # Use injected dependencies
+        self._qdrant_client = qdrant_client
+        self._embedding_model = embedding_model
+        
         # Model references (don't store model objects in class to avoid serialization issues)
         self._llm_model = None
-        self._embedding_model = None
-        self._qdrant_client = None
         self._model_name = "not-initialized"
     
     async def initialize(self):
         """Initialize RAG components"""
         try:
-            # Initialize Qdrant client
-            from qdrant_client import QdrantClient
-            from src.backend.config.settings import get_settings
+            # Qdrant client and embedding model are now injected via constructor
+            if self._qdrant_client:
+                print(f"✓ Using injected Qdrant client")
+            else:
+                print(f"⚠️ No Qdrant client available")
             
-            settings = get_settings()
-            self._qdrant_client = QdrantClient(
-                host=settings.qdrant_host,
-                port=settings.qdrant_port
-            )
-            
-            print(f"✓ Qdrant client initialized: {settings.qdrant_host}:{settings.qdrant_port}")
-            
-            # Use singleton embedding model from dependency injection
-            from src.backend.dependencies import get_embedding_model
-            try:
-                self._embedding_model = get_embedding_model()
-                print(f"✓ Query embedding model initialized: {self._embedding_model}")
-            except Exception as e:
-                print(f"⚠️ Error getting embedding model: {e}")
-                self._embedding_model = None
+            if self._embedding_model:
+                print(f"✓ Using injected embedding model")
+            else:
+                print(f"⚠️ No embedding model available")
             
             # Initialize LLM for answer generation
             try:
@@ -133,15 +125,8 @@ class RAGService:
                     print(f"⚠️ Failed to load fallback model: {e2} - using mock responses")
                     self._llm_model = None
             
-        except ImportError:
-            print("⚠️ qdrant-client not available, using mock vector operations")
-            self._qdrant_client = None
-            self._embedding_model = None
-            self._llm_model = None
         except Exception as e:
             print(f"⚠️ Failed to initialize RAG components: {e}")
-            self._qdrant_client = None
-            self._embedding_model = None
             self._llm_model = None
     
     async def process_query(
@@ -154,7 +139,7 @@ class RAGService:
         prompt_template: str = "default"
     ) -> RAGResponse:
         """
-        Process a RAG query with retrieval and generation
+        Process a RAG query with LlamaIndex integration and fallback retrieval
         
         Args:
             query: User query
@@ -174,6 +159,59 @@ class RAGService:
             max_sources = retrieval_config["max_sources"]
         if confidence_threshold is None:
             confidence_threshold = retrieval_config["confidence_threshold"]
+        
+        # Try LlamaIndex query engine first
+        try:
+            from .rag.llamaindex_query_engine import create_tenant_query_engine
+            
+            # Create tenant-isolated query engine
+            query_engine = await create_tenant_query_engine(tenant_id, self.db)
+            
+            # Process query with LlamaIndex
+            llamaindex_result = await query_engine.query(
+                query_text=query,
+                max_sources=max_sources,
+                metadata_filters=metadata_filters
+            )
+            
+            # Convert LlamaIndex result to our format
+            search_results = []
+            for node in llamaindex_result.source_nodes:
+                search_result = SearchResult(
+                    chunk_id=node.get("node_id"),
+                    file_id=node.get("file_id"),
+                    content=node.get("content"),
+                    score=node.get("score", 0.0),
+                    metadata=node.get("metadata", {}),
+                    chunk_index=node.get("metadata", {}).get("chunk_index", 0),
+                    filename=node.get("filename", "unknown")
+                )
+                search_results.append(search_result)
+            
+            # Filter by confidence threshold
+            filtered_results = [
+                result for result in search_results 
+                if result.score >= confidence_threshold
+            ][:max_sources]
+            
+            # Calculate processing time
+            end_time = datetime.utcnow()
+            processing_time = (end_time - start_time).total_seconds()
+            
+            return RAGResponse(
+                query=query,
+                answer=llamaindex_result.response,
+                sources=filtered_results,
+                confidence=llamaindex_result.confidence,
+                processing_time=processing_time,
+                model_used="llamaindex_query_engine",
+                tokens_used=len(llamaindex_result.response.split()) if llamaindex_result.response else 0
+            )
+            
+        except Exception as e:
+            print(f"⚠️ LlamaIndex query failed: {e}, falling back to traditional RAG")
+        
+        # Fallback to traditional RAG processing
         
         # Step 1: Generate query embedding
         query_embedding = await self._generate_query_embedding(query)
@@ -238,17 +276,19 @@ class RAGService:
         
         if self._qdrant_client is not None:
             try:
-                # Build Qdrant filter
+                # Build standardized Qdrant filter with tenant and environment isolation
                 must_conditions = [
-                    {"key": "tenant_id", "match": {"value": str(tenant_id)}}
+                    {"key": "tenant_id", "match": {"value": str(tenant_id)}},
+                    {"key": "environment", "match": {"value": environment}}
                 ]
                 
                 # Add metadata filters if provided
                 if metadata_filters:
                     for key, value in metadata_filters.items():
                         if value is not None:
+                            # Try top-level field first, then fallback to metadata nest
                             must_conditions.append({
-                                "key": f"metadata.{key}",
+                                "key": key,
                                 "match": {"value": value}
                             })
                 

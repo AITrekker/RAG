@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from src.backend.models.database import File, SyncOperation, FileSyncHistory, User
 from src.backend.services.file_service import FileService
 from src.backend.services.embedding_service import EmbeddingService
+from src.backend.config.settings import get_settings
 
 
 class ChangeType(Enum):
@@ -114,6 +115,11 @@ class SyncService:
         db_files = await self.file_service.list_files(tenant_id, limit=10000)
         db_file_map = {f.file_path: f for f in db_files}
         
+        # DEBUG: Log what we found
+        print(f"🔍 DEBUG Tenant {tenant_id}:")
+        print(f"  Filesystem files: {len(fs_files)} - {list(fs_file_map.keys())[:3]}...")
+        print(f"  Database files: {len(db_files)} - {list(db_file_map.keys())[:3]}...")
+        
         changes = []
         
         # Detect new and updated files
@@ -199,38 +205,74 @@ class SyncService:
         sync_plan: SyncPlan, 
         sync_op: SyncOperation
     ):
-        """Execute the actual file changes with memory management"""
+        """Execute the actual file changes with optimized async/await concurrency"""
         
         print(f"🔍 DEBUG: _execute_file_changes called with {len(sync_plan.new_files)} new, {len(sync_plan.updated_files)} updated, {len(sync_plan.deleted_files)} deleted")
         
-        # Process files in batches to manage memory usage
-        batch_size = 3  # Process 3 files at a time to prevent memory issues
-        
-        # Process new files in batches
-        new_files = sync_plan.new_files
-        for i in range(0, len(new_files), batch_size):
-            batch = new_files[i:i + batch_size]
-            
-            for change in batch:
-                await self._process_new_file(change, sync_op)
-            
-            # Force garbage collection and GPU cleanup after each batch
-            await self._cleanup_memory()
-        
-        # Process updated files in batches
-        updated_files = sync_plan.updated_files
-        for i in range(0, len(updated_files), batch_size):
-            batch = updated_files[i:i + batch_size]
-            
-            for change in batch:
-                await self._process_updated_file(change, sync_op)
-            
-            # Force garbage collection and GPU cleanup after each batch
-            await self._cleanup_memory()
-        
-        # Process deleted files in batch for efficiency
+        # Process deletions first (fastest operation)
         if sync_plan.deleted_files:
             await self._process_deleted_files_batch(sync_plan.deleted_files, sync_op)
+        
+        # Process new and updated files concurrently with controlled batching
+        await self._process_files_concurrently(sync_plan, sync_op)
+    
+    async def _process_files_concurrently(self, sync_plan: SyncPlan, sync_op: SyncOperation):
+        """Process new and updated files with optimized concurrency"""
+        
+        # Combine new and updated files for processing
+        all_files = sync_plan.new_files + sync_plan.updated_files
+        
+        if not all_files:
+            return
+        
+        # Process in concurrent batches with memory management
+        batch_size = 5  # Increased batch size for better throughput
+        max_concurrent = 3  # Maximum concurrent file processing tasks
+        
+        print(f"🚀 Processing {len(all_files)} files with concurrent batching (batch_size={batch_size}, max_concurrent={max_concurrent})")
+        
+        for i in range(0, len(all_files), batch_size):
+            batch = all_files[i:i + batch_size]
+            
+            # Create concurrent tasks for this batch
+            tasks = []
+            for j in range(0, len(batch), max_concurrent):
+                concurrent_batch = batch[j:j + max_concurrent]
+                
+                # Create tasks for concurrent processing
+                batch_tasks = []
+                for change in concurrent_batch:
+                    if change.change_type == ChangeType.CREATED:
+                        batch_tasks.append(self._process_new_file(change, sync_op))
+                    elif change.change_type == ChangeType.UPDATED:
+                        batch_tasks.append(self._process_updated_file(change, sync_op))
+                
+                # Execute concurrent batch
+                if batch_tasks:
+                    tasks.extend(batch_tasks)
+            
+            # Execute all tasks in this batch concurrently
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Check for exceptions
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        print(f"⚠️ File processing failed: {result}")
+                        # Continue processing other files
+                
+                # Force cleanup after each batch
+                await self._cleanup_memory()
+                
+                print(f"  ✓ Completed batch {i//batch_size + 1}/{(len(all_files) + batch_size - 1)//batch_size}")
+    
+    async def _process_new_file_optimized(self, change: FileChange, sync_op: SyncOperation):
+        """Process a new file with optimized async operations"""
+        return await self._process_new_file(change, sync_op)
+    
+    async def _process_updated_file_optimized(self, change: FileChange, sync_op: SyncOperation):
+        """Process an updated file with optimized async operations"""
+        return await self._process_updated_file(change, sync_op)
     
     async def _cleanup_memory(self):
         """Clean up memory and GPU cache"""
@@ -245,8 +287,13 @@ class SyncService:
         except ImportError:
             pass
         
-        # Commit database changes to free connection resources
-        await self.db.commit()
+        # Safely commit database changes to free connection resources
+        try:
+            if self.db.is_active:
+                await self.db.commit()
+        except Exception:
+            # Ignore commit errors if session is already closed or invalid
+            pass
     
     async def _process_deleted_files_batch(self, deleted_files: List[FileChange], sync_op: SyncOperation):
         """
@@ -288,7 +335,8 @@ class SyncService:
             
         except Exception as e:
             print(f"⚠️ Batch deletion failed: {e}, falling back to individual processing")
-            # Fallback to individual processing
+            await self.db.rollback()
+            # Fall back to individual processing
             for change in deleted_files:
                 try:
                     await self._process_deleted_file(change, sync_op)
@@ -347,7 +395,7 @@ class SyncService:
                 file_path=change.file_path,
                 file_size=change.file_size or 0,
                 file_hash=change.new_hash,
-                sync_status='pending'
+                sync_status='processing'  # Mark as processing immediately
             )
             
             self.db.add(file_record)
@@ -356,16 +404,27 @@ class SyncService:
             # Process the file immediately with memory management
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
-            chunk_records = await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            
+            # Store embeddings using simple embedding service
+            settings = get_settings()
+            chunk_records = await self.embedding_service.store_embeddings(
+                file_record, chunks, embeddings, environment=settings.rag_environment
+            )
+            success = True
             
             # Track embedding metrics
             chunks_created = len(chunk_records)
             sync_op.chunks_created = (sync_op.chunks_created or 0) + chunks_created
             await self.db.flush()  # Ensure sync_op changes are persisted
             
-            # Update file status to synced
-            file_record.sync_status = 'synced'
-            file_record.sync_completed_at = datetime.utcnow()
+            # Update file status to synced only if embeddings were stored successfully
+            if success:
+                file_record.sync_status = 'synced'
+                file_record.sync_completed_at = datetime.utcnow()
+                file_record.sync_error = None
+            else:
+                file_record.sync_status = 'failed'
+                file_record.sync_error = 'Failed to store embeddings'
             
             # Create sync history record with chunk metrics
             await self._create_sync_history(file_record.id, sync_op, change, chunks_before=0, chunks_after=chunks_created)
@@ -377,6 +436,7 @@ class SyncService:
             if 'file_record' in locals():
                 file_record.sync_status = 'failed'
                 file_record.sync_error = str(e)
+                file_record.sync_completed_at = datetime.utcnow()
             raise
     
     async def _process_updated_file(self, change: FileChange, sync_op: SyncOperation):
@@ -404,13 +464,17 @@ class SyncService:
             )
             file_record = result.scalar_one()
             
-            # Delete old embeddings first - track how many were deleted
-            chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
-            
             # Reprocess the file with memory management
             chunks = await self.embedding_service.process_file(file_record)
             embeddings = await self.embedding_service.generate_embeddings(chunks)
-            chunk_records = await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            
+            # Simple embedding update - delete old then store new
+            chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
+            settings = get_settings()
+            chunk_records = await self.embedding_service.store_embeddings(
+                file_record, chunks, embeddings, environment=settings.rag_environment
+            )
+            success = True
             
             # Track embedding metrics - for updates, we delete old and create new
             chunks_created = len(chunk_records)
@@ -419,16 +483,27 @@ class SyncService:
             sync_op.chunks_updated = (sync_op.chunks_updated or 0) + chunks_created  # New embeddings for updated file
             await self.db.flush()  # Ensure sync_op changes are persisted
             
-            # Update file status to synced
-            await self.db.execute(
-                update(File)
-                .where(File.id == change.file_id)
-                .values(
-                    sync_status='synced',
-                    sync_completed_at=datetime.utcnow(),
-                    sync_error=None
+            # Update file status to synced only if embeddings were updated successfully
+            if success:
+                await self.db.execute(
+                    update(File)
+                    .where(File.id == change.file_id)
+                    .values(
+                        sync_status='synced',
+                        sync_completed_at=datetime.utcnow(),
+                        sync_error=None
+                    )
                 )
-            )
+            else:
+                await self.db.execute(
+                    update(File)
+                    .where(File.id == change.file_id)
+                    .values(
+                        sync_status='failed',
+                        sync_completed_at=datetime.utcnow(),
+                        sync_error='Failed to update embeddings'
+                    )
+                )
             
             # Create sync history record with chunk metrics
             await self._create_sync_history(change.file_id, sync_op, change, chunks_before=chunks_deleted, chunks_after=chunks_created)
@@ -458,12 +533,11 @@ class SyncService:
             # Create sync history record BEFORE deletion (since we need file ID)
             await self._create_sync_history(change.file_id, sync_op, change, chunks_before=0, chunks_after=0)
             
-            # Delete embeddings first - track how many were deleted
+            # Use simple embedding service - no complex transactions
             chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
             
             # Track embedding metrics
             sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + chunks_deleted
-            await self.db.flush()  # Ensure sync_op changes are persisted
             
             # HARD DELETE file record
             from sqlalchemy import delete

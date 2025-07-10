@@ -13,18 +13,78 @@ from src.backend.services.file_service import FileService
 from src.backend.services.embedding_service import EmbeddingService
 from src.backend.services.sync_service import SyncService
 from src.backend.services.rag_service import RAGService
+# Removed transactional embedding service to simplify
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
 
 
-# Database dependency
-async def get_db() -> AsyncSession:
-    """Get database session"""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# Singleton Qdrant client dependency
+@lru_cache(maxsize=1)
+def get_qdrant_client():
+    """Get singleton Qdrant client instance - cached across all requests"""
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, VectorParams
+        
+        settings = get_settings()
+        
+        print(f"🔢 Initializing Qdrant client: {settings.qdrant_host}:{settings.qdrant_port}")
+        
+        client = QdrantClient(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            api_key=settings.qdrant_api_key if hasattr(settings, 'qdrant_api_key') else None,
+            https=False,  # Force HTTP connection for local Qdrant
+            timeout=30
+        )
+        
+        print(f"✓ Qdrant client initialized successfully")
+        return client
+        
+    except ImportError:
+        print("⚠️ qdrant-client not available, returning None")
+        return None
+    except Exception as e:
+        print(f"❌ Failed to initialize Qdrant client: {e}")
+        return None
+
+
+# Database dependency with connection monitoring
+async def get_db():
+    """Get database session for FastAPI dependency injection with monitoring"""
+    session = None
+    try:
+        from sqlalchemy import text
+        session = AsyncSessionLocal()
+        # Set session-level timeout
+        await session.execute(text("SET statement_timeout = '120s'"))  # 2 minutes for API operations
+        yield session
+    except Exception as e:
+        if session:
+            try:
+                await session.rollback()
+            except Exception:
+                # Ignore rollback errors if session is already closed
+                pass
+        # Log connection pool issues
+        from src.backend.database import async_engine
+        pool = async_engine.pool
+        if pool.checkedout() > 25:  # Warning threshold
+            print(f"⚠️ High connection usage: {pool.checkedout()}/80 connections in use")
+        raise e
+    finally:
+        if session:
+            try:
+                await session.close()
+            except Exception:
+                # Ignore close errors - session may already be closed or invalid
+                pass
+
+
+# Direct session access for non-dependency usage
+async def get_db_session() -> AsyncSession:
+    """Get database session directly (not for FastAPI dependencies)"""
+    return AsyncSessionLocal()
 
 
 # Singleton embedding model dependency with proper memory management
@@ -71,11 +131,12 @@ async def get_file_service_dep(
 
 async def get_embedding_service_dep(
     db: AsyncSession = Depends(get_db),
-    embedding_model = Depends(get_embedding_model)
+    embedding_model = Depends(get_embedding_model),
+    qdrant_client = Depends(get_qdrant_client)
 ) -> EmbeddingService:
-    """Get embedding service with singleton model"""
-    service = EmbeddingService(db, embedding_model)
-    # No need to call initialize() since model is injected
+    """Get embedding service with singleton model and Qdrant client"""
+    service = EmbeddingService(db, embedding_model, qdrant_client)
+    # No need to call initialize() since dependencies are injected
     return service
 
 
@@ -90,10 +151,12 @@ async def get_sync_service_dep(
 
 async def get_rag_service_dep(
     db: AsyncSession = Depends(get_db),
-    file_service: FileService = Depends(get_file_service_dep)
+    file_service: FileService = Depends(get_file_service_dep),
+    qdrant_client = Depends(get_qdrant_client),
+    embedding_model = Depends(get_embedding_model)
 ) -> RAGService:
     """Get RAG service with dependencies"""
-    service = RAGService(db, file_service)
+    service = RAGService(db, file_service, qdrant_client, embedding_model)
     await service.initialize()
     return service
 

@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { useTenant } from "@/contexts/TenantContext";
 import { OpenAPI } from "@/src/services/api.generated/core/OpenAPI";
 import { useState, useEffect } from "react";
-import { RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FileText } from "lucide-react";
+import { RefreshCw, CheckCircle, XCircle, Clock, AlertCircle, FileText, Trash2 } from "lucide-react";
 
 interface SyncStatus {
   latest_sync: {
@@ -18,6 +18,14 @@ interface SyncStatus {
     completed_at: string | null;
     files_processed: number;
     error_message: string | null;
+    progress?: {
+      stage: string | null;
+      percentage: number | null;
+      current_file: number | null;
+      total_files: number | null;
+    };
+    heartbeat_at: string | null;
+    expected_duration_seconds: number | null;
   };
   file_status: {
     pending: number;
@@ -157,6 +165,37 @@ export const SyncDashboard = () => {
     refetchChanges();
   };
 
+  const handleCleanupStuckSyncs = async () => {
+    try {
+      const response = await fetch(`${OpenAPI.BASE}/api/v1/sync/cleanup`, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': tenantApiKey!,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) throw new Error('Failed to cleanup stuck syncs');
+      
+      const result = await response.json();
+      toast({
+        title: "Cleanup Completed",
+        description: `Cleaned up ${result.operations_cleaned} stuck operations.`,
+      });
+      
+      // Refresh status after cleanup
+      refetchStatus();
+      queryClient.invalidateQueries({ queryKey: ["syncHistory"] });
+      
+    } catch (error: any) {
+      toast({
+        title: "Cleanup Failed",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const getStatusColor = (status: string | null) => {
     switch (status) {
       case 'completed': return 'text-green-600';
@@ -233,6 +272,15 @@ export const SyncDashboard = () => {
               <FileText className="w-4 h-4" />
               Preview Changes
             </Button>
+            <Button
+              onClick={handleCleanupStuckSyncs}
+              disabled={!tenant || !tenantApiKey}
+              variant="outline"
+              className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              Cleanup Stuck Syncs
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -277,6 +325,65 @@ export const SyncDashboard = () => {
                       <span className="text-gray-600">Files Processed:</span>
                       <span className="text-sm">{syncStatus.latest_sync.files_processed}</span>
                     </div>
+                    
+                    {/* Progress Information */}
+                    {syncStatus.latest_sync.progress && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Stage:</span>
+                          <span className="font-medium capitalize">
+                            {syncStatus.latest_sync.progress.stage?.replace('_', ' ') || 'Unknown'}
+                          </span>
+                        </div>
+                        
+                        {syncStatus.latest_sync.progress.percentage !== null && (
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-600">Progress:</span>
+                              <span className="font-medium">
+                                {syncStatus.latest_sync.progress.percentage?.toFixed(1)}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div 
+                                className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                                style={{ 
+                                  width: `${syncStatus.latest_sync.progress.percentage || 0}%` 
+                                }}
+                              ></div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {syncStatus.latest_sync.progress.current_file && syncStatus.latest_sync.progress.total_files && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">File Progress:</span>
+                            <span className="font-medium">
+                              {syncStatus.latest_sync.progress.current_file} of {syncStatus.latest_sync.progress.total_files}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {syncStatus.latest_sync.heartbeat_at && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Last Heartbeat:</span>
+                            <span className="text-xs text-gray-500">
+                              {formatDateTime(syncStatus.latest_sync.heartbeat_at)}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {syncStatus.latest_sync.expected_duration_seconds && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Expected Duration:</span>
+                            <span className="text-xs text-gray-500">
+                              {Math.round(syncStatus.latest_sync.expected_duration_seconds / 60)} min
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
                     {syncStatus.latest_sync.error_message && (
                       <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
                         <strong>Error:</strong> {syncStatus.latest_sync.error_message}

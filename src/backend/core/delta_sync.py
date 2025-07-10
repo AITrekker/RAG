@@ -136,7 +136,7 @@ class DeltaSync:
             Dict mapping file paths to stored metadata from point payloads.
         """
         stored_files = {}
-        collection_name = self.vector_store_manager.get_collection_name_for_tenant(tenant_id)
+        collection_name = self.vector_store_manager.get_collection_name()
         
         try:
             # Scroll through all points in the collection to fetch metadata

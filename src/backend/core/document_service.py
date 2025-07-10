@@ -38,7 +38,7 @@ class DocumentService:
         # 1. Fetch metadata from Qdrant to find the file path
         try:
             points = self.vector_manager.client.retrieve(
-                collection_name=self.vector_manager.get_collection_name_for_tenant(self.tenant_id),
+                collection_name=self.vector_manager.get_collection_name(),
                 ids=[document_id],
                 with_payload=True
             )
@@ -74,7 +74,7 @@ class DocumentService:
             The number of documents deleted (approximated by files).
         """
         logger.warning(f"Service: Clearing ALL documents for tenant {self.tenant_id}")
-        collection_name = self.vector_manager.get_collection_name_for_tenant(self.tenant_id)
+        collection_name = self.vector_manager.get_collection_name()
         deleted_files = 0
 
         try:
@@ -97,9 +97,13 @@ class DocumentService:
                         logger.warning(f"Failed to remove file from filesystem: {file_path_str}: {e}")
             logger.info(f"Removed {deleted_files} document files from filesystem for tenant {self.tenant_id}")
             
-            # 3. Clear from Vector Store by deleting the whole collection
-            self.vector_manager.delete_tenant_collection(self.tenant_id)
-            logger.info(f"Cleared all embeddings by deleting collection for tenant {self.tenant_id}")
+            # 3. Clear from Vector Store by deleting all tenant points
+            # Since we use environment collections, we can't delete the whole collection
+            # Instead, we delete all points for this tenant using a filter
+            all_point_ids = [p.id for p in all_points]
+            if all_point_ids:
+                self.vector_manager.delete_documents(self.tenant_id, all_point_ids)
+                logger.info(f"Cleared {len(all_point_ids)} embeddings for tenant {self.tenant_id}")
 
         except Exception as e:
             logger.error(f"Failed to clear documents for tenant {self.tenant_id}: {e}", exc_info=True)

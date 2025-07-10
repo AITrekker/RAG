@@ -60,16 +60,6 @@ class VectorStoreManager:
         self.ensure_collection_exists(collection_name, embedding_size)
         return self.client.get_collection(collection_name=collection_name)
 
-    def get_collection_name_for_tenant(self, tenant_id: str) -> str:
-        """Gets the Qdrant collection name (now environment-based, not tenant-based)."""
-        return self.get_collection_name()
-
-    # Legacy method for backward compatibility
-    def get_collection_for_tenant(self, tenant_id: str, embedding_size: int) -> models.CollectionInfo:
-        """
-        Legacy method: now returns environment collection (tenant isolation via payload).
-        """
-        return self.get_collection_for_environment(embedding_size)
 
     def add_documents(
         self,
@@ -131,7 +121,7 @@ class VectorStoreManager:
         env = environment or self.environment
         collection_name = self.get_collection_name(env)
         
-        # Build filter to include tenant and environment isolation
+        # Build standardized filter for tenant and environment isolation
         tenant_filter = {
             "must": [
                 {"key": "tenant_id", "match": {"value": str(tenant_id)}},
@@ -157,15 +147,17 @@ class VectorStoreManager:
         )
         return search_results
 
-    def delete_documents(self, tenant_id: str, point_ids: List[str]):
+    def delete_documents(self, tenant_id: str, point_ids: List[str], environment: str = None):
         """
-        Deletes documents from a tenant's collection by their point IDs.
+        Deletes documents from environment collection by their point IDs with tenant filtering.
 
         Args:
             tenant_id: The ID of the tenant.
             point_ids: A list of point IDs to delete.
+            environment: Target environment (defaults to current).
         """
-        collection_name = self._get_collection_name_for_tenant(tenant_id)
+        env = environment or self.environment
+        collection_name = self.get_collection_name(env)
         
         self.client.delete(
             collection_name=collection_name,
@@ -174,36 +166,25 @@ class VectorStoreManager:
         )
         logger.info(f"Deleted {len(point_ids)} points from collection '{collection_name}'.")
 
-    def delete_tenant_collection(self, tenant_id: str) -> bool:
-        """
-        Deletes an entire collection for a tenant.
-
-        Args:
-            tenant_id: The ID of the tenant whose collection is to be deleted.
-        
-        Returns:
-            True if deletion was successful, False otherwise.
-        """
-        collection_name = self._get_collection_name_for_tenant(tenant_id)
-        try:
-            result = self.client.delete_collection(collection_name=collection_name)
-            if result:
-                logger.info(f"Successfully deleted collection '{collection_name}'.")
-            return result
-        except Exception as e:
-            logger.error(f"Error deleting collection '{collection_name}': {e}")
-            return False
-
-    def delete_documents_by_path(self, tenant_id: str, file_path: str):
-        """Deletes all points associated with a specific file_path from a tenant's collection."""
-        collection_name = self._get_collection_name_for_tenant(tenant_id)
+    def delete_documents_by_path(self, tenant_id: str, file_path: str, environment: str = None):
+        """Deletes all points associated with a specific file_path from environment collection."""
+        env = environment or self.environment
+        collection_name = self.get_collection_name(env)
         logger.info(f"Attempting to delete all points for file '{file_path}' from collection '{collection_name}'.")
 
-        # Use a filter to select points where the metadata contains the matching file_path
+        # Use standardized filter with tenant isolation and direct file_path field
         must_filter = models.Filter(
             must=[
                 models.FieldCondition(
-                    key="metadata.file_path",
+                    key="tenant_id",
+                    match=models.MatchValue(value=str(tenant_id))
+                ),
+                models.FieldCondition(
+                    key="environment",
+                    match=models.MatchValue(value=env)
+                ),
+                models.FieldCondition(
+                    key="file_path",
                     match=models.MatchValue(value=file_path)
                 )
             ]
@@ -226,9 +207,6 @@ class VectorStoreManager:
             )
             logger.info(f"Created new collection: {collection_name}")
 
-    def _get_collection_name_for_tenant(self, tenant_id: str) -> str:
-        """Gets the Qdrant collection name for a given tenant."""
-        return f"tenant_{tenant_id}_documents"
 
 # Singleton instance of the VectorStoreManager
 _vector_store_manager_instance: Optional[VectorStoreManager] = None

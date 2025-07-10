@@ -270,6 +270,14 @@ class SyncOperation(BaseModel):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     
+    # Heartbeat and Progress Tracking
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    expected_duration_seconds: Mapped[Optional[int]] = mapped_column(Integer)
+    progress_stage: Mapped[Optional[str]] = mapped_column(String(50))
+    progress_percentage: Mapped[Optional[float]] = mapped_column(Float)
+    total_files_to_process: Mapped[Optional[int]] = mapped_column(Integer)
+    current_file_index: Mapped[Optional[int]] = mapped_column(Integer)
+    
     # Statistics
     files_processed: Mapped[int] = mapped_column(Integer, default=0)
     files_added: Mapped[int] = mapped_column(Integer, default=0)
@@ -291,8 +299,13 @@ class SyncOperation(BaseModel):
     __table_args__ = (
         CheckConstraint("operation_type IN ('full_sync', 'delta_sync', 'file_sync')", name='check_operation_type'),
         CheckConstraint("status IN ('running', 'completed', 'failed', 'cancelled')", name='check_sync_status'),
+        CheckConstraint("progress_percentage >= 0 AND progress_percentage <= 100", name='check_progress_range'),
+        CheckConstraint("current_file_index >= 0", name='check_current_file_index'),
+        CheckConstraint("total_files_to_process >= 0", name='check_total_files'),
         Index('idx_sync_operations_tenant', 'tenant_id', 'started_at'),
-        Index('idx_sync_operations_status', 'status', 'started_at')
+        Index('idx_sync_operations_status', 'status', 'started_at'),
+        Index('idx_sync_operations_heartbeat', 'status', 'heartbeat_at'),
+        Index('idx_sync_operations_progress', 'tenant_id', 'status', 'progress_stage')
     )
 
 class FileSyncHistory(BaseModel):

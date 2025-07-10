@@ -42,8 +42,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
     from scripts.utils.api_validator import APIValidator, APIValidationError
 except ImportError:
-    print("❌ Could not import APIValidator. Make sure api_validator.py exists.")
-    sys.exit(1)
+    # Create dummy classes for when dependencies are missing
+    class APIValidator:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("APIValidator requires aiohttp and jsonschema dependencies")
+    
+    class APIValidationError(Exception):
+        pass
 
 
 class ValidatedAPIClient:
