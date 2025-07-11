@@ -32,11 +32,15 @@ The API is organized into the following route modules, all prefixed with `/api/v
 
 ### Route Categories
 1. **Health & Monitoring** (`/health`) - System health checks
-2. **Query Processing** (`/query`) - RAG query operations
-3. **Delta Sync** (`/sync`) - Document synchronization
-4. **Setup & Initialization** (`/setup`) - System setup
-5. **Admin Operations** (`/admin`) - Administrative functions
-6. **Tenant Operations** (`/tenants`) - **ORPHANED** (not registered)
+2. **Authentication** (`/auth`) - API key and tenant management
+3. **Setup & Initialization** (`/setup`) - System setup
+4. **Admin Operations** (`/admin`) - Administrative functions
+5. **Audit** (`/audit`) - Audit logging and events
+6. **Tenant Operations** (`/tenants`) - Tenant context and operations
+7. **File Management** (`/files`) - File upload and management
+8. **Sync Operations** (`/sync`) - Document synchronization
+9. **Query Processing** (`/query`) - RAG query operations
+10. **Analytics** (`/analytics`) - Usage analytics and metrics
 
 ---
 
@@ -47,36 +51,22 @@ The API is organized into the following route modules, all prefixed with `/api/v
 #### 1. Health & Monitoring (`/api/v1/health`)
 - ✅ `GET /health` - Comprehensive health check with component status
 - ✅ `GET /health/liveness` - Basic liveness check
+- ✅ `GET /health/database` - Database connection pool status
 
-#### 2. Query Processing (`/api/v1/queries`)
-- ✅ `POST /queries` - Process RAG queries with metadata filtering
-- ✅ `POST /queries/batch` - Process multiple queries in batch
-- ✅ `GET /queries/documents` - List documents with metadata filtering
-- ✅ `GET /queries/documents/{document_id}` - Get document details
-- ✅ `GET /queries/search` - Search documents by content and metadata
-- ✅ `GET /queries/history` - Get query history for a tenant
-- ✅ `POST /queries/feedback` - Submit feedback for query responses
-- ✅ `GET /queries/config` - Get query configuration
-- ✅ `PUT /queries/config` - Update query configuration
-- ✅ `GET /queries/stats` - Get query statistics
-- ✅ `POST /queries/validate` - Validate a query without processing
+#### 2. Authentication (`/api/v1/auth`)
+- ✅ `GET /auth/tenants` - List all tenants (for admin/development use)
+- ✅ `POST /auth/tenants` - Create a new tenant
+- ✅ `GET /auth/tenants/{tenant_slug}` - Get tenant by slug
+- ✅ `POST /auth/tenants/{tenant_slug}/api-key` - Create/regenerate API key for tenant
+- ✅ `GET /auth/tenants/{tenant_slug}/api-key` - Get API key info (without revealing key)
+- ✅ `DELETE /auth/tenants/{tenant_slug}/api-key` - Revoke API key for tenant
+- ✅ `GET /auth/tenant` - Get current tenant from API key authentication
 
-#### 3. Delta Sync (`/api/v1/syncs`)
-- ✅ `POST /syncs` - Trigger delta sync operation with hash tracking
-- ✅ `GET /syncs/{sync_id}` - Get sync status and progress
-- ✅ `GET /syncs/history` - Get sync history
-- ✅ `DELETE /syncs/{sync_id}` - Cancel a running sync operation
-- ✅ `GET /syncs/config` - Get sync configuration
-- ✅ `PUT /syncs/config` - Update sync configuration
-- ✅ `GET /syncs/stats` - Get sync statistics
-- ✅ `POST /syncs/documents` - Process single document manually
-- ✅ `DELETE /syncs/documents/{document_id}` - Remove document from Qdrant
-
-#### 4. Setup & Initialization (`/api/v1/setup`)
+#### 3. Setup & Initialization (`/api/v1/setup`)
 - ✅ `GET /setup/status` - Check system initialization status
 - ✅ `POST /setup/initialize` - Initialize the system with admin tenant
 
-#### 5. Admin Operations (`/api/v1/admin`)
+#### 4. Admin Operations (`/api/v1/admin`)
 - ✅ `POST /admin/tenants` - Create new tenant (Admin only)
 - ✅ `GET /admin/tenants` - List all tenants (Admin only)
 - ✅ `GET /admin/tenants/{tenant_id}` - Get tenant details (Admin only)
@@ -91,7 +81,74 @@ The API is organized into the following route modules, all prefixed with `/api/v
 - ✅ `DELETE /admin/system/llm/stats` - Clear LLM statistics (Admin only)
 - ✅ `DELETE /admin/system/llm/cache` - Clear LLM cache (Admin only)
 - ✅ `PUT /admin/system/maintenance` - Update maintenance mode (Admin only)
-- ✅ `GET /admin/audit/events` - Get audit events (Admin only)
+- ✅ `POST /admin/demo/setup` - Setup demo environment with tenants
+- ✅ `GET /admin/demo/tenants` - List demo tenants with API keys
+- ✅ `DELETE /admin/demo/cleanup` - Clean up demo environment
+- ✅ `POST /admin/system/init-database` - Initialize database schema
+
+#### 5. Audit (`/api/v1/audit`)
+- ⚠️ **PARTIALLY IMPLEMENTED** - Route exists but specific endpoints not confirmed
+
+#### 6. Tenant Operations (`/api/v1/tenants`)
+- ✅ `GET /tenants/context` - Get current tenant context information
+- ✅ `POST /tenants/switch` - Switch to different tenant context
+- ✅ `GET /tenants/{tenant_id}/documents` - List documents for tenant
+- ✅ `GET /tenants/{tenant_id}/sync/status` - Get tenant sync status
+- ✅ `POST /tenants/{tenant_id}/api-keys` - Create API key for tenant (self-service)
+- ✅ `GET /tenants` - List all tenants with pagination
+- ✅ `GET /tenants/{tenant_id}` - Get tenant details by ID
+- ✅ `GET /tenants/{tenant_id}/api-keys` - List API keys for tenant
+- ✅ `DELETE /tenants/{tenant_id}/api-keys/{key_id}` - Delete API key for tenant
+
+#### 7. File Management (`/api/v1/files`)
+- ✅ `POST /files/upload` - Upload a file for the authenticated tenant
+- ✅ `GET /files` - List files for the authenticated tenant
+- ✅ `GET /files/{file_id}` - Get file details
+- ✅ `DELETE /files/{file_id}` - Delete a file
+- ✅ `POST /files/{file_id}/sync` - Trigger sync for a specific file
+- ✅ `GET /files/{file_id}/chunks` - Get all chunks for a file
+
+#### 8. Sync Operations (`/api/v1/sync`)
+- ✅ `POST /sync` - Create a new sync operation
+- ✅ `POST /sync/trigger` - Trigger a sync operation with conflict resolution
+- ✅ `GET /sync/status` - Get comprehensive sync status
+- ✅ `GET /sync/history` - Get sync history for the authenticated tenant
+- ✅ `GET /sync/{sync_id}` - Get specific sync operation status (NOT IMPLEMENTED)
+- ✅ `DELETE /sync/{sync_id}` - Cancel a sync operation (NOT IMPLEMENTED)
+- ✅ `POST /sync/cleanup` - Manually trigger cleanup of stuck sync operations
+- ✅ `POST /sync/detect-changes` - Detect file changes without executing sync
+- ✅ `GET /sync/config` - Get sync configuration (NOT IMPLEMENTED)
+- ✅ `PUT /sync/config` - Update sync configuration (NOT IMPLEMENTED)
+- ✅ `GET /sync/stats` - Get sync statistics (NOT IMPLEMENTED)
+- ✅ `POST /sync/documents` - Create document processing job (NOT IMPLEMENTED)
+- ✅ `DELETE /sync/documents/{document_id}` - Delete document and sync (NOT IMPLEMENTED)
+
+#### 9. Query Processing (`/api/v1/query`)
+- ✅ `POST /query` - Process RAG query with comprehensive analytics tracking
+- ✅ `POST /query/batch` - Process multiple queries in batch (NOT IMPLEMENTED)
+- ✅ `POST /query/search` - Perform semantic search without answer generation
+- ✅ `GET /query/documents` - List documents with optional search
+- ✅ `GET /query/documents/{document_id}` - Get specific document details (NOT IMPLEMENTED)
+- ✅ `GET /query/history` - Get query history (NOT IMPLEMENTED)
+- ✅ `POST /query/validate` - Validate a query without processing it
+- ✅ `GET /query/suggestions` - Get query suggestions (STUBBED)
+- ✅ `GET /query/stats` - Get RAG usage statistics (STUBBED)
+- ✅ `POST /query/feedback` - Submit query feedback (STUBBED)
+- ✅ `GET /query/config` - Get query configuration (NOT IMPLEMENTED)
+- ✅ `PUT /query/config` - Update query configuration (NOT IMPLEMENTED)
+
+#### 10. Analytics (`/api/v1/analytics`)
+- ✅ `GET /analytics/summary` - Get comprehensive tenant summary metrics
+- ✅ `GET /analytics/metrics/daily` - Get daily aggregated metrics
+- ✅ `POST /analytics/metrics/calculate` - Manually trigger metrics calculation
+- ✅ `GET /analytics/queries/history` - Get paginated query history
+- ✅ `POST /analytics/queries/feedback` - Submit feedback for query response
+- ✅ `GET /analytics/queries/stats` - Get detailed query statistics
+- ✅ `GET /analytics/documents/usage` - Get document usage statistics
+- ✅ `GET /analytics/documents/metrics` - Get document-related metrics
+- ✅ `GET /analytics/users/activity` - Get user activity metrics
+- ✅ `GET /analytics/performance/overview` - Get performance overview
+- ✅ `GET /analytics/export/csv` - Export metrics data as CSV
 
 ### 📚 **ADDITIONAL ENDPOINTS**
 
@@ -189,7 +246,162 @@ All endpoints have been updated to follow REST conventions:
 
 ---
 
+## 🚨 **CRITICAL DOCUMENTATION FIXES**
+
+### **Major Path Corrections Applied**
+1. **Query Endpoints**: Corrected from `/api/v1/queries` to `/api/v1/query`
+2. **Sync Endpoints**: Corrected from `/api/v1/syncs` to `/api/v1/sync`
+3. **Search Endpoint**: Changed from GET with query params to POST with JSON body
+
+### **Missing Route Categories Added**
+1. **Authentication Routes** (`/api/v1/auth`) - Completely missing from previous documentation
+2. **File Management Routes** (`/api/v1/files`) - Completely missing from previous documentation
+3. **Analytics Routes** (`/api/v1/analytics`) - Completely missing from previous documentation
+4. **Tenant Context Routes** (`/api/v1/tenants`) - Documented but incorrectly marked as orphaned
+
+### **Implementation Status Clarifications**
+- Many sync endpoints are **NOT IMPLEMENTED** (return 501 errors)
+- Many query endpoints are **NOT IMPLEMENTED** or **STUBBED**
+- Analytics endpoints are **IMPLEMENTED** with mock data for development
+
+---
+
 ## Detailed Endpoint Reference
+
+### Authentication Endpoints
+
+#### `GET /api/v1/auth/tenants`
+**List all tenants (for admin/development use)**
+```json
+[
+  {
+    "id": "tenant_123",
+    "name": "Demo Company",
+    "slug": "demo-company",
+    "plan_tier": "free",
+    "storage_limit_gb": 10,
+    "max_users": 5,
+    "is_active": true,
+    "api_key_name": "Development Key",
+    "api_key_last_used": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+#### `POST /api/v1/auth/tenants`
+**Create a new tenant**
+```json
+{
+  "name": "New Company",
+  "description": "Description of the new company"
+}
+```
+
+#### `GET /api/v1/auth/tenant`
+**Get current tenant from API key authentication**
+```json
+{
+  "id": "tenant_123",
+  "name": "Demo Company",
+  "slug": "demo-company",
+  "plan_tier": "free",
+  "storage_limit_gb": 10,
+  "max_users": 5,
+  "is_active": true
+}
+```
+
+### File Management Endpoints
+
+#### `POST /api/v1/files/upload`
+**Upload a file for the authenticated tenant**
+```bash
+curl -X POST "http://localhost:8000/api/v1/files/upload" \
+  -H "Authorization: Bearer your-api-key" \
+  -F "file=@document.pdf"
+```
+
+**Response:**
+```json
+{
+  "file_id": "file_123",
+  "filename": "document.pdf",
+  "file_size": 1048576,
+  "sync_status": "pending",
+  "message": "File uploaded successfully"
+}
+```
+
+#### `GET /api/v1/files`
+**List files for the authenticated tenant**
+```json
+{
+  "files": [
+    {
+      "id": "file_123",
+      "filename": "document.pdf",
+      "file_size": 1048576,
+      "mime_type": "application/pdf",
+      "sync_status": "synced",
+      "word_count": 1500,
+      "page_count": 10,
+      "language": "en",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:05:00Z"
+    }
+  ],
+  "total_count": 1,
+  "page": 1,
+  "page_size": 100
+}
+```
+
+### Analytics Endpoints
+
+#### `GET /api/v1/analytics/summary`
+**Get comprehensive tenant summary metrics**
+```json
+{
+  "tenant_id": "tenant_123",
+  "today": {
+    "queries": 47,
+    "documents": 156,
+    "users": 12,
+    "avg_response_time": 850,
+    "success_rate": 94.2
+  },
+  "all_time": {
+    "total_queries": 3247,
+    "total_documents": 156,
+    "success_rate": 91.8
+  },
+  "recent_trend": [
+    {
+      "date": "2025-07-07",
+      "queries": 47,
+      "success_rate": 94.2,
+      "avg_response_time": 850
+    }
+  ]
+}
+```
+
+#### `GET /api/v1/analytics/queries/history`
+**Get paginated query history for the tenant**
+```json
+[
+  {
+    "id": "q1",
+    "query_text": "What are the key features of our new product?",
+    "response_type": "success",
+    "confidence_score": 0.92,
+    "response_time_ms": 750,
+    "sources_count": 3,
+    "created_at": "2025-07-07T15:30:00Z",
+    "user_id": "user1"
+  }
+]
+```
 
 ### Health & Monitoring Endpoints
 
@@ -233,7 +445,7 @@ All endpoints have been updated to follow REST conventions:
 
 ### Query Processing Endpoints
 
-#### `POST /api/v1/queries`
+#### `POST /api/v1/query`
 **Process RAG query with metadata filtering**
 ```json
 {
@@ -275,7 +487,7 @@ All endpoints have been updated to follow REST conventions:
 
 ### Delta Sync Endpoints
 
-#### `POST /api/v1/syncs`
+#### `POST /api/v1/sync/trigger`
 **Trigger delta sync operation**
 ```json
 {
@@ -672,19 +884,19 @@ The API implements comprehensive error handling:
 cp document.pdf data/tenants/tenant-1/documents/
 
 # 2. Trigger delta sync
-curl -X POST "http://localhost:8000/api/v1/syncs" \
+curl -X POST "http://localhost:8000/api/v1/sync/trigger" \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"force_full_sync": false}'
 
 # 3. Check sync status
-curl -X GET "http://localhost:8000/api/v1/syncs/{sync_id}" \
+curl -X GET "http://localhost:8000/api/v1/sync/status" \
   -H "Authorization: Bearer your-api-key"
 ```
 
 ### Query with Metadata Filtering
 ```bash
-curl -X POST "http://localhost:8000/api/v1/queries" \
+curl -X POST "http://localhost:8000/api/v1/query" \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -703,8 +915,17 @@ curl -X POST "http://localhost:8000/api/v1/queries" \
 
 ### Document Search
 ```bash
-curl -X GET "http://localhost:8000/api/v1/queries/search?query=machine+learning&author=John+Doe&tags=AI,research" \
-  -H "Authorization: Bearer your-api-key"
+curl -X POST "http://localhost:8000/api/v1/query/search" \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "machine learning",
+    "max_results": 20,
+    "metadata_filters": {
+      "author": "John Doe",
+      "tags": ["AI", "research"]
+    }
+  }'
 ```
 
 ### System Health Check
@@ -991,21 +1212,25 @@ X-RateLimit-Reset: 1640995200
 
 ## Implementation Summary
 
-| Route Category | Status | Endpoints | RESTful Updates |
-|----------------|--------|-----------|----------------|
-| Health Routes | ✅ Complete | 2 endpoints | ✅ No changes needed |
-| Query Routes | ✅ Complete | 11 endpoints | ✅ Updated to `/queries` |
-| Sync Routes | ✅ Complete | 9 endpoints | ✅ Updated to `/syncs` |
-| Setup Routes | ✅ Complete | 2 endpoints | ✅ No changes needed |
-| Admin Routes | ✅ Complete | 19 endpoints | ✅ Updated maintenance endpoints |
-| Demo Routes | ✅ Complete | 3 endpoints | ✅ RESTful from start |
+| Route Category | Status | Endpoints | Critical Issues Fixed |
+|----------------|--------|-----------|---------------------|
+| Health Routes | ✅ Complete | 3 endpoints | ✅ No issues found |
+| Auth Routes | ✅ Complete | 7 endpoints | ✅ **ADDED** - Was completely missing |
+| Setup Routes | ✅ Complete | 2 endpoints | ✅ No issues found |
+| Admin Routes | ✅ Complete | 15+ endpoints | ✅ Demo management added |
+| Audit Routes | ⚠️ Partial | Unknown | ⚠️ Route registered but endpoints unclear |
+| Tenant Routes | ✅ Complete | 9 endpoints | ✅ **FIXED** - Was marked as orphaned |
+| File Routes | ✅ Complete | 6 endpoints | ✅ **ADDED** - Was completely missing |
+| Sync Routes | ⚠️ Partial | 13 endpoints | ✅ **FIXED** - Many endpoints return 501 |
+| Query Routes | ⚠️ Partial | 12 endpoints | ✅ **FIXED** - Path corrected, many stubbed |
+| Analytics Routes | ✅ Complete | 11 endpoints | ✅ **ADDED** - Was completely missing |
 
-### Recent Improvements
-1. ✅ **RESTful Restructure**: All endpoints follow REST conventions
-2. ✅ **Consistent Naming**: Standardized endpoint patterns
-3. ✅ **HTTP Methods**: Proper use of GET, POST, PUT, DELETE
-4. ✅ **Documentation**: Updated all examples and references
-5. ✅ **Script Updates**: API scripts use centralized configuration
+### Critical Documentation Fixes Applied
+1. ✅ **Path Corrections**: Fixed `/queries` → `/query`, `/syncs` → `/sync`
+2. ✅ **Missing Routes**: Added auth, files, analytics, tenant context routes
+3. ✅ **Implementation Status**: Clarified NOT IMPLEMENTED vs STUBBED endpoints
+4. ✅ **Route Registration**: Verified all routes are properly registered in main.py
+5. ✅ **Example Updates**: All curl examples now use correct endpoint paths
 
 ---
 

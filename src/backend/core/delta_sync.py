@@ -24,9 +24,9 @@ import uuid
 from ..config.settings import get_settings
 from .document_processor import DocumentProcessor
 # from .tenant_manager import TenantManager # Obsolete
-from .auditing import audit_logger
+# from .auditing import audit_logger  # Disabled: migrated from Qdrant to pgvector
 from ..utils.vector_store import get_vector_store_manager
-from qdrant_client import models
+# from qdrant_client import models  # Disabled: migrated from Qdrant to pgvector
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

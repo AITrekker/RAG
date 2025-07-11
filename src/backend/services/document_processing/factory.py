@@ -3,16 +3,18 @@
 from typing import Dict, Type, Optional, List
 from pathlib import Path
 from .base import DocumentProcessor
-from .processors import TextProcessor, PDFProcessor, HTMLProcessor
+from .processors.text_processor import TextProcessor
+# from .processors.pdf_processor import PDFProcessor
+# from .processors.html_processor import HTMLProcessor
 
 class DocumentProcessorFactory:
     """Factory for creating appropriate document processors."""
     
     _processors: Dict[str, Type[DocumentProcessor]] = {
         '.txt': TextProcessor,
-        '.pdf': PDFProcessor,
-        '.html': HTMLProcessor,
-        '.htm': HTMLProcessor,
+        # '.pdf': PDFProcessor,
+        # '.html': HTMLProcessor,
+        # '.htm': HTMLProcessor,
     }
     
     @classmethod
@@ -26,9 +28,14 @@ class DocumentProcessorFactory:
                 return processor_class()
             except Exception as e:
                 # Log the error but don't fail completely
-                print(f"Warning: Failed to initialize processor for {extension}: {e}")
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to initialize processor for {extension}: {e}")
                 return None
         
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"No processor class found for extension: {extension}. Available: {list(cls._processors.keys())}")
         return None
     
     @classmethod

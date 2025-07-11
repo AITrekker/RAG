@@ -28,7 +28,7 @@ from src.backend.models.api_models import (
     SyncHistoryResponse
 )
 from src.backend.middleware.auth import get_current_tenant, get_tenant_context, verify_tenant_access
-from src.backend.api.v1.providers import get_document_service, get_delta_sync
+from src.backend.api.v1.providers import get_document_service  # , get_delta_sync  # Disabled: needs migration from Qdrant to pgvector
 from src.backend.core.document_processor import DocumentProcessor
 
 logger = logging.getLogger(__name__)
@@ -217,8 +217,8 @@ async def get_tenant_sync_status(
     tenant_id: str,
     include_history: bool = Query(False, description="Include sync history"),
     limit: int = Query(10, ge=1, le=50, description="Number of history entries"),
-    current_tenant: dict = Depends(get_current_tenant),
-    delta_sync = Depends(get_delta_sync)
+    current_tenant: dict = Depends(get_current_tenant)
+    # delta_sync = Depends(get_delta_sync)  # Disabled: needs migration from Qdrant to pgvector
 ):
     """
     Get sync status for current tenant.

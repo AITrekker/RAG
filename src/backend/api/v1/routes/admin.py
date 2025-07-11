@@ -36,12 +36,13 @@ from src.backend.models.api_models import (
     DemoCleanupResponse,
     SyncEventResponse
 )
-from src.backend.services.tenant_service import TenantService, get_tenant_service
+from src.backend.services.tenant_service import TenantService
+from src.backend.dependencies import get_tenant_service_dep
 from src.backend.core.embedding_manager import EmbeddingManager
 from src.backend.core.llm_service import get_llm_service
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
-from src.backend.core.auditing import AuditLogger, get_audit_logger
+# from src.backend.core.auditing import AuditLogger, get_audit_logger  # Disabled: migrated from Qdrant to pgvector
 from src.backend.utils.error_handling import (
     handle_exception,
     not_found_error,
@@ -62,7 +63,7 @@ router = APIRouter(tags=["Admin Operations"])
 async def create_tenant(
     request: TenantCreateRequest,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Create a new tenant (Admin only).
@@ -134,7 +135,7 @@ async def list_tenants(
     include_api_keys: bool = Query(False, description="Include API keys in response"),
     demo_only: bool = Query(False, description="Show only demo tenants"),
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     List all tenants (Admin only).
@@ -218,7 +219,7 @@ async def list_tenants(
 async def get_tenant(
     tenant_id: str,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Get tenant details (Admin only).
@@ -267,7 +268,7 @@ async def update_tenant(
     tenant_id: str,
     request: TenantUpdateRequest,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Update tenant details (Admin only).
@@ -325,7 +326,7 @@ async def update_tenant(
 async def delete_tenant(
     tenant_id: str,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Delete a tenant (Admin only).
@@ -376,7 +377,7 @@ async def create_api_key(
     tenant_id: str,
     request: ApiKeyCreateRequest,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Create API key for a tenant (Admin only).
@@ -420,7 +421,7 @@ async def create_api_key(
 async def list_api_keys(
     tenant_id: str,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     List API keys for a tenant (Admin only).
@@ -459,7 +460,7 @@ async def delete_api_key(
     tenant_id: str,
     key_id: str,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Delete an API key (Admin only).
@@ -502,7 +503,7 @@ async def delete_api_key(
 @router.get("/system/status", response_model=SystemStatusResponse)
 async def get_system_status(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Get comprehensive system status (Admin only).
@@ -568,7 +569,7 @@ async def get_system_status(
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
 async def get_system_metrics(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Get system performance metrics (Admin only).
@@ -618,7 +619,7 @@ async def get_system_metrics(
 @router.delete("/system/embeddings/stats", response_model=SuccessResponse)
 async def delete_embedding_statistics(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Clear embedding generation statistics (Admin only).
@@ -648,7 +649,7 @@ async def delete_embedding_statistics(
 @router.delete("/system/llm/stats", response_model=SuccessResponse)
 async def delete_llm_statistics(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Clear LLM service statistics (Admin only).
@@ -678,7 +679,7 @@ async def delete_llm_statistics(
 @router.delete("/system/llm/cache", response_model=SuccessResponse)
 async def delete_llm_cache(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Clear LLM service cache (Admin only).
@@ -709,7 +710,7 @@ async def delete_llm_cache(
 async def update_maintenance_mode(
     maintenance_request: dict,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Update system maintenance mode (Admin only).
@@ -756,7 +757,7 @@ async def update_maintenance_mode(
 async def setup_demo_environment(
     request: DemoSetupRequest,
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Setup demo environment with multiple tenants (Admin only).
@@ -837,7 +838,7 @@ async def setup_demo_environment(
 @router.get("/demo/tenants", response_model=List[DemoTenantInfo])
 async def list_demo_tenants(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     List all demo tenants with their API keys (Admin only).
@@ -898,7 +899,7 @@ async def list_demo_tenants(
 @router.delete("/demo/cleanup", response_model=DemoCleanupResponse)
 async def cleanup_demo_environment(
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
 ):
     """
     Clean up demo environment and expire demo API keys (Admin only).
@@ -963,8 +964,8 @@ async def initialize_database_schema(
     request: Request,
     environment: Optional[str] = Query(None, description="Target environment for initialization"),
     current_tenant: dict = Depends(get_current_tenant),
-    tenant_service: TenantService = Depends(get_tenant_service),
-    audit_logger: AuditLogger = Depends(get_audit_logger)
+    tenant_service: TenantService = Depends(get_tenant_service_dep)
+    # audit_logger: AuditLogger = Depends(get_audit_logger)  # Disabled: migrated from Qdrant to pgvector
 ):
     """
     Initialize database schema for a specific environment (Admin only).

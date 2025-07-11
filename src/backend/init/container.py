@@ -111,6 +111,13 @@ def create_database_tables() -> bool:
     logger.info("🗄️ Creating database tables...")
     
     try:
+        # First, enable pgvector extension
+        logger.info("🔧 Enabling pgvector extension...")
+        if not asyncio.run(enable_pgvector_extension()):
+            logger.error("❌ Failed to enable pgvector extension")
+            return False
+        
+        # Then create tables
         from src.backend.database import create_tables
         create_tables()
         logger.info("✅ Database tables created successfully!")
@@ -118,6 +125,52 @@ def create_database_tables() -> bool:
         
     except Exception as e:
         logger.error(f"❌ Failed to create database tables: {e}")
+        return False
+
+
+async def enable_pgvector_extension() -> bool:
+    """Enable pgvector extension in the current environment database."""
+    try:
+        import asyncpg
+        
+        # Get database credentials
+        postgres_user = os.getenv("POSTGRES_USER")
+        postgres_password = os.getenv("POSTGRES_PASSWORD")
+        current_db = f"rag_db_{CURRENT_ENVIRONMENT}"
+        
+        if not postgres_user or not postgres_password:
+            logger.error("❌ Missing POSTGRES_USER or POSTGRES_PASSWORD")
+            return False
+        
+        # Connect to the current environment database
+        conn = await asyncpg.connect(
+            host="postgres",  # Docker service name
+            port=5432,
+            database=current_db,
+            user=postgres_user,
+            password=postgres_password
+        )
+        
+        logger.info(f"✅ Connected to {current_db} for pgvector extension setup")
+        
+        # Enable pgvector extension
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        logger.info("✅ pgvector extension enabled successfully!")
+        
+        # Verify extension is available
+        result = await conn.fetchval("SELECT 1 FROM pg_extension WHERE extname = 'vector';")
+        if result:
+            logger.info("✅ pgvector extension verified and ready")
+        else:
+            logger.error("❌ pgvector extension not found after installation")
+            await conn.close()
+            return False
+        
+        await conn.close()
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to enable pgvector extension: {e}")
         return False
 
 

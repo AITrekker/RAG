@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 
 from src.backend.core.embedding_manager import get_embedding_manager, EmbeddingManager
 from src.backend.core.llm_service import get_llm_service
-from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
+# DEPRECATED: Vector store functionality moved to PostgreSQL + pgvector
+# from src.backend.utils.vector_store import get_vector_store_manager, VectorStoreManager
 from src.backend.utils.monitoring import SystemMonitor
 from src.backend.database import get_pool_status, check_database_health
 
@@ -38,11 +39,15 @@ class ComprehensiveHealthResponse(BaseModel):
 
 # --- Health Check Logic ---
 
-async def check_vector_store_health(vsm: VectorStoreManager = Depends(get_vector_store_manager)) -> ComponentStatus:
-    """Checks the health of the Qdrant vector store."""
+async def check_vector_store_health() -> ComponentStatus:
+    """Checks the health of PostgreSQL + pgvector."""
     try:
-        await asyncio.to_thread(vsm.client.health_check)
-        return ComponentStatus(name="vector_store", status="healthy", details={"message": "Qdrant is reachable"})
+        # pgvector is part of PostgreSQL, so if database is healthy, vectors are healthy
+        db_healthy = await check_database_health()
+        if db_healthy:
+            return ComponentStatus(name="vector_store", status="healthy", details={"message": "PostgreSQL + pgvector is operational"})
+        else:
+            return ComponentStatus(name="vector_store", status="unhealthy", details={"error": "PostgreSQL connection failed"})
     except Exception as e:
         logger.error(f"Vector store health check failed: {e}", exc_info=True)
         return ComponentStatus(name="vector_store", status="unhealthy", details={"error": str(e)})
@@ -182,7 +187,7 @@ async def comprehensive_health_check(
     Comprehensive health check for the entire system.
     
     Checks all critical components:
-    - Vector store (Qdrant)
+    - Vector store (PostgreSQL + pgvector)
     - Embedding service
     - LLM service
     - Monitoring system

@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 # Define the project's base directory
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 CACHE_DIR = BASE_DIR / "cache"
 
 class Settings(BaseSettings):
@@ -41,23 +41,11 @@ class Settings(BaseSettings):
     db_pool_timeout: int = Field(default=30, env="DB_POOL_TIMEOUT")
     db_pool_recycle: int = Field(default=3600, env="DB_POOL_RECYCLE")
     
-    # Qdrant settings
-    qdrant_url: str = Field(default="http://localhost:6333", env="QDRANT_URL")
-    qdrant_api_key: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
-    
-    @property
-    def qdrant_host(self) -> str:
-        """Extract host from qdrant_url"""
-        from urllib.parse import urlparse
-        parsed = urlparse(self.qdrant_url)
-        return parsed.hostname or "localhost"
-    
-    @property
-    def qdrant_port(self) -> int:
-        """Extract port from qdrant_url"""
-        from urllib.parse import urlparse
-        parsed = urlparse(self.qdrant_url)
-        return parsed.port or 6333
+    # PostgreSQL with pgvector settings
+    pgvector_enabled: bool = Field(default=True, env="PGVECTOR_ENABLED")
+    vector_dimensions: int = Field(default=384, env="VECTOR_DIMENSIONS")
+    vector_index_type: str = Field(default="ivfflat", env="VECTOR_INDEX_TYPE")
+    vector_distance_metric: str = Field(default="cosine", env="VECTOR_DISTANCE_METRIC")
     
     # Embedding model settings
     embedding_model: str = Field(
@@ -112,7 +100,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=50, env="CHUNK_OVERLAP")
     
     # Storage settings - Now relative to BASE_DIR
-    documents_path: str = Field(default=str(BASE_DIR / "documents"), env="DOCUMENTS_PATH")
+    documents_path: str = Field(default=str(BASE_DIR / "data" / "uploads"), env="DOCUMENTS_PATH")
     
     # API settings
     api_v1_str: str = Field(default="/api/v1", env="API_V1_STR")

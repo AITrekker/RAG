@@ -1,7 +1,7 @@
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database with pgvector
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: rag_postgres
     ports:
       - "5432:5432"
@@ -20,24 +20,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Qdrant Vector Database
-  qdrant:
-    image: qdrant/qdrant:v1.7.4
-    container_name: rag_qdrant
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_storage:/qdrant/storage
-    networks:
-      - rag_network
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/6333' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   # Database and System Init Container  
   init:
     container_name: rag_init
@@ -55,14 +37,11 @@ services:
     env_file:
       - .env
     environment:
-      - QDRANT_URL=http://qdrant:6333
       - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_db
     networks:
       - rag_network
     depends_on:
       postgres:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
     command: python -m src.backend.init.container
     restart: "no"  # Init container should run once and exit
@@ -94,7 +73,6 @@ services:
     env_file:
       - .env
     environment:
-      - QDRANT_URL=http://qdrant:6333
       - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_db
       - RELOAD_ON_CHANGE=True
     networks:
@@ -137,8 +115,6 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
       interval: 30s
@@ -151,8 +127,6 @@ networks:
     driver: bridge
 
 volumes:
-  qdrant_storage:
-    driver: local
   postgres_data:
     driver: local 
   huggingface_cache:

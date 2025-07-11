@@ -16,7 +16,7 @@ from src.backend.config.settings import get_settings
 from src.backend.api.v1.routes import (
     health as health_routes,
     admin as admin_routes,
-    audit as audit_routes,
+    # audit as audit_routes,  # Disabled: migrated from Qdrant to pgvector
     setup as setup_routes,
     tenants as tenant_routes,
     auth as auth_routes,
@@ -202,7 +202,7 @@ app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health",
 app.include_router(auth_routes.router, prefix=f"{settings.api_v1_str}/auth", tags=["Authentication"])
 app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
-app.include_router(audit_routes.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])
+# app.include_router(audit_routes.router, prefix=f"{settings.api_v1_str}/audit", tags=["Audit"])  # Disabled: migrated from Qdrant to pgvector
 app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
 
 # Service-based routes

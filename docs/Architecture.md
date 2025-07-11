@@ -1,12 +1,12 @@
 # Enterprise RAG Platform - System Architecture
 
 **Version**: Production 2025  
-**Last Updated**: 2025-01-29  
-**Architecture**: Hybrid PostgreSQL + Qdrant
+**Last Updated**: 2025-01-10  
+**Architecture**: Unified PostgreSQL + pgvector
 
 ## 🏗️ **Architecture Overview**
 
-The Enterprise RAG Platform implements a **hybrid PostgreSQL + Qdrant architecture** that combines the strengths of relational databases for metadata management with specialized vector databases for semantic search, delivering enterprise-grade RAG (Retrieval-Augmented Generation) capabilities.
+The Enterprise RAG Platform implements a **unified PostgreSQL + pgvector architecture** that combines the strengths of relational databases with integrated vector capabilities for semantic search, delivering enterprise-grade RAG (Retrieval-Augmented Generation) capabilities with simplified data management and ACID transaction guarantees.
 
 ### **System Components**
 
@@ -23,8 +23,7 @@ graph TB
     end
     
     subgraph "Data Layer"
-        PG[(PostgreSQL<br/>Metadata & Control)]
-        QD[(Qdrant<br/>Vector Embeddings)]
+        PG[(PostgreSQL + pgvector<br/>Unified Data & Vectors)]
         FS[File System<br/>Document Storage]
     end
     
@@ -32,17 +31,15 @@ graph TB
     API --> RAG
     API --> SYNC
     RAG --> PG
-    RAG --> QD
     SYNC --> PG
-    SYNC --> QD
     SYNC --> FS
 ```
 
 ### **Core Architecture Principles**
 
-1. **Hybrid Data Management**: PostgreSQL for structured metadata, Qdrant for vector operations
-2. **Environment Separation**: Complete isolation between production, staging, test, and development
-3. **Multi-Tenant Isolation**: Complete data separation at all architectural layers within environments
+1. **Unified Data Management**: PostgreSQL + pgvector for both structured metadata and vector operations
+2. **ACID Transactions**: Complete data consistency guaranteed by PostgreSQL transactions
+3. **Multi-Tenant Isolation**: Complete data separation at all architectural layers
 4. **GPU Acceleration**: Optimized for RTX 5070 with 6.5x performance improvement
 5. **Delta Sync**: Hash-based change detection for efficient document synchronization
 6. **Production Ready**: Comprehensive error handling, monitoring, and scalability
@@ -51,9 +48,9 @@ graph TB
 
 ## 🗄️ **Data Architecture**
 
-### **PostgreSQL (Control Plane)**
+### **PostgreSQL + pgvector (Unified Data Layer)**
 
-PostgreSQL serves as the primary control plane, managing all structured data, relationships, and operational metadata.
+PostgreSQL with the pgvector extension serves as the unified data layer, managing all structured data, relationships, operational metadata, and vector embeddings in a single database with ACID transaction guarantees.
 
 #### **Core Schema**
 ```sql
@@ -64,7 +61,7 @@ tenant_memberships (tenant_id, user_id, role, permissions, ...)
 
 -- File & Content Management  
 files (id, tenant_id, filename, file_path, file_size, file_hash, sync_status, ...)
-embedding_chunks (id, file_id, tenant_id, chunk_content, chunk_index, qdrant_point_id, ...)
+embedding_chunks (id, file_id, tenant_id, chunk_content, chunk_index, embedding_vector, ...)
 
 -- Access Control & Security
 file_access_control (file_id, user_id, access_type, granted_by, ...)
@@ -77,9 +74,10 @@ file_sync_history (file_id, sync_operation_id, change_type, processing_time, ...
 
 #### **Critical Design Elements**
 - **Environment Separation**: Separate databases per environment (production, staging, test, development)
-- **Tenant Isolation**: All tables include `tenant_id` with row-level security within environments
+- **Tenant Isolation**: All tables include `tenant_id` with row-level security
 - **File Hash Tracking**: SHA-256 hashes enable efficient delta sync
-- **Vector ID Mapping**: `qdrant_point_id` field links to Qdrant vectors
+- **Integrated Vectors**: `embedding_vector` field stores pgvector embeddings directly in PostgreSQL
+- **ACID Transactions**: All operations (metadata + vectors) in single database transactions
 - **Audit Trail**: Comprehensive tracking of all operations
 
 ### **Environment Separation Strategy**
@@ -88,17 +86,14 @@ The system uses complete environment isolation for maximum safety and compliance
 
 #### **Database Structure**
 ```bash
-# PostgreSQL Databases
-rag_db_production   # Live customer data
-rag_db_staging      # Pre-production testing  
-rag_db_test         # Automated testing
-rag_db_development  # Local development
+# PostgreSQL Databases (with pgvector extension)
+rag_db_production   # Live customer data + vectors
+rag_db_staging      # Pre-production testing + vectors
+rag_db_test         # Automated testing + vectors
+rag_db_development  # Local development + vectors
 
-# Qdrant Collections  
-documents_production
-documents_staging
-documents_test
-documents_development
+# Note: All vector embeddings stored directly in PostgreSQL tables
+# No separate vector database required with pgvector integration
 ```
 
 #### **Environment Usage Patterns**
@@ -110,43 +105,40 @@ documents_development
 | **Staging** | QA, Product | Pre-release, UAT | Production-like (sanitized) | Stable for weeks |
 | **Production** | End users | Live system | Real customer data | Never reset, full backup |
 
-### **Qdrant (Vector Store)**
+### **pgvector Integration**
 
-Qdrant handles all vector storage and semantic search operations with environment-separated collections.
+pgvector handles all vector storage and semantic search operations directly within PostgreSQL, providing unified data management.
 
-#### **Collection Structure**
-```python
-# Collection naming pattern (per environment)
-collection_name = f"documents_{environment}"  # documents_production, documents_test, etc.
+#### **Vector Storage Structure**
+```sql
+-- embedding_chunks table with vector column
+CREATE TABLE embedding_chunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    file_id UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    chunk_content TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    embedding_vector vector(384),  -- pgvector column for 384-dimensional embeddings
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Tenant isolation and performance indexes
+    UNIQUE(file_id, chunk_index)
+);
 
-# Vector configuration
-{
-    "vectors": {
-        "size": 384,  # all-MiniLM-L6-v2 dimensions
-        "distance": "Cosine"
-    }
-}
+-- Vector similarity search indexes
+CREATE INDEX idx_embedding_chunks_vector ON embedding_chunks 
+    USING ivfflat (embedding_vector vector_cosine_ops) WITH (lists = 100);
 
-# Point payload (minimal for performance)
-{
-    "id": uuid4(),  # Stored as qdrant_point_id in PostgreSQL
-    "vector": [0.1, 0.2, ...],  # 384-dimensional embedding
-    "payload": {
-        "chunk_id": str(chunk_id),     # PostgreSQL chunk reference
-        "file_id": str(file_id),       # PostgreSQL file reference
-        "tenant_id": str(tenant_id),   # Tenant isolation
-        "environment": environment,     # Environment isolation
-        "chunk_index": 0               # Chunk position in file
-    }
-}
+-- Tenant isolation indexes
+CREATE INDEX idx_embedding_chunks_tenant ON embedding_chunks(tenant_id);
 ```
 
 #### **Key Features**
-- **Environment Isolation**: Separate collections per environment prevent data mixing
-- **Tenant Isolation**: Payload-based filtering within environments
-- **Minimal Payload**: Only essential metadata stored with vectors
-- **High Performance**: Optimized for sub-second search responses
-- **Scalability**: Handles 100K+ vectors per tenant efficiently
+- **ACID Transactions**: All operations (metadata + vectors) in single database transactions
+- **Tenant Isolation**: Row-level security with tenant_id filtering
+- **Integrated Storage**: No need for separate vector database management
+- **High Performance**: Optimized ivfflat indexes for fast similarity search
+- **Scalability**: Handles 100K+ vectors per tenant efficiently within PostgreSQL
 
 ---
 
@@ -208,17 +200,18 @@ class VectorRetriever:
         # Generate query embedding (GPU accelerated)
         embedding = await self._generate_query_embedding(query.text)
         
-        # Search Qdrant with tenant isolation
-        collection_name = f"tenant_{query.tenant_id}_documents"
-        qdrant_results = self.qdrant_client.search(
-            collection_name=collection_name,
-            query_vector=embedding,
-            limit=query.max_results,
-            score_threshold=query.min_score
-        )
+        # Search pgvector with tenant isolation in single PostgreSQL query
+        query_stmt = select(EmbeddingChunk, File).join(
+            File, EmbeddingChunk.file_id == File.id
+        ).where(
+            EmbeddingChunk.tenant_id == query.tenant_id
+        ).order_by(
+            EmbeddingChunk.embedding_vector.cosine_distance(embedding)
+        ).limit(query.max_results)
         
-        # Join with PostgreSQL metadata using qdrant_point_id
-        chunks = await self._convert_search_results(qdrant_results)
+        # Execute unified query - no separate database coordination needed
+        result = await self.db_session.execute(query_stmt)
+        chunks = self._convert_search_results(result)
         return chunks
 ```
 
@@ -293,15 +286,18 @@ model = SentenceTransformer(
 min_score: float = 0.3  # Changed from 0.7 (too restrictive)
 ```
 
-#### **ID Mapping (Critical Fix)**
+#### **Vector Search (Critical Implementation)**
 ```python
-# CORRECT: Use qdrant_point_id to link systems
-query_stmt = select(EmbeddingChunk, File).where(
-    EmbeddingChunk.qdrant_point_id.in_(qdrant_point_ids)
-)
+# PGVECTOR: Direct vector similarity search in PostgreSQL
+query_stmt = select(EmbeddingChunk, File).join(
+    File, EmbeddingChunk.file_id == File.id
+).where(
+    EmbeddingChunk.tenant_id == tenant_id
+).order_by(
+    EmbeddingChunk.embedding_vector.cosine_distance(query_embedding)
+).limit(max_results)
 
-# WRONG: Using chunk.id (PostgreSQL UUID)
-# EmbeddingChunk.id.in_(qdrant_point_ids)  # This was the bug
+# BENEFITS: Single database transaction, ACID guarantees, simplified architecture
 ```
 
 ---
@@ -316,8 +312,7 @@ Delta sync enables efficient document synchronization using hash-based change de
 sequenceDiagram
     participant FS as File System
     participant SYNC as Sync Service
-    participant PG as PostgreSQL
-    participant QD as Qdrant
+    participant PG as PostgreSQL + pgvector
     participant EMB as Embedding Service
     
     SYNC->>FS: Scan tenant directory
@@ -329,11 +324,12 @@ sequenceDiagram
     SYNC->>SYNC: Compare hashes (detect changes)
     
     loop For each changed file
+        SYNC->>PG: Begin transaction
         SYNC->>PG: Update file metadata
         SYNC->>EMB: Process file to chunks
         EMB-->>SYNC: Chunks with embeddings
-        SYNC->>QD: Store vectors with point IDs
-        SYNC->>PG: Store chunk metadata with qdrant_point_id
+        SYNC->>PG: Store chunks + vectors in single transaction
+        SYNC->>PG: Commit transaction (ACID guarantees)
     end
 ```
 
@@ -407,15 +403,14 @@ CREATE POLICY tenant_isolation ON files
 
 #### **Vector Store Level**
 ```python
-# Tenant-specific collections
-collection_name = f"tenant_{tenant_id}_documents"
+# pgvector: Tenant isolation through PostgreSQL row-level security
+query_stmt = select(EmbeddingChunk).where(
+    EmbeddingChunk.tenant_id == tenant_id
+).order_by(
+    EmbeddingChunk.embedding_vector.cosine_distance(query_embedding)
+)
 
-# Additional payload filtering
-qdrant_filter = {
-    "must": [
-        {"key": "tenant_id", "match": {"value": str(tenant_id)}}
-    ]
-}
+# Automatic tenant filtering enforced by database constraints
 ```
 
 #### **File System Level**
@@ -487,26 +482,19 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://rag_user:rag_password@rag_postgres:5432/rag_db
-      - QDRANT_URL=http://rag_qdrant:6333
     depends_on:
       - rag_postgres
-      - rag_qdrant
 
   rag_postgres:
-    image: postgres:15
+    image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_DB=rag_db
       - POSTGRES_USER=rag_user
       - POSTGRES_PASSWORD=rag_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  rag_qdrant:
-    image: qdrant/qdrant:latest
     ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
+      - "5432:5432"
 ```
 
 ### **Environment Configuration**
@@ -515,7 +503,6 @@ services:
 ```bash
 # Backend environment
 DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_db
-QDRANT_URL=http://localhost:6333
 EMBEDDING_DEVICE=cuda  # Auto-detected
 LOG_LEVEL=DEBUG
 
@@ -526,9 +513,8 @@ VITE_APP_TITLE=Enterprise RAG Platform
 
 #### **Production**
 ```bash
-# Managed database connection
+# Managed database connection with pgvector extension
 DATABASE_URL=postgresql://user:pass@managed-postgres:5432/rag_prod
-QDRANT_URL=http://qdrant-cluster:6333
 EMBEDDING_DEVICE=cuda
 LOG_LEVEL=INFO
 
@@ -552,7 +538,7 @@ async def detailed_health_check():
         "status": "healthy",
         "components": {
             "postgresql": await check_postgres_health(),
-            "qdrant": await check_qdrant_health(),
+            "pgvector": await check_pgvector_extension(),
             "gpu": check_gpu_availability(),
             "file_system": check_upload_directory(),
             "embedding_model": await check_model_loading()
@@ -671,12 +657,15 @@ async def test_complete_rag_pipeline():
 #### **1. No Vector Search Results**
 **Symptoms**: Search returns empty results despite having documents
 ```python
-# Check similarity threshold
+# Check similarity threshold and pgvector query
 min_score = 0.3  # Lower if needed (was 0.7)
 
-# Verify ID mapping
-EmbeddingChunk.qdrant_point_id.in_(point_ids)  # Correct
-# Not: EmbeddingChunk.id.in_(point_ids)  # Wrong
+# Verify pgvector query structure
+query_stmt = select(EmbeddingChunk).where(
+    EmbeddingChunk.tenant_id == tenant_id
+).order_by(
+    EmbeddingChunk.embedding_vector.cosine_distance(query_embedding)
+).limit(max_results)
 ```
 
 #### **2. GPU Not Utilized**
@@ -690,11 +679,13 @@ python -c "import torch; print(torch.cuda.is_available())"
 ```
 
 #### **3. Docker Network Issues**
-**Symptoms**: Connection refused to Qdrant/PostgreSQL
+**Symptoms**: Connection refused to PostgreSQL
 ```python
 # Use Docker service names, not localhost
-QDRANT_URL = "http://rag_qdrant:6333"  # Correct
 DATABASE_URL = "postgresql://...@rag_postgres:5432/..."  # Correct
+
+# Verify pgvector extension is installed
+# Connect to PostgreSQL and run: CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 #### **4. Memory Issues**
@@ -722,9 +713,8 @@ DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_db
 DB_POOL_SIZE=20
 DB_MAX_OVERFLOW=30
 
-# Vector Store Configuration
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=optional_api_key
+# pgvector Configuration (managed within PostgreSQL)
+# No separate vector store configuration needed
 
 # Embedding Configuration
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
@@ -768,7 +758,8 @@ RUN pip install -r requirements.txt
 The Enterprise RAG Platform delivers a **production-ready, scalable architecture** that successfully combines:
 
 ### **✅ Core Achievements**
-- **Hybrid Data Management**: PostgreSQL + Qdrant for optimal performance
+- **Unified Data Management**: PostgreSQL + pgvector for simplified architecture
+- **ACID Transactions**: Complete data consistency with vector operations
 - **Complete RAG Pipeline**: Query processing to response generation
 - **Multi-Tenant Security**: Enterprise-grade isolation and access control
 - **GPU Acceleration**: 6.5x performance improvement on RTX 5070
@@ -778,9 +769,10 @@ The Enterprise RAG Platform delivers a **production-ready, scalable architecture
 ### **🎯 Key Performance Indicators**
 - **Sub-second queries** with GPU acceleration
 - **100K+ documents** per tenant capacity
-- **Complete tenant isolation** at all architectural layers
+- **Complete tenant isolation** at all architectural layers  
 - **6.5x speedup** with GPU-accelerated embeddings
 - **99%+ uptime** with robust health monitoring
+- **ACID compliance** for all vector operations
 
 ### **🚀 Production Readiness**
 - Docker-based deployment with service orchestration
@@ -808,7 +800,7 @@ graph TD
     C --> D[API POST /query with X-Tenant-Id]
     D --> E[get_tenant_from_header validates tenant]
     E --> F[RAG Pipeline processes query]
-    F --> G[Vector search in tenant collection]
+    F --> G[Vector search in PostgreSQL with pgvector]
     G --> H[LLM generates response]
     H --> I[Return structured answer]
 ```
@@ -842,7 +834,7 @@ graph TD
     B --> C[Store in PostgreSQL with tenant_id]
     C --> D[Chunk document content]
     D --> E[Generate embeddings]
-    E --> F[Store in tenant vector collection]
+    E --> F[Store vectors in PostgreSQL with pgvector]
 ```
 
 ### 🚨 Common Failure Points
@@ -850,6 +842,7 @@ graph TD
 | Issue | Symptom | Root Cause |
 |-------|---------|------------|
 | "No relevant information" | UI gets empty results | Frontend not setting `X-Tenant-Id` header |
-| Cross-tenant data leakage | Wrong search results | Collection routing bug in the backend |
+| Cross-tenant data leakage | Wrong search results | Tenant filtering bug in PostgreSQL queries |
 | 500 errors on search | Server crashes | LLM service async/sync mismatch |
 | Inconsistent results | Works sometimes | Race conditions in tenant context |
+| pgvector extension missing | Vector search fails | pgvector extension not installed in PostgreSQL |

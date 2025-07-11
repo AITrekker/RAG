@@ -35,7 +35,8 @@ def setup_database_url():
     # Get credentials from .env
     postgres_user = os.getenv("POSTGRES_USER")
     postgres_password = os.getenv("POSTGRES_PASSWORD") 
-    postgres_db = "rag_db"
+    rag_environment = os.getenv("RAG_ENVIRONMENT", "development")
+    postgres_db = f"rag_db_{rag_environment}"
     
     if not postgres_user or not postgres_password:
         print("❌ Missing database credentials in .env file")
@@ -82,7 +83,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.backend.database import AsyncSessionLocal, init_database
 from src.backend.models.database import Tenant, User
 from src.backend.services.file_service import FileService
-from src.backend.services.embedding_service import EmbeddingService
+from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
 from src.backend.services.sync_service import SyncService
 
 
@@ -187,11 +188,11 @@ async def run_tenant_sync(tenant_id: UUID, tenant_info: Dict[str, Any], system_u
         try:
             from src.backend.dependencies import get_embedding_model
             embedding_model = get_embedding_model()
-            embedding_service = EmbeddingService(session, embedding_model)
+            embedding_service = PgVectorEmbeddingService(session, embedding_model)
             print(f"  🤖 Using singleton embedding model")
         except Exception as e:
             print(f"  ⚠️ Failed to load embedding model: {e}")
-            embedding_service = EmbeddingService(session)
+            embedding_service = PgVectorEmbeddingService(session)
             await embedding_service.initialize()
         
         sync_service = SyncService(session, file_service, embedding_service)

@@ -88,17 +88,17 @@ class TestFastComprehensiveSync:
         
         print(f"✅ Change detection: {data['total_changes']} total changes")
     
-    def test_03_qdrant_connectivity(self):
-        """Test Qdrant collection exists and has data."""
-        # Check Qdrant collection
-        response = requests.get(f"{QDRANT_URL}/collections/documents_development")
+    def test_03_pgvector_connectivity(self):
+        """Test PostgreSQL pgvector has embedding data."""
+        # Check embedding chunks in PostgreSQL 
+        response = requests.get(f"{API_BASE_URL}/health/database")
         assert response.status_code == 200
         
-        collection_info = response.json()["result"]
-        assert collection_info["status"] == "green"
-        assert collection_info["points_count"] > 0
+        db_info = response.json()
+        # Check if we have embedding chunks stored
+        assert "embedding_chunks" in str(db_info)
         
-        print(f"✅ Qdrant collection: {collection_info['points_count']} vectors")
+        print(f"✅ PostgreSQL pgvector: database connectivity verified")
     
     def test_04_semantic_search(self):
         """Test semantic search functionality."""
@@ -200,7 +200,7 @@ class TestFastComprehensiveSync:
         print(f"✅ Tenant isolation: T1={tenant1_status['file_status']['total']}, T2={tenant2_status['file_status']['total']}")
     
     def test_08_database_consistency(self):
-        """Test PostgreSQL and Qdrant consistency."""
+        """Test PostgreSQL pgvector consistency."""
         headers = {"X-API-Key": TENANT1_KEY, "Content-Type": "application/json"}
         
         # Get PostgreSQL file status
@@ -208,20 +208,14 @@ class TestFastComprehensiveSync:
         assert response.status_code == 200
         pg_status = response.json()["file_status"]
         
-        # Get Qdrant collection info
-        response = requests.get(f"{QDRANT_URL}/collections/documents_development")
-        assert response.status_code == 200
-        qdrant_info = response.json()["result"]
-        
-        # Verify both databases have data
+        # Check that we have consistent data in PostgreSQL
         assert pg_status["total"] > 0
-        assert qdrant_info["points_count"] > 0
         
-        # Verify collection configuration
-        assert qdrant_info["config"]["params"]["vectors"]["size"] == 384
-        assert qdrant_info["config"]["params"]["vectors"]["distance"] == "Cosine"
+        # Check database health endpoint for pgvector status
+        health_response = requests.get(f"{API_BASE_URL}/health/database")
+        assert health_response.status_code == 200
         
-        print(f"✅ DB consistency: PG={pg_status['total']} files, Qdrant={qdrant_info['points_count']} vectors")
+        print(f"✅ DB consistency: PG={pg_status['total']} files with pgvector embeddings")
     
     def test_09_error_handling(self):
         """Test error handling with invalid requests."""

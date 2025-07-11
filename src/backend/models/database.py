@@ -12,6 +12,12 @@ from sqlalchemy import (
     ForeignKey, CheckConstraint, UniqueConstraint, Index
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgreUUID, JSONB
+try:
+    from pgvector.sqlalchemy import Vector
+    PGVECTOR_AVAILABLE = True
+except ImportError:
+    PGVECTOR_AVAILABLE = False
+    Vector = None  # Fallback for when pgvector is not available
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -182,9 +188,12 @@ class EmbeddingChunk(BaseModel):
     chunk_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     token_count: Mapped[Optional[int]] = mapped_column(Integer)
     
-    # Vector Store Reference
-    qdrant_point_id: Mapped[UUID] = mapped_column(PostgreUUID(as_uuid=True), nullable=False)
-    collection_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Vector Embedding (384 dimensions for all-MiniLM-L6-v2)
+    if PGVECTOR_AVAILABLE:
+        embedding: Mapped[Optional[Vector]] = mapped_column(Vector(384))
+    else:
+        # Fallback: store as JSON when pgvector is not available
+        embedding: Mapped[Optional[list]] = mapped_column(JSONB)
     
     # Processing Metadata
     embedding_model: Mapped[str] = mapped_column(String(100), nullable=False, default='all-MiniLM-L6-v2')
@@ -194,15 +203,23 @@ class EmbeddingChunk(BaseModel):
     file: Mapped["File"] = relationship("File", back_populates="chunks")
     
     # Constraints
-    __table_args__ = (
-        UniqueConstraint('file_id', 'chunk_index', name='uq_file_chunk_index'),
-        UniqueConstraint('qdrant_point_id', name='uq_qdrant_point_id'),
-        CheckConstraint('chunk_index >= 0', name='check_chunk_index_non_negative'),
-        CheckConstraint('token_count > 0', name='check_token_count_positive'),
-        Index('idx_chunks_tenant_id', 'tenant_id'),
-        Index('idx_chunks_file_id', 'file_id', 'chunk_index'),
-        Index('idx_qdrant_point_lookup', 'qdrant_point_id')
-    )
+    if PGVECTOR_AVAILABLE:
+        __table_args__ = (
+            UniqueConstraint('file_id', 'chunk_index', name='uq_file_chunk_index'),
+            CheckConstraint('chunk_index >= 0', name='check_chunk_index_non_negative'),
+            CheckConstraint('token_count > 0', name='check_token_count_positive'),
+            Index('idx_chunks_tenant_id', 'tenant_id'),
+            Index('idx_chunks_file_id', 'file_id', 'chunk_index'),
+            Index('idx_chunks_embedding', 'embedding', postgresql_using='ivfflat', postgresql_ops={'embedding': 'vector_cosine_ops'})
+        )
+    else:
+        __table_args__ = (
+            UniqueConstraint('file_id', 'chunk_index', name='uq_file_chunk_index'),
+            CheckConstraint('chunk_index >= 0', name='check_chunk_index_non_negative'),
+            CheckConstraint('token_count > 0', name='check_token_count_positive'),
+            Index('idx_chunks_tenant_id', 'tenant_id'),
+            Index('idx_chunks_file_id', 'file_id', 'chunk_index')
+        )
 
 # =============================================
 # ACCESS CONTROL & SHARING

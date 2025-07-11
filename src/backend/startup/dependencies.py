@@ -87,9 +87,7 @@ def wait_for_dependencies() -> Tuple[bool, str]:
     if not wait_for_postgres():
         return False, "Failed to connect to PostgreSQL"
     
-    # Wait for Qdrant
-    if not wait_for_qdrant():
-        return False, "Failed to connect to Qdrant"
+    # Qdrant removed - using pgvector instead
     
     logger.info("✅ All external dependencies are available!")
     return True, ""

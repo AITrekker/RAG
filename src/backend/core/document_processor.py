@@ -20,7 +20,7 @@ from llama_index.core.readers.base import BaseReader
 from llama_index.readers.file import PDFReader, DocxReader, UnstructuredReader
 from llama_index.core.text_splitter import TokenTextSplitter
 
-from ..utils.html_processor import HTMLProcessor
+from ..services.document_processing.processors.html_processor import HTMLProcessor
 
 logger = logging.getLogger(__name__)
 

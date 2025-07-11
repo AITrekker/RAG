@@ -5,9 +5,9 @@ A production-ready, enterprise-grade Retrieval-Augmented Generation (RAG) platfo
 ## ✨ Features
 
 ### 🏗️ **Enterprise Architecture**
-- **🔒 Multi-tenant Isolation**: Complete data separation across database, vector store, and file system
+- **🔒 Multi-tenant Isolation**: Complete data separation across database, vector operations, and file system
 - **🔄 Intelligent Delta Sync**: Hash-based change detection with atomic transaction processing
-- **🗃️ Hybrid Storage Design**: PostgreSQL for metadata control plane + Qdrant for high-performance vector operations
+- **🗃️ Unified Storage Design**: PostgreSQL with pgvector for both metadata and high-performance vector operations
 - **🌐 API-First Architecture**: Comprehensive RESTful API with OpenAPI documentation
 - **🚀 Production Ready**: Container orchestration, health checks, monitoring, and graceful degradation
 
@@ -49,8 +49,7 @@ docker-compose up -d
 ```
 
 This orchestrates all services:
-- **🗄️ PostgreSQL**: Multi-tenant database with proper schemas
-- **🔍 Qdrant**: High-performance vector database  
+- **🗄️ PostgreSQL**: Multi-tenant database with pgvector for unified storage
 - **⚙️ Backend API**: FastAPI with comprehensive endpoints
 - **🖥️ Frontend UI**: React-based management interface
 - **🔧 Init Container**: Automatic database setup and admin user creation
@@ -76,7 +75,6 @@ NAME                STATUS              PORTS
 rag_backend         Up (healthy)        0.0.0.0:8000->8000/tcp
 rag_frontend        Up (healthy)        0.0.0.0:3000->3000/tcp  
 rag_postgres        Up (healthy)        0.0.0.0:5432->5432/tcp
-rag_qdrant          Up (healthy)        0.0.0.0:6333->6333/tcp
 rag_init            Exited (0)          # Normal after successful setup
 ```
 
@@ -86,8 +84,7 @@ rag_init            Exited (0)          # Normal after successful setup
 |---------|-----|---------|
 | **🖥️ Frontend Dashboard** | [localhost:3000](http://localhost:3000) | Main user interface |
 | **📚 API Documentation** | [localhost:8000/docs](http://localhost:8000/docs) | Interactive API explorer |
-| **🔍 Vector Database** | [localhost:6333/dashboard](http://localhost:6333/dashboard) | Qdrant management |
-| **🗄️ Database** | `localhost:5432` | PostgreSQL (external tools) |
+| **🗄️ Database** | `localhost:5432` | PostgreSQL with pgvector (external tools) |
 
 ### 🎯 Quick Demo Setup
 
@@ -146,7 +143,7 @@ make up-prod
 
 For more detailed information, please refer to our comprehensive guides in the `docs` folder.
 
-- **[Architecture](docs/ARCHITECTURE.md)**: A deep dive into the system's design, components, and data flows.
+- **[Architecture](docs/Architecture.md)**: A deep dive into the system's design, components, and data flows.
 - **[API Reference](docs/API_REFERENCE.md)**: The complete reference for all API endpoints, including authentication and data models.
 - **[Operations Guide](docs/OPERATIONS_GUIDE.md)**: A handbook for setup, deployment, Docker configuration, and managing demo tenants.
 

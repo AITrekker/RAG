@@ -329,6 +329,12 @@ class SyncOperationsManager:
         from src.backend.database import AsyncSessionLocal
         
         async with AsyncSessionLocal() as completion_db:
+            # Get current sync operation to preserve files_processed value set by sync service
+            result = await completion_db.execute(
+                select(SyncOperation).where(SyncOperation.id == sync_op.id)
+            )
+            current_sync = result.scalar_one()
+            
             await completion_db.execute(
                 update(SyncOperation)
                 .where(SyncOperation.id == sync_op.id)
@@ -337,7 +343,9 @@ class SyncOperationsManager:
                     completed_at=datetime.now(timezone.utc),
                     progress_stage=SyncStage.COMPLETED.value,
                     progress_percentage=100.0,
-                    heartbeat_at=datetime.now(timezone.utc)
+                    heartbeat_at=datetime.now(timezone.utc),
+                    # Preserve files_processed value set by sync service
+                    files_processed=current_sync.files_processed
                 )
             )
             await completion_db.commit()

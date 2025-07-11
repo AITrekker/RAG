@@ -46,12 +46,12 @@ class RAGResponse:
 class RAGService:
     """Service for RAG query processing and retrieval"""
     
-    def __init__(self, db_session: AsyncSession, file_service: FileService, qdrant_client=None, embedding_model=None):
+    def __init__(self, db_session: AsyncSession, file_service: FileService, embedding_service=None, embedding_model=None):
         self.db = db_session
         self.file_service = file_service
         
         # Use injected dependencies
-        self._qdrant_client = qdrant_client
+        self._embedding_service = embedding_service
         self._embedding_model = embedding_model
         
         # Model references (don't store model objects in class to avoid serialization issues)
@@ -61,11 +61,11 @@ class RAGService:
     async def initialize(self):
         """Initialize RAG components"""
         try:
-            # Qdrant client and embedding model are now injected via constructor
-            if self._qdrant_client:
-                print(f"✓ Using injected Qdrant client")
+            # Embedding service and model are now injected via constructor
+            if self._embedding_service:
+                print(f"✓ Using injected pgvector embedding service")
             else:
-                print(f"⚠️ No Qdrant client available")
+                print(f"⚠️ No embedding service available")
             
             if self._embedding_model:
                 print(f"✓ Using injected embedding model")
@@ -270,76 +270,46 @@ class RAGService:
         metadata_filters: Optional[Dict[str, Any]] = None
     ) -> List[SearchResult]:
         """Search for relevant chunks using vector similarity"""
-        import os
-        environment = os.getenv("RAG_ENVIRONMENT", "development")
-        collection_name = f"documents_{environment}"
         
-        if self._qdrant_client is not None:
+        if self._embedding_service is not None:
             try:
-                # Build standardized Qdrant filter with tenant and environment isolation
-                must_conditions = [
-                    {"key": "tenant_id", "match": {"value": str(tenant_id)}},
-                    {"key": "environment", "match": {"value": environment}}
-                ]
-                
-                # Add metadata filters if provided
-                if metadata_filters:
-                    for key, value in metadata_filters.items():
-                        if value is not None:
-                            # Try top-level field first, then fallback to metadata nest
-                            must_conditions.append({
-                                "key": key,
-                                "match": {"value": value}
-                            })
-                
-                qdrant_filter = {"must": must_conditions} if must_conditions else None
-                
-                # Search in Qdrant
-                search_results = self._qdrant_client.search(
-                    collection_name=collection_name,
-                    query_vector=query_embedding,
-                    limit=max_results,
-                    query_filter=qdrant_filter
+                # Search using pgvector embedding service
+                chunks_with_scores = await self._embedding_service.search_similar_chunks(
+                    query_embedding=query_embedding,
+                    tenant_id=tenant_id,
+                    limit=max_results
                 )
                 
-                # Convert Qdrant results to SearchResult objects
+                # Convert to SearchResult objects
                 results = []
-                for result in search_results:
-                    payload = result.payload
+                for chunk, score in chunks_with_scores:
+                    # Get file details
+                    file_result = await self.db.execute(
+                        select(File).where(File.id == chunk.file_id)
+                    )
+                    file = file_result.scalar_one_or_none()
                     
-                    # Get chunk details from database
-                    chunk_id = payload.get("chunk_id")
-                    if chunk_id:
-                        db_result = await self.db.execute(
-                            select(EmbeddingChunk, File)
-                            .join(File)
-                            .where(EmbeddingChunk.id == chunk_id)
+                    if file:
+                        search_result = SearchResult(
+                            chunk_id=chunk.id,
+                            file_id=chunk.file_id,
+                            content=chunk.chunk_content,
+                            score=score,
+                            metadata={
+                                "filename": file.filename,
+                                "chunk_index": chunk.chunk_index,
+                                "file_path": file.file_path
+                            },
+                            chunk_index=chunk.chunk_index,
+                            filename=file.filename
                         )
-                        chunk_and_file = db_result.first()
-                        
-                        if chunk_and_file:
-                            chunk, file = chunk_and_file
-                            
-                            search_result = SearchResult(
-                                chunk_id=chunk.id,
-                                file_id=chunk.file_id,
-                                content=chunk.chunk_content,
-                                score=result.score,
-                                metadata={
-                                    "filename": file.filename,
-                                    "chunk_index": chunk.chunk_index,
-                                    "file_path": file.file_path
-                                },
-                                chunk_index=chunk.chunk_index,
-                                filename=file.filename
-                            )
-                            results.append(search_result)
+                        results.append(search_result)
                 
-                print(f"✓ Found {len(results)} relevant chunks via Qdrant")
+                print(f"✓ Found {len(results)} relevant chunks via pgvector")
                 return results
                 
             except Exception as e:
-                print(f"⚠️ Qdrant search failed: {e}, falling back to database search")
+                print(f"⚠️ pgvector search failed: {e}, falling back to database search")
         
         # Fallback: Search using database only (no vector similarity)
         return await self._fallback_database_search(tenant_id, max_results, metadata_filters)

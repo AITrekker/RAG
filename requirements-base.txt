@@ -18,8 +18,8 @@ tokenizers>=0.19.0,<0.21.0
 huggingface-hub>=0.26.0
 
 # ===== RAG & VECTOR DATABASES =====
-# Qdrant (our primary vector DB)
-qdrant-client==1.9.2
+# pgvector for PostgreSQL vector support
+pgvector==0.2.4
 
 # LangChain ecosystem
 langchain==0.2.11

@@ -4,7 +4,7 @@ Dependency injection providers for services.
 from functools import lru_cache
 from fastapi import Depends
 
-from src.backend.core.delta_sync import DeltaSync
+# from src.backend.core.delta_sync import DeltaSync  # Disabled: needs migration from Qdrant to pgvector
 from src.backend.core.document_processor import DocumentProcessor
 from src.backend.core.document_service import DocumentService
 from src.backend.middleware.auth import require_authentication
@@ -20,11 +20,11 @@ def get_document_processor() -> DocumentProcessor:
     return DocumentProcessor()
 
 
-def get_delta_sync(
-    doc_processor: DocumentProcessor = Depends(get_document_processor),
-) -> DeltaSync:
-    """FastAPI dependency to get a DeltaSync instance."""
-    return DeltaSync(document_processor=doc_processor)
+# def get_delta_sync(
+#     doc_processor: DocumentProcessor = Depends(get_document_processor),
+# ) -> DeltaSync:
+#     """FastAPI dependency to get a DeltaSync instance."""
+#     return DeltaSync(document_processor=doc_processor)  # Disabled: needs migration from Qdrant to pgvector
 
 
 def get_document_service(

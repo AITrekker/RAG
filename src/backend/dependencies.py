@@ -10,43 +10,12 @@ from src.backend.database import get_async_db, AsyncSessionLocal
 from src.backend.models.database import Tenant
 from src.backend.services.tenant_service import TenantService
 from src.backend.services.file_service import FileService
-from src.backend.services.embedding_service import EmbeddingService
+# Embedding service import moved to function level to avoid circular imports
 from src.backend.services.sync_service import SyncService
 from src.backend.services.rag_service import RAGService
 # Removed transactional embedding service to simplify
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
-
-
-# Singleton Qdrant client dependency
-@lru_cache(maxsize=1)
-def get_qdrant_client():
-    """Get singleton Qdrant client instance - cached across all requests"""
-    try:
-        from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, VectorParams
-        
-        settings = get_settings()
-        
-        print(f"🔢 Initializing Qdrant client: {settings.qdrant_host}:{settings.qdrant_port}")
-        
-        client = QdrantClient(
-            host=settings.qdrant_host,
-            port=settings.qdrant_port,
-            api_key=settings.qdrant_api_key if hasattr(settings, 'qdrant_api_key') else None,
-            https=False,  # Force HTTP connection for local Qdrant
-            timeout=30
-        )
-        
-        print(f"✓ Qdrant client initialized successfully")
-        return client
-        
-    except ImportError:
-        print("⚠️ qdrant-client not available, returning None")
-        return None
-    except Exception as e:
-        print(f"❌ Failed to initialize Qdrant client: {e}")
-        return None
 
 
 # Database dependency with connection monitoring
@@ -131,19 +100,17 @@ async def get_file_service_dep(
 
 async def get_embedding_service_dep(
     db: AsyncSession = Depends(get_db),
-    embedding_model = Depends(get_embedding_model),
-    qdrant_client = Depends(get_qdrant_client)
-) -> EmbeddingService:
-    """Get embedding service with singleton model and Qdrant client"""
-    service = EmbeddingService(db, embedding_model, qdrant_client)
-    # No need to call initialize() since dependencies are injected
-    return service
+    embedding_model = Depends(get_embedding_model)
+):
+    """Get pgvector embedding service with singleton model"""
+    from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
+    return PgVectorEmbeddingService(db, embedding_model)
 
 
 async def get_sync_service_dep(
     db: AsyncSession = Depends(get_db),
     file_service: FileService = Depends(get_file_service_dep),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep)
+    embedding_service = Depends(get_embedding_service_dep)
 ) -> SyncService:
     """Get sync service with dependencies"""
     return SyncService(db, file_service, embedding_service)
@@ -152,11 +119,11 @@ async def get_sync_service_dep(
 async def get_rag_service_dep(
     db: AsyncSession = Depends(get_db),
     file_service: FileService = Depends(get_file_service_dep),
-    qdrant_client = Depends(get_qdrant_client),
+    embedding_service = Depends(get_embedding_service_dep),
     embedding_model = Depends(get_embedding_model)
 ) -> RAGService:
     """Get RAG service with dependencies"""
-    service = RAGService(db, file_service, qdrant_client, embedding_model)
+    service = RAGService(db, file_service, embedding_service, embedding_model)
     await service.initialize()
     return service
 
@@ -182,7 +149,7 @@ class ServiceBundle:
         db: AsyncSession,
         tenant_service: TenantService,
         file_service: FileService,
-        embedding_service: EmbeddingService,
+        embedding_service,
         sync_service: SyncService,
         rag_service: RAGService
     ):
@@ -198,7 +165,7 @@ async def get_service_bundle(
     db: AsyncSession = Depends(get_db),
     tenant_service: TenantService = Depends(get_tenant_service_dep),
     file_service: FileService = Depends(get_file_service_dep),
-    embedding_service: EmbeddingService = Depends(get_embedding_service_dep),
+    embedding_service = Depends(get_embedding_service_dep),
     sync_service: SyncService = Depends(get_sync_service_dep),
     rag_service: RAGService = Depends(get_rag_service_dep)
 ) -> ServiceBundle:

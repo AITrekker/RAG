@@ -11,11 +11,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from src.backend.models.database import File, SyncOperation, FileSyncHistory, User
 from src.backend.services.file_service import FileService
-from src.backend.services.embedding_service import EmbeddingService
+from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
 from src.backend.config.settings import get_settings
 
 
@@ -69,7 +69,7 @@ class SyncService:
         self, 
         db_session: AsyncSession,
         file_service: FileService,
-        embedding_service: EmbeddingService
+        embedding_service: PgVectorEmbeddingService
     ):
         self.db = db_session
         self.file_service = file_service
@@ -189,6 +189,9 @@ class SyncService:
         try:
             # Execute changes
             await self._execute_file_changes(sync_plan, sync_op)
+            
+            # Ensure all counter updates are committed before completion
+            await self.db.commit()
             
             # Update sync operation status
             await self._complete_sync_operation(sync_op, sync_plan)
@@ -323,7 +326,7 @@ class SyncService:
             
             # Track embedding metrics
             sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + total_chunks_deleted
-            await self.db.flush()
+            await self.db.commit()
             
             # HARD DELETE all file records in one query
             from sqlalchemy import delete
@@ -399,23 +402,41 @@ class SyncService:
             )
             
             self.db.add(file_record)
-            await self.db.flush()  # Get ID without committing
+            await self.db.commit()  # Use commit instead of flush for concurrency
+            await self.db.refresh(file_record)
             
             # Process the file immediately with memory management
-            chunks = await self.embedding_service.process_file(file_record)
-            embeddings = await self.embedding_service.generate_embeddings(chunks)
-            
-            # Store embeddings using simple embedding service
+            # Construct absolute file path
+            from src.backend.config.settings import get_settings
             settings = get_settings()
+            absolute_file_path = Path(settings.documents_path) / file_record.file_path
+            
+            chunks = await self.embedding_service.process_file_to_chunks(
+                absolute_file_path, 
+                file_record.tenant_id, 
+                file_record
+            )
+            embeddings = self.embedding_service.generate_embeddings(chunks)
+            
+            # Store embeddings using pgvector embedding service
             chunk_records = await self.embedding_service.store_embeddings(
-                file_record, chunks, embeddings, environment=settings.rag_environment
+                chunks, embeddings, file_record
             )
             success = True
             
             # Track embedding metrics
             chunks_created = len(chunk_records)
-            sync_op.chunks_created = (sync_op.chunks_created or 0) + chunks_created
-            await self.db.flush()  # Ensure sync_op changes are persisted
+            
+            # Use explicit SQL update to ensure persistence
+            await self.db.execute(
+                update(SyncOperation)
+                .where(SyncOperation.id == sync_op.id)
+                .values(
+                    chunks_created=func.coalesce(SyncOperation.chunks_created, 0) + chunks_created,
+                    files_added=func.coalesce(SyncOperation.files_added, 0) + 1
+                )
+            )
+            await self.db.commit()  # Ensure sync_op changes are persisted
             
             # Update file status to synced only if embeddings were stored successfully
             if success:
@@ -425,6 +446,9 @@ class SyncService:
             else:
                 file_record.sync_status = 'failed'
                 file_record.sync_error = 'Failed to store embeddings'
+            
+            # Commit file status changes to database
+            await self.db.commit()
             
             # Create sync history record with chunk metrics
             await self._create_sync_history(file_record.id, sync_op, change, chunks_before=0, chunks_after=chunks_created)
@@ -437,6 +461,7 @@ class SyncService:
                 file_record.sync_status = 'failed'
                 file_record.sync_error = str(e)
                 file_record.sync_completed_at = datetime.utcnow()
+                await self.db.commit()  # Commit failed status
             raise
     
     async def _process_updated_file(self, change: FileChange, sync_op: SyncOperation):
@@ -465,23 +490,39 @@ class SyncService:
             file_record = result.scalar_one()
             
             # Reprocess the file with memory management
-            chunks = await self.embedding_service.process_file(file_record)
-            embeddings = await self.embedding_service.generate_embeddings(chunks)
+            # Construct absolute file path
+            from src.backend.config.settings import get_settings
+            settings = get_settings()
+            absolute_file_path = Path(settings.documents_path) / file_record.file_path
+            
+            chunks = await self.embedding_service.process_file_to_chunks(
+                absolute_file_path, 
+                file_record.tenant_id, 
+                file_record
+            )
+            embeddings = self.embedding_service.generate_embeddings(chunks)
             
             # Simple embedding update - delete old then store new
             chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
-            settings = get_settings()
             chunk_records = await self.embedding_service.store_embeddings(
-                file_record, chunks, embeddings, environment=settings.rag_environment
+                chunks, embeddings, file_record
             )
             success = True
             
             # Track embedding metrics - for updates, we delete old and create new
             chunks_created = len(chunk_records)
-            sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + chunks_deleted
-            sync_op.chunks_created = (sync_op.chunks_created or 0) + chunks_created
-            sync_op.chunks_updated = (sync_op.chunks_updated or 0) + chunks_created  # New embeddings for updated file
-            await self.db.flush()  # Ensure sync_op changes are persisted
+            # Use explicit SQL update to ensure persistence
+            await self.db.execute(
+                update(SyncOperation)
+                .where(SyncOperation.id == sync_op.id)
+                .values(
+                    chunks_deleted=func.coalesce(SyncOperation.chunks_deleted, 0) + chunks_deleted,
+                    chunks_created=func.coalesce(SyncOperation.chunks_created, 0) + chunks_created,
+                    chunks_updated=func.coalesce(SyncOperation.chunks_updated, 0) + chunks_created,
+                    files_updated=func.coalesce(SyncOperation.files_updated, 0) + 1
+                )
+            )
+            await self.db.commit()  # Ensure sync_op changes are persisted
             
             # Update file status to synced only if embeddings were updated successfully
             if success:
@@ -536,8 +577,15 @@ class SyncService:
             # Use simple embedding service - no complex transactions
             chunks_deleted = await self.embedding_service.delete_file_embeddings(change.file_id)
             
-            # Track embedding metrics
-            sync_op.chunks_deleted = (sync_op.chunks_deleted or 0) + chunks_deleted
+            # Track embedding metrics - use explicit SQL update
+            await self.db.execute(
+                update(SyncOperation)
+                .where(SyncOperation.id == sync_op.id)
+                .values(
+                    chunks_deleted=func.coalesce(SyncOperation.chunks_deleted, 0) + chunks_deleted,
+                    files_deleted=func.coalesce(SyncOperation.files_deleted, 0) + 1
+                )
+            )
             
             # HARD DELETE file record
             from sqlalchemy import delete
@@ -588,16 +636,23 @@ class SyncService:
         sync_plan: SyncPlan
     ):
         """Mark sync operation as completed"""
+        # Get current sync operation to preserve actual processing counts
+        result = await self.db.execute(
+            select(SyncOperation).where(SyncOperation.id == sync_op.id)
+        )
+        current_sync_op = result.scalar_one()
+        
+        # Calculate actual processed count from individual metrics
+        actual_processed = (current_sync_op.files_added or 0) + (current_sync_op.files_updated or 0) + (current_sync_op.files_deleted or 0)
+        
         await self.db.execute(
             update(SyncOperation)
             .where(SyncOperation.id == sync_op.id)
             .values(
                 status='completed',
                 completed_at=datetime.utcnow(),
-                files_processed=sync_plan.total_changes,
-                files_added=len(sync_plan.new_files),
-                files_updated=len(sync_plan.updated_files),
-                files_deleted=len(sync_plan.deleted_files)
+                files_processed=actual_processed
+                # Don't overwrite the individual counters - they were set during processing
             )
         )
         await self.db.commit()
@@ -684,9 +739,18 @@ class SyncService:
             await self.embedding_service.delete_file_embeddings(file_id)
             
             # Process file with memory management
-            chunks = await self.embedding_service.process_file(file_record)
-            embeddings = await self.embedding_service.generate_embeddings(chunks)
-            await self.embedding_service.store_embeddings(file_record, chunks, embeddings)
+            # Construct absolute file path
+            from src.backend.config.settings import get_settings
+            settings = get_settings()
+            absolute_file_path = Path(settings.documents_path) / file_record.file_path
+            
+            chunks = await self.embedding_service.process_file_to_chunks(
+                absolute_file_path, 
+                file_record.tenant_id, 
+                file_record
+            )
+            embeddings = self.embedding_service.generate_embeddings(chunks)
+            await self.embedding_service.store_embeddings(chunks, embeddings, file_record)
             
             # Clean up variables to free memory
             del chunks, embeddings
@@ -795,7 +859,7 @@ class SyncService:
 async def get_sync_service(
     db_session: AsyncSession,
     file_service: FileService,
-    embedding_service: EmbeddingService
+    embedding_service: PgVectorEmbeddingService
 ) -> SyncService:
     """Dependency to get sync service with required dependencies"""
     return SyncService(db_session, file_service, embedding_service)
