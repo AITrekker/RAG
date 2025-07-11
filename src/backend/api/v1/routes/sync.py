@@ -13,62 +13,80 @@ from src.backend.dependencies import (
     get_db_session
 )
 from src.backend.services.sync_service import SyncService
-from src.backend.services.sync_operations_manager import SyncOperationsManager
+# Removed SyncOperationsManager for simplified approach
 from src.backend.models.database import Tenant
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 
 
+async def _create_simple_full_sync_plan(sync_service: SyncService, tenant_id: UUID):
+    """Create a simple full sync plan that marks all files as updated"""
+    from src.backend.services.sync_service import SyncPlan, FileChange, ChangeType
+    
+    # Get all files from database
+    db_files = await sync_service.file_service.list_files(tenant_id, limit=10000)
+    
+    # Create changes for all files to force reprocessing
+    changes = []
+    for db_file in db_files:
+        changes.append(FileChange(
+            change_type=ChangeType.UPDATED,
+            file_path=db_file.file_path,
+            file_id=db_file.id,
+            old_hash=db_file.file_hash,
+            new_hash=db_file.file_hash,  # Same hash, but force update
+            file_size=db_file.file_size,
+            modified_time=db_file.updated_at
+        ))
+    
+    print(f"🔄 SIMPLE FULL SYNC: Force processing {len(changes)} files for tenant {tenant_id}")
+    return SyncPlan(tenant_id=tenant_id, changes=changes)
+
+
 class SyncTriggerRequest(BaseModel):
     force_full_sync: bool = False
 
 
-# Sync operations manager factory function below
-
-
-async def get_sync_operations_manager(
-    db_session: AsyncSession = Depends(get_db_session),
-    sync_service: SyncService = Depends(get_sync_service_dep)
-) -> SyncOperationsManager:
-    """Get sync operations manager - create fresh instance per request"""
-    return SyncOperationsManager(
-        db_session=db_session,
-        sync_service=sync_service
-    )
+# Simplified sync approach - no complex operations manager needed
 
 
 @router.post("/")
 async def create_sync(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """Create a new sync operation"""
+    """Create a new sync operation (simplified)"""
     try:
         force_full = request.get("force_full_sync", False)
-        result = await sync_manager.request_sync(
-            tenant_id=current_tenant.id,
-            force_full_sync=force_full,
-            triggered_by=None
-        )
         
-        if result["status"] == "error":
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result["message"]
-            )
-        elif result["status"] == "conflict":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=result
-            )
+        if force_full:
+            sync_plan = await _create_simple_full_sync_plan(sync_service, current_tenant.id)
+        else:
+            sync_plan = await sync_service.detect_file_changes(current_tenant.id)
         
-        return result
+        if sync_plan.total_changes == 0:
+            return {
+                "status": "completed",
+                "message": "No changes detected",
+                "total_files": 0,
+                "files_processed": 0
+            }
         
-    except HTTPException:
-        raise
+        sync_op = await sync_service.execute_sync_plan(sync_plan, triggered_by=None)
+        
+        return {
+            "status": "completed",
+            "sync_id": str(sync_op.id),
+            "message": "Sync completed successfully",
+            "total_files": sync_plan.total_changes,
+            "files_processed": sync_plan.total_changes
+        }
+        
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create sync: {str(e)}"
@@ -79,32 +97,40 @@ async def create_sync(
 async def trigger_sync(
     request: SyncTriggerRequest,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """Trigger a sync operation with intelligent conflict resolution"""
+    """Trigger a sync operation (simplified)"""
     try:
-        result = await sync_manager.request_sync(
-            tenant_id=current_tenant.id,
-            force_full_sync=request.force_full_sync,
-            triggered_by=None
-        )
+        print(f"🚀 Triggering simplified sync for tenant {current_tenant.id}")
         
-        if result["status"] == "error":
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result["message"]
-            )
-        elif result["status"] == "conflict":
-            # Return conflict information instead of error
+        if request.force_full_sync:
+            # Force full sync - create a sync plan that processes all files
+            sync_plan = await _create_simple_full_sync_plan(sync_service, current_tenant.id)
+        else:
+            # Regular delta sync
+            sync_plan = await sync_service.detect_file_changes(current_tenant.id)
+        
+        print(f"📋 Sync plan: {len(sync_plan.new_files)} new, {len(sync_plan.updated_files)} updated, {len(sync_plan.deleted_files)} deleted")
+        
+        if sync_plan.total_changes == 0:
             return {
-                **result,
-                "message": f"Sync already in progress. {result['message']}"
+                "status": "completed",
+                "message": "No changes detected",
+                "total_files": 0,
+                "files_processed": 0
             }
         
-        return result
+        # Execute sync plan directly
+        sync_op = await sync_service.execute_sync_plan(sync_plan, triggered_by=None)
         
-    except HTTPException:
-        raise
+        return {
+            "status": "completed",
+            "sync_id": str(sync_op.id),
+            "message": "Sync completed successfully",
+            "total_files": sync_plan.total_changes,
+            "files_processed": sync_plan.total_changes
+        }
+        
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -117,11 +143,11 @@ async def trigger_sync(
 @router.get("/status")
 async def get_sync_status(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """Get comprehensive sync status for the authenticated tenant"""
+    """Get comprehensive sync status for the authenticated tenant (simplified)"""
     try:
-        status_info = await sync_manager.get_sync_status(current_tenant.id)
+        status_info = await sync_service.get_sync_status(current_tenant.id)
         return status_info
         
     except Exception as e:
@@ -197,7 +223,7 @@ async def get_sync(
 async def delete_sync(
     sync_id: str,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
     """Cancel a sync operation - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -217,14 +243,13 @@ async def delete_sync(
 @router.post("/cleanup")
 async def cleanup_stuck_syncs(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    sync_manager: SyncOperationsManager = Depends(get_sync_operations_manager)
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """Manually trigger cleanup of stuck sync operations"""
+    """Manually trigger cleanup of stuck sync operations (simplified - no background tasks to clean)"""
     try:
-        cleanup_count = await sync_manager.cleanup_stuck_operations()
         return {
-            "message": f"Cleanup completed",
-            "operations_cleaned": cleanup_count,
+            "message": "No cleanup needed - simplified sync system has no background tasks",
+            "operations_cleaned": 0,
             "status": "success"
         }
         

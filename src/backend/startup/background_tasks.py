@@ -39,21 +39,12 @@ class BackgroundTaskManager:
             return
         
         self.running = True
-        logger.info("Starting background tasks...")
+        logger.info("Starting simplified background tasks...")
         
-        # Start sync cleanup task
-        self.tasks["sync_cleanup"] = asyncio.create_task(
-            self._sync_cleanup_loop(),
-            name="sync_cleanup"
-        )
+        # DISABLED: sync cleanup task (causing complexity)
+        # DISABLED: performance monitoring task (not essential)
         
-        # Start performance monitoring task
-        self.tasks["performance_monitor"] = asyncio.create_task(
-            self._performance_monitoring_loop(),
-            name="performance_monitor"
-        )
-        
-        # Start health check task
+        # Only start essential health check task
         self.tasks["health_check"] = asyncio.create_task(
             self._health_check_loop(),
             name="health_check"

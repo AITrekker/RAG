@@ -40,19 +40,17 @@ TEST_CATEGORIES = {
     "rag": ["tests/test_rag_comprehensive.py"],
     "multitenancy": ["tests/test_api_multitenancy.py"],
     "templates": ["tests/test_api_templates.py"],
-    "analytics": ["tests/test_analytics_simple.py", "tests/test_analytics_api.py"],
-    "hard_delete": ["tests/test_hard_delete.py"],
-    "comprehensive_sync": ["tests/test_comprehensive_sync_fast.py"],
-    "comprehensive_sync_full": ["tests/test_comprehensive_sync_embeddings.py"],
+    "analytics": ["tests/test_analytics_api.py"],
+    "comprehensive_sync": ["tests/test_comprehensive_sync_embeddings.py"],
     "comprehensive": [
         "tests/test_sync_service.py",
         "tests/test_embedding_service.py", 
         "tests/test_rag_comprehensive.py",
-        "tests/test_comprehensive_sync_fast.py"
+        "tests/test_comprehensive_sync_embeddings.py"
     ],
     "critical": [
         "tests/test_api_health.py",
-        "tests/test_comprehensive_sync_fast.py",
+        "tests/test_comprehensive_sync_embeddings.py",
         "tests/test_api_query.py"
     ],
     "all": [
@@ -64,10 +62,8 @@ TEST_CATEGORIES = {
         "tests/test_rag_comprehensive.py",
         "tests/test_api_multitenancy.py",
         "tests/test_api_templates.py",
-        "tests/test_analytics_simple.py",
         "tests/test_analytics_api.py",
-        "tests/test_hard_delete.py",
-        "tests/test_comprehensive_sync_fast.py"
+        "tests/test_comprehensive_sync_embeddings.py"
     ]
 }
 

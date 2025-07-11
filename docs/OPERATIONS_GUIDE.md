@@ -10,7 +10,7 @@ This section covers the Docker setup, port mapping, and service management.
 
 ### Overview
 
-The RAG platform uses a **simplified, 3-service Docker architecture** after removing Redis and Nginx dependencies. Each service now exposes its ports **directly** to the host machine, eliminating the need for a reverse proxy.
+The RAG platform uses a **simplified, 3-service Docker architecture** with PostgreSQL + pgvector for unified data storage. Each service exposes its ports **directly** to the host machine for easy access.
 
 ### Architecture Diagram
 
@@ -18,12 +18,12 @@ The RAG platform uses a **simplified, 3-service Docker architecture** after remo
 graph TD
     A["🌐 Your Browser<br/>localhost:3000"] --> B["📦 Frontend Container<br/>rag_frontend<br/>Port 3000:3000"]
     C["🔧 API Client<br/>localhost:8000"] --> D["📦 Backend Container<br/>rag_backend<br/>Port 8000:8000"]
-    E["🔍 Qdrant Client<br/>localhost:6333"] --> F["📦 Qdrant Container<br/>rag_qdrant<br/>Port 6333:6333<br/>Port 6334:6334"]
+    E["🗄️ DB Client<br/>localhost:5432"] --> F["📦 PostgreSQL + pgvector<br/>rag_postgres<br/>Port 5432:5432"]
     
     B --> D
     D --> F
     
-    G["🖥️ Host Machine<br/>Windows"] -.-> A
+    G["🖥️ Host Machine<br/>Windows/Linux"] -.-> A
     G -.-> C  
     G -.-> E
     
@@ -38,8 +38,7 @@ graph TD
 |---------|---------------|-----------|------------|---------|
 | **Frontend** | `3000` | `3000` | `http://localhost:3000` | React/Vite Dev Server |
 | **Backend** | `8000` | `8000` | `http://localhost:8000` | FastAPI Application |
-| **Qdrant** | `6333` | `6333` | `http://localhost:6333` | Vector DB HTTP API |
-| **Qdrant** | `6334` | `6334` | `http://localhost:6334` | Vector DB gRPC API |
+| **PostgreSQL** | `5432` | `5432` | `localhost:5432` | Database with pgvector |
 
 ### Service Details
 
@@ -48,124 +47,394 @@ graph TD
 - **Base Image**: Node.js 20 Alpine
 - **Access URL**: `http://localhost:3000`
 - **Features**:
-  - React application with TypeScript
-  - Vite development server with HMR
-  - Tailwind CSS styling
-  - Hot reload for development
+  - React 18 with TypeScript
+  - Vite dev server with hot reload
+  - Material-UI component library
+  - Auto-start with `docker-compose up`
 
-#### 2. Backend API Service (Port 8000)
+#### 2. Backend Service (Port 8000)
 - **Container**: `rag_backend`
-- **Base Image**: NVIDIA PyTorch (for GPU support)
+- **Base Image**: Python 3.11 with ML dependencies
 - **Access URL**: `http://localhost:8000`
 - **Features**:
-  - FastAPI application
-  - Automatic OpenAPI documentation
-  - Hot reload for development
-  - Non-root user for security
+  - FastAPI with automatic OpenAPI docs
+  - Comprehensive RAG pipeline
+  - Multi-tenant authentication
+  - Delta sync with pgvector storage
 
-#### 3. Qdrant Vector Database (Ports 6333/6334)
-- **Container**: `rag_qdrant`
-- **Image**: `qdrant/qdrant:v1.7.4`
-- **HTTP API**: `http://localhost:6333`
-- **gRPC API**: `localhost:6334`
+#### 3. PostgreSQL + pgvector Service (Port 5432)
+- **Container**: `rag_postgres`
+- **Base Image**: `pgvector/pgvector:pg16`
+- **Access**: `localhost:5432`
 - **Features**:
-  - Vector similarity search
-  - HTTP REST API
-  - gRPC API for high performance
-  - Web dashboard
+  - PostgreSQL 16 with pgvector extension
+  - Unified storage for metadata and vectors
+  - ACID transactions for data consistency
+  - Automatic database initialization
 
-### Quick Start Commands
+---
 
-#### Start All Services
+## Quick Start Deployment
+
+### 1. Prerequisites
 ```bash
-# Build and start the complete stack
-docker-compose up -d
-
-# View logs from all services
-docker-compose logs -f
-
-# Check service status
-docker-compose ps
+# Ensure Docker and Docker Compose are installed
+docker --version          # Should be 24.0+
+docker-compose --version   # Should be 2.20+
 ```
 
-#### Access the Application
+### 2. Clone and Start
 ```bash
-# Open the main application
-start http://localhost:3000
+git clone <repository-url>
+cd rag
+docker-compose up -d
+```
 
-# View API documentation
-start http://localhost:8000/docs
+### 3. Verify Services
+```bash
+# Check service status
+docker-compose ps
 
-# Access Qdrant dashboard
-start http://localhost:6333/dashboard
+# Expected output:
+# NAME             STATUS    PORTS
+# rag_backend      Up        0.0.0.0:8000->8000/tcp
+# rag_frontend     Up        0.0.0.0:3000->3000/tcp  
+# rag_postgres     Up        0.0.0.0:5432->5432/tcp
+# rag_init         Exited(0)  # Normal after setup
+```
+
+### 4. Access Services
+- **Frontend UI**: [http://localhost:3000](http://localhost:3000)
+- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+
+---
+
+## Environment Configuration
+
+### Primary Configuration (.env)
+```bash
+# Database Configuration
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=rag_db_development
+POSTGRES_USER=rag_user
+POSTGRES_PASSWORD=your_secure_password
+
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+LOG_LEVEL=INFO
+
+# ML Configuration
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+NLTK_DATA=/tmp/nltk_data
+
+# Security
+SECRET_KEY=your_secret_key_change_in_production
+ADMIN_API_KEY=your_admin_api_key
+
+# Paths
+UPLOAD_BASE_PATH=/app/data/uploads
+```
+
+### Docker Compose Override
+For development customization, create `docker-compose.override.yml`:
+```yaml
+version: '3.8'
+services:
+  backend:
+    volumes:
+      - ./src:/app/src  # Enable hot reload
+    environment:
+      - LOG_LEVEL=DEBUG
+  
+  frontend:
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ---
 
-## Demo Tenant Setup & Management
+## Data Management
 
-This section explains how to create and manage demo tenants for testing and development.
-
-### Quick Start
-
-#### Option 1: Default Demo Setup (Recommended)
-
-The fastest way to create demo tenants that match your data folder structure:
-
-```bash
-# Creates tenant1, tenant2, tenant3 with API keys
-python scripts/api-demo.py --setup-default
+### File Storage Structure
+```
+data/
+├── uploads/           # Tenant file uploads
+│   ├── tenant1/
+│   ├── tenant2/
+│   └── admin/
+├── cache/             # ML model cache
+│   ├── huggingface/
+│   └── transformers/
+└── logs/              # Application logs
 ```
 
-This command will:
-- Create tenants named `tenant1`, `tenant2`, `tenant3`
-- Generate API keys for each tenant
-- Save API keys to `demo_tenant_keys.json`
-- Set up document collections in Qdrant
-- Configure 24-hour demo duration
-
-#### Option 2: Custom Demo Setup
-
-For custom tenant configurations:
-
+### Database Management
 ```bash
-# Custom demo tenants with specific duration
-python scripts/api-demo.py --setup --demo-tenants "custom1,custom2" --duration 48
+# Connect to PostgreSQL
+docker exec -it rag_postgres psql -U rag_user -d rag_db_development
 
-# Setup without API keys
-python scripts/api-demo.py --setup --demo-tenants "tenant1,tenant2" --no-api-keys
+# View tables
+\dt
+
+# Check pgvector extension
+SELECT * FROM pg_extension WHERE extname = 'vector';
+
+# View tenants
+SELECT id, name, plan_tier FROM tenants;
 ```
 
-### API Key Management
-
-When creating demo tenants with API keys enabled, keys are automatically:
-- Generated for each tenant
-- Saved to `demo_tenant_keys.json`
-- Displayed in console output
-- Associated with the tenant in the database
-
-After demo setup, use the generated keys from `demo_tenant_keys.json`.
-
-### Common Workflows
-
-#### Complete Demo Setup
-
+### Backup and Restore
 ```bash
-# 1. Setup demo environment
-python scripts/api-demo.py --setup-default
+# Backup database
+docker exec rag_postgres pg_dump -U rag_user rag_db_development > backup.sql
 
-# 2. Verify tenants were created
-python scripts/api-demo.py --list
+# Restore database
+docker exec -i rag_postgres psql -U rag_user rag_db_development < backup.sql
+```
 
-# 3. Start backend server
+---
+
+## Development Workflow
+
+### 1. Frontend Development
+```bash
+# Start with hot reload
 docker-compose up -d
 
-# 4. Use API keys from demo_tenant_keys.json in your frontend
+# Or manual development
+make frontend-shell
+npm run dev
 ```
 
-### Troubleshooting
+### 2. Backend Development
+```bash
+# View logs
+docker-compose logs -f backend
 
-1.  **"Please update ADMIN_API_KEY"**: Ensure admin API key is set in environment or `.env` file.
-2.  **"Tenant already exists"**: Use `--list` to see existing tenants or delete the tenant before recreating.
-3.  **"Connection refused"**: Ensure backend server and Docker containers are running.
-4.  **API keys not saved**: Check file permissions and console output. 
+# Restart after changes
+docker-compose restart backend
+
+# Manual development (if needed)
+python -m uvicorn src.backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3. Database Development
+```bash
+# Reset database
+docker-compose down
+docker volume rm rag_postgres_data
+docker-compose up -d
+
+# Run migrations (if any)
+docker exec rag_backend python -m alembic upgrade head
+```
+
+---
+
+## Testing and Validation
+
+### Demo Setup
+```bash
+# Create demo tenants with API keys
+python scripts/workflow/setup_demo_tenants.py
+
+# Test complete system
+python scripts/test_system.py
+
+# Test RAG queries
+python demo_rag_queries.py
+```
+
+### Health Checks
+```bash
+# Basic health
+curl http://localhost:8000/api/v1/health
+
+# Detailed health
+curl http://localhost:8000/api/v1/health/detailed
+
+# Database connectivity
+curl http://localhost:8000/api/v1/health/database
+```
+
+### Load Testing
+```bash
+# Simple load test
+for i in {1..10}; do
+  curl -H "X-API-Key: $API_KEY" http://localhost:8000/api/v1/files &
+done
+wait
+```
+
+---
+
+## Production Deployment
+
+### 1. Environment Preparation
+```bash
+# Create production environment file
+cp .env.example .env.production
+
+# Update values for production:
+# - Use strong passwords
+# - Set proper SECRET_KEY
+# - Configure external database if needed
+# - Set LOG_LEVEL=INFO
+```
+
+### 2. Production Build
+```bash
+# Build production images
+docker-compose -f docker-compose.prod.yml build
+
+# Start production services
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### 3. SSL/TLS Configuration
+```bash
+# Using Let's Encrypt with nginx
+# (Add nginx reverse proxy configuration)
+```
+
+### 4. Monitoring Setup
+```bash
+# View service metrics
+docker stats
+
+# Monitor logs
+docker-compose logs -f --tail=100
+
+# Database monitoring
+docker exec rag_postgres psql -U rag_user -d rag_db_development -c "SELECT * FROM pg_stat_activity;"
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### Backend Won't Start
+```bash
+# Check logs
+docker-compose logs backend
+
+# Common fixes:
+# 1. Database not ready - wait for postgres container
+# 2. Port conflict - change API_PORT
+# 3. Permission issues - check file permissions
+```
+
+#### Frontend Not Loading
+```bash
+# Check if backend is accessible
+curl http://localhost:8000/api/v1/health
+
+# Check frontend logs
+docker-compose logs frontend
+
+# Common fixes:
+# 1. Backend not running
+# 2. VITE_API_BASE_URL misconfigured
+# 3. Port 3000 already in use
+```
+
+#### Database Connection Issues
+```bash
+# Check postgres container
+docker-compose logs postgres
+
+# Test connection
+docker exec rag_postgres pg_isready -U rag_user
+
+# Common fixes:
+# 1. Container not started
+# 2. Wrong credentials in .env
+# 3. Port 5432 already in use
+```
+
+#### ML Model Loading Issues
+```bash
+# Check backend logs for model loading
+docker-compose logs backend | grep -i "model\|embedding"
+
+# Common fixes:
+# 1. Insufficient memory (need 8GB+ RAM)
+# 2. GPU drivers (if using GPU)
+# 3. Model cache corruption - delete cache/transformers/
+```
+
+### Performance Issues
+
+#### Slow Query Response
+```bash
+# Check database performance
+docker exec rag_postgres psql -U rag_user -d rag_db_development -c "SELECT * FROM pg_stat_user_tables;"
+
+# Check pgvector indexes
+docker exec rag_postgres psql -U rag_user -d rag_db_development -c "\d+ embedding_chunks"
+```
+
+#### High Memory Usage
+```bash
+# Monitor container resources
+docker stats
+
+# Common solutions:
+# 1. Reduce batch size in settings
+# 2. Add more RAM
+# 3. Optimize ML model settings
+```
+
+---
+
+## Maintenance
+
+### Regular Tasks
+```bash
+# Update containers (weekly)
+docker-compose pull
+docker-compose up -d
+
+# Clean up old images (monthly)
+docker image prune -f
+
+# Backup database (daily in production)
+docker exec rag_postgres pg_dump -U rag_user rag_db_development > backup_$(date +%Y%m%d).sql
+```
+
+### Monitoring
+```bash
+# Check disk usage
+df -h
+
+# Check container health
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# Monitor logs for errors
+docker-compose logs --tail=50 | grep -i error
+```
+
+---
+
+## Support and Resources
+
+### Documentation
+- **API Reference**: `/docs/API_REFERENCE.md`
+- **Architecture**: `/docs/Architecture.md`
+- **RAG Tuning**: `/docs/RAG_TUNING.md`
+
+### API Documentation
+- **Interactive Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **OpenAPI Spec**: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
+
+### Community
+- **Issues**: GitHub Issues
+- **Discussions**: GitHub Discussions
+- **Wiki**: Project Wiki
+
+This operations guide covers the essential aspects of deploying and managing the RAG platform with the simplified PostgreSQL + pgvector architecture.

@@ -4,17 +4,17 @@ from typing import Dict, Type, Optional, List
 from pathlib import Path
 from .base import DocumentProcessor
 from .processors.text_processor import TextProcessor
-# from .processors.pdf_processor import PDFProcessor
-# from .processors.html_processor import HTMLProcessor
+from .processors.pdf_processor import PDFProcessor
+from .processors.html_processor import HTMLProcessor
 
 class DocumentProcessorFactory:
     """Factory for creating appropriate document processors."""
     
     _processors: Dict[str, Type[DocumentProcessor]] = {
         '.txt': TextProcessor,
-        # '.pdf': PDFProcessor,
-        # '.html': HTMLProcessor,
-        # '.htm': HTMLProcessor,
+        '.pdf': PDFProcessor,
+        '.html': HTMLProcessor,
+        '.htm': HTMLProcessor,
     }
     
     @classmethod

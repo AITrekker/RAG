@@ -1,10 +1,10 @@
-# RAG System API Test Suite
+# RAG System Test Suite
 
-**API-only testing for the Enterprise RAG Platform - no business logic, pure API calls.**
+**Comprehensive testing for the Enterprise RAG Platform - streamlined and focused test coverage.**
 
 ## 🎯 Test Suite Overview
 
-This test suite contains **4 focused API test files** that validate the RAG system through HTTP API calls only, ensuring proper separation between testing and business logic.
+This test suite contains **10 focused test files** that validate the RAG system through both API calls and service layer testing, providing comprehensive coverage of the simplified pgvector architecture.
 
 ## Quick Start
 
@@ -52,16 +52,18 @@ python3 -m pytest tests/test_api_query.py -v
 python3 -m pytest tests/test_api_multitenancy.py -v
 ```
 
-## 🧪 API Test Files
+## 🧪 Test Files
 
-### 1. **`test_api_health.py`**
+### **API Tests**
+
+#### 1. **`test_api_health.py`**
 **Health check and system status validation**
 - Health endpoint: `GET /api/v1/health/`
 - Liveness endpoint: `GET /api/v1/health/liveness`
 - OpenAPI documentation accessibility
 - Basic system connectivity
 
-### 2. **`test_api_sync.py`**
+#### 2. **`test_api_sync.py`**
 **Sync operation API validation**
 - Trigger sync: `POST /api/v1/sync/trigger`
 - Sync status: `GET /api/v1/sync/status`
@@ -69,7 +71,7 @@ python3 -m pytest tests/test_api_multitenancy.py -v
 - Change detection: `POST /api/v1/sync/detect-changes`
 - Authentication and authorization testing
 
-### 3. **`test_api_query.py`**
+#### 3. **`test_api_query.py`**
 **RAG query API validation**
 - Basic RAG query: `POST /api/v1/query/`
 - Semantic search: `POST /api/v1/query/search`
@@ -78,12 +80,47 @@ python3 -m pytest tests/test_api_multitenancy.py -v
 - Multi-tenant result isolation
 - Error handling (empty queries, invalid requests)
 
-### 4. **`test_api_multitenancy.py`**
+#### 4. **`test_api_multitenancy.py`**
 **Multi-tenancy isolation validation**
 - Cross-tenant sync isolation
 - Cross-tenant query isolation
 - API key validation and security
 - Tenant-specific document verification
+
+#### 5. **`test_api_templates.py`**
+**Template API validation**
+- Template management endpoints
+- Template rendering and validation
+
+#### 6. **`test_analytics_api.py`**
+**Analytics API validation**
+- Analytics endpoints testing
+- Metrics collection and reporting
+
+### **Service Layer Tests**
+
+#### 7. **`test_sync_service.py`**
+**Sync service layer testing**
+- Delta sync functionality
+- File change detection
+- pgvector integration
+
+#### 8. **`test_embedding_service.py`**
+**Embedding service testing**
+- Document processing
+- Embedding generation
+- pgvector storage
+
+#### 9. **`test_rag_comprehensive.py`**
+**RAG pipeline testing**
+- End-to-end RAG functionality
+- Query processing and response generation
+
+#### 10. **`test_comprehensive_sync_embeddings.py`**
+**Comprehensive sync testing**
+- Full sync workflow validation
+- Embedding lifecycle testing
+- System integration verification
 
 ## 🔧 Test Configuration
 

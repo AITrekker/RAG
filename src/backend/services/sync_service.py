@@ -212,12 +212,50 @@ class SyncService:
         
         print(f"🔍 DEBUG: _execute_file_changes called with {len(sync_plan.new_files)} new, {len(sync_plan.updated_files)} updated, {len(sync_plan.deleted_files)} deleted")
         
-        # Process deletions first (fastest operation)
+        # Process deletions sequentially (simplified)
         if sync_plan.deleted_files:
-            await self._process_deleted_files_batch(sync_plan.deleted_files, sync_op)
+            await self._process_deleted_files_sequentially(sync_plan.deleted_files, sync_op)
         
-        # Process new and updated files concurrently with controlled batching
-        await self._process_files_concurrently(sync_plan, sync_op)
+        # Process new and updated files sequentially (simplified)
+        await self._process_files_sequentially(sync_plan, sync_op)
+    
+    async def _process_files_sequentially(self, sync_plan: SyncPlan, sync_op: SyncOperation):
+        """Process files one at a time (simplified for reliability)"""
+        all_files = sync_plan.new_files + sync_plan.updated_files
+        
+        if not all_files:
+            return
+        
+        print(f"🔄 Processing {len(all_files)} files sequentially")
+        
+        for i, change in enumerate(all_files):
+            try:
+                print(f"  📄 Processing file {i+1}/{len(all_files)}: {change.file_path}")
+                
+                if change.change_type == ChangeType.CREATED:
+                    await self._process_new_file(change, sync_op)
+                elif change.change_type == ChangeType.UPDATED:
+                    await self._process_updated_file(change, sync_op)
+                
+                print(f"  ✅ Completed file {i+1}/{len(all_files)}")
+                
+            except Exception as e:
+                print(f"  ❌ Failed to process file {change.file_path}: {e}")
+                # Continue with next file instead of failing entire sync
+                continue
+    
+    async def _process_deleted_files_sequentially(self, deleted_files: List[FileChange], sync_op: SyncOperation):
+        """Process deleted files one at a time (simplified)"""
+        print(f"🗑️ Processing {len(deleted_files)} deleted files sequentially")
+        
+        for i, change in enumerate(deleted_files):
+            try:
+                print(f"  🗑️ Deleting file {i+1}/{len(deleted_files)}: {change.file_path}")
+                await self._process_deleted_file(change, sync_op)
+                print(f"  ✅ Deleted file {i+1}/{len(deleted_files)}")
+            except Exception as e:
+                print(f"  ❌ Failed to delete file {change.file_path}: {e}")
+                continue
     
     async def _process_files_concurrently(self, sync_plan: SyncPlan, sync_op: SyncOperation):
         """Process new and updated files with optimized concurrency"""
@@ -457,12 +495,23 @@ class SyncService:
             del chunks, embeddings, chunk_records
             
         except Exception as e:
-            if 'file_record' in locals():
-                file_record.sync_status = 'failed'
-                file_record.sync_error = str(e)
-                file_record.sync_completed_at = datetime.utcnow()
-                await self.db.commit()  # Commit failed status
-            raise
+            # Handle errors gracefully to avoid breaking subsequent files
+            print(f"    🔍 DEBUG: Exception in _process_new_file: {e}")
+            
+            try:
+                # Rollback any pending transaction to clean session state
+                await self.db.rollback()
+                
+                if 'file_record' in locals():
+                    file_record.sync_status = 'failed'
+                    file_record.sync_error = str(e)
+                    file_record.sync_completed_at = datetime.utcnow()
+                    await self.db.commit()  # Commit failed status
+            except Exception as cleanup_error:
+                print(f"    ⚠️ Error during cleanup: {cleanup_error}")
+                
+            # Don't raise - continue with next file
+            return
     
     async def _process_updated_file(self, change: FileChange, sync_op: SyncOperation):
         """Process an updated file by reprocessing embeddings"""
@@ -553,17 +602,29 @@ class SyncService:
             del chunks, embeddings, chunk_records
             
         except Exception as e:
-            # Mark file as failed
-            await self.db.execute(
-                update(File)
-                .where(File.id == change.file_id)
-                .values(
-                    sync_status='failed',
-                    sync_completed_at=datetime.utcnow(),
-                    sync_error=str(e)
+            # Handle errors gracefully to avoid breaking subsequent files
+            print(f"    🔍 DEBUG: Exception in _process_updated_file: {e}")
+            
+            try:
+                # Rollback any pending transaction to clean session state
+                await self.db.rollback()
+                
+                # Mark file as failed
+                await self.db.execute(
+                    update(File)
+                    .where(File.id == change.file_id)
+                    .values(
+                        sync_status='failed',
+                        sync_completed_at=datetime.utcnow(),
+                        sync_error=str(e)
+                    )
                 )
-            )
-            raise
+                await self.db.commit()
+            except Exception as cleanup_error:
+                print(f"    ⚠️ Error during cleanup: {cleanup_error}")
+                
+            # Don't raise - continue with next file
+            return
     
     async def _process_deleted_file(self, change: FileChange, sync_op: SyncOperation):
         """Process a deleted file by cleaning up records and embeddings - HARD DELETE"""

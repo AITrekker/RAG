@@ -57,6 +57,10 @@ class RAGService:
         # Model references (don't store model objects in class to avoid serialization issues)
         self._llm_model = None
         self._model_name = "not-initialized"
+        
+        # Hybrid RAG service (optional LlamaIndex integration)
+        self._hybrid_rag_service = None
+        self._hybrid_available = False
     
     async def initialize(self):
         """Initialize RAG components"""
@@ -71,6 +75,21 @@ class RAGService:
                 print(f"✓ Using injected embedding model")
             else:
                 print(f"⚠️ No embedding model available")
+            
+            # Try to initialize hybrid RAG service (optional LlamaIndex integration)
+            try:
+                from .rag.hybrid_rag_service import create_hybrid_rag_service
+                self._hybrid_rag_service = await create_hybrid_rag_service(
+                    self.db, self._embedding_service
+                )
+                self._hybrid_available = True
+                print("✓ Hybrid RAG service with LlamaIndex integration initialized")
+            except ImportError:
+                print("⚠️ LlamaIndex not available, using simple RAG only")
+                self._hybrid_available = False
+            except Exception as e:
+                print(f"⚠️ Error initializing hybrid RAG service: {e}")
+                self._hybrid_available = False
             
             # Initialize LLM for answer generation
             try:
@@ -139,7 +158,7 @@ class RAGService:
         prompt_template: str = "default"
     ) -> RAGResponse:
         """
-        Process a RAG query with LlamaIndex integration and fallback retrieval
+        Process a RAG query with hybrid LlamaIndex integration and fallback retrieval
         
         Args:
             query: User query
@@ -147,6 +166,7 @@ class RAGService:
             max_sources: Maximum number of sources to retrieve
             confidence_threshold: Minimum confidence score for sources
             metadata_filters: Optional metadata filters
+            prompt_template: Template to use for response generation
             
         Returns:
             RAGResponse: Generated response with sources
@@ -160,56 +180,47 @@ class RAGService:
         if confidence_threshold is None:
             confidence_threshold = retrieval_config["confidence_threshold"]
         
-        # Try LlamaIndex query engine first
-        try:
-            from .rag.llamaindex_query_engine import create_tenant_query_engine
-            
-            # Create tenant-isolated query engine
-            query_engine = await create_tenant_query_engine(tenant_id, self.db)
-            
-            # Process query with LlamaIndex
-            llamaindex_result = await query_engine.query(
-                query_text=query,
-                max_sources=max_sources,
-                metadata_filters=metadata_filters
-            )
-            
-            # Convert LlamaIndex result to our format
-            search_results = []
-            for node in llamaindex_result.source_nodes:
-                search_result = SearchResult(
-                    chunk_id=node.get("node_id"),
-                    file_id=node.get("file_id"),
-                    content=node.get("content"),
-                    score=node.get("score", 0.0),
-                    metadata=node.get("metadata", {}),
-                    chunk_index=node.get("metadata", {}).get("chunk_index", 0),
-                    filename=node.get("filename", "unknown")
+        # Try hybrid RAG service first (LlamaIndex response synthesis)
+        if self._hybrid_available and self._hybrid_rag_service:
+            try:
+                hybrid_result = await self._hybrid_rag_service.query(
+                    query=query,
+                    tenant_id=tenant_id,
+                    max_results=max_sources,
+                    min_score=confidence_threshold,
+                    use_llamaindex_synthesis=True
                 )
-                search_results.append(search_result)
-            
-            # Filter by confidence threshold
-            filtered_results = [
-                result for result in search_results 
-                if result.score >= confidence_threshold
-            ][:max_sources]
-            
-            # Calculate processing time
-            end_time = datetime.utcnow()
-            processing_time = (end_time - start_time).total_seconds()
-            
-            return RAGResponse(
-                query=query,
-                answer=llamaindex_result.response,
-                sources=filtered_results,
-                confidence=llamaindex_result.confidence,
-                processing_time=processing_time,
-                model_used="llamaindex_query_engine",
-                tokens_used=len(llamaindex_result.response.split()) if llamaindex_result.response else 0
-            )
-            
-        except Exception as e:
-            print(f"⚠️ LlamaIndex query failed: {e}, falling back to traditional RAG")
+                
+                # Convert hybrid result to our RAGResponse format
+                search_results = []
+                for source in hybrid_result.get("sources", []):
+                    search_result = SearchResult(
+                        chunk_id=UUID(source["chunk_id"]),
+                        file_id=UUID(source["file_id"]),
+                        content=source["content"],
+                        score=source["score"],
+                        metadata=source.get("metadata", {}),
+                        chunk_index=source.get("chunk_index", 0),
+                        filename=source.get("filename", "unknown")
+                    )
+                    search_results.append(search_result)
+                
+                # Calculate processing time
+                end_time = datetime.utcnow()
+                processing_time = (end_time - start_time).total_seconds()
+                
+                return RAGResponse(
+                    query=query,
+                    answer=hybrid_result["answer"],
+                    sources=search_results,
+                    confidence=hybrid_result.get("confidence", 0.0),
+                    processing_time=processing_time,
+                    model_used="hybrid_llamaindex_synthesis",
+                    tokens_used=len(hybrid_result["answer"].split()) if hybrid_result.get("answer") else 0
+                )
+                
+            except Exception as e:
+                print(f"⚠️ Hybrid RAG service failed: {e}, falling back to traditional RAG")
         
         # Fallback to traditional RAG processing
         

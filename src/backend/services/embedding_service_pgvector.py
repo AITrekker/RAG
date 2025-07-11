@@ -196,29 +196,58 @@ class PgVectorEmbeddingService:
             List of created EmbeddingChunk records
         """
         try:
-            # Prepare bulk insert data
+            # Use raw SQL insert to handle pgvector properly
+            from uuid import uuid4
+            
             chunk_records = []
+            
             for chunk, embedding in zip(chunks, embeddings):
+                # Convert embedding to pgvector string format
+                vector_str = f"[{','.join(map(str, embedding.vector))}]"
+                chunk_id = uuid4()
+                
+                # Use raw SQL to insert with proper vector casting
+                await self.db.execute(
+                    text("""
+                        INSERT INTO embedding_chunks 
+                        (id, file_id, tenant_id, chunk_index, chunk_content, chunk_hash, 
+                         token_count, embedding, embedding_model, processed_at, created_at, updated_at)
+                        VALUES 
+                        (:id, :file_id, :tenant_id, :chunk_index, :chunk_content, :chunk_hash,
+                         :token_count, (:embedding)::vector, :embedding_model, :processed_at, :created_at, :updated_at)
+                    """),
+                    {
+                        'id': str(chunk_id),
+                        'file_id': str(file_record.id),
+                        'tenant_id': str(file_record.tenant_id),
+                        'chunk_index': chunk.chunk_index,
+                        'chunk_content': chunk.content,
+                        'chunk_hash': chunk.hash,
+                        'token_count': chunk.token_count,
+                        'embedding': vector_str,
+                        'embedding_model': self.model_name,
+                        'processed_at': datetime.utcnow(),
+                        'created_at': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                )
+                
+                # Create record object for return value (without querying back)
                 chunk_record = EmbeddingChunk(
+                    id=chunk_id,
                     file_id=file_record.id,
                     tenant_id=file_record.tenant_id,
                     chunk_index=chunk.chunk_index,
                     chunk_content=chunk.content,
                     chunk_hash=chunk.hash,
                     token_count=chunk.token_count,
-                    embedding=embedding.vector,
+                    embedding=vector_str,
                     embedding_model=self.model_name,
                     processed_at=datetime.utcnow()
                 )
                 chunk_records.append(chunk_record)
             
-            # Bulk insert all chunks
-            self.db.add_all(chunk_records)
             await self.db.commit()
-            
-            # Refresh to get IDs
-            for record in chunk_records:
-                await self.db.refresh(record)
             
             logger.info(f"✓ Stored {len(chunk_records)} chunks with embeddings in PostgreSQL")
             return chunk_records
@@ -386,32 +415,38 @@ class PgVectorEmbeddingService:
     async def process_and_store_file(
         self, 
         file_path: Path, 
-        file_record: File
+        file_record: File,
+        use_llamaindex: bool = True
     ) -> List[EmbeddingChunk]:
         """
         Complete pipeline: process file, generate embeddings, and store
+        Now with optional LlamaIndex integration for complex documents
         
         Args:
             file_path: Path to the file
             file_record: Database file record
+            use_llamaindex: Whether to try LlamaIndex for complex documents
             
         Returns:
             List of created EmbeddingChunk records
         """
         try:
-            # Step 1: Process file to chunks
-            chunks = await self.process_file_to_chunks(
-                file_path, file_record.tenant_id, file_record
-            )
+            # Step 1: Choose processing method
+            if use_llamaindex:
+                chunks = await self._process_with_hybrid_approach(file_path, file_record)
+            else:
+                chunks = await self.process_file_to_chunks(
+                    file_path, file_record.tenant_id, file_record
+                )
             
             if not chunks:
                 logger.warning(f"⚠️ No chunks extracted from {file_path}")
                 return []
             
-            # Step 2: Generate embeddings
+            # Step 2: Generate embeddings (same as before)
             embeddings = self.generate_embeddings(chunks)
             
-            # Step 3: Store in PostgreSQL
+            # Step 3: Store in PostgreSQL (same as before)
             chunk_records = await self.store_embeddings(chunks, embeddings, file_record)
             
             logger.info(f"✓ Successfully processed and stored file: {file_record.filename}")
@@ -421,6 +456,34 @@ class PgVectorEmbeddingService:
             logger.error(f"❌ Error in complete file processing: {e}")
             await self.db.rollback()
             raise
+    
+    async def _process_with_hybrid_approach(
+        self, 
+        file_path: Path, 
+        file_record: File
+    ) -> List['DocumentChunk']:
+        """
+        Process file using hybrid approach (LlamaIndex + simple fallback)
+        """
+        try:
+            # Import the hybrid processor
+            from .document_processing.llamaindex_adapter import create_hybrid_document_processor
+            
+            # Create and initialize hybrid processor
+            hybrid_processor = await create_hybrid_document_processor(self.db)
+            
+            # Process the file
+            chunks, method = await hybrid_processor.process_file(str(file_path), file_record)
+            
+            logger.info(f"✓ Processed {file_record.filename} using {method} method")
+            return chunks
+            
+        except ImportError:
+            logger.warning("⚠️ LlamaIndex adapter not available, using simple processing")
+            return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
+        except Exception as e:
+            logger.warning(f"⚠️ Hybrid processing failed, falling back to simple: {e}")
+            return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
 
 
 # Factory function for dependency injection
