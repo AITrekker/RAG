@@ -18,6 +18,12 @@ CACHE_DIR = BASE_DIR / "cache"
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
+    }
+    
     # Application settings
     app_name: str = Field(default="Enterprise RAG Platform", env="APP_NAME")
     project_name: str = Field(default="Enterprise RAG Platform", env="PROJECT_NAME")
@@ -29,8 +35,8 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, env="PORT")
     
     # Security settings - will be dynamically overridden in debug mode
-    allowed_origins: List[str] = Field(
-        default=["http://localhost:3000"], 
+    allowed_origins: str = Field(
+        default="http://localhost:3000", 
         env="ALLOWED_ORIGINS"
     )
     
@@ -49,7 +55,7 @@ class Settings(BaseSettings):
     
     # Embedding model settings
     embedding_model: str = Field(
-        default="sentence-transformers/all-MiniLM-L6-v2", 
+        default="all-MiniLM-L6-v2", 
         env="EMBEDDING_MODEL"
     )
     embedding_model_dimensions: int = Field(default=384, env="EMBEDDING_MODEL_DIMENSIONS")
@@ -58,8 +64,8 @@ class Settings(BaseSettings):
     
     # RAG/LLM settings - Comprehensive configuration for iterative tuning
     rag_llm_model: str = Field(
-        default="gpt2-medium", 
-        env="RAG_LLM_MODEL",
+        default="gpt2-large", 
+        env="LLM_MODEL",
         description="LLM model for answer generation. Options: gpt2-medium, gpt2-large, microsoft/DialoGPT-medium"
     )
     rag_max_length: int = Field(default=512, env="RAG_MAX_LENGTH")
@@ -116,11 +122,6 @@ class Settings(BaseSettings):
     # Development settings
     reload_on_change: bool = Field(default=False, env="RELOAD_ON_CHANGE")
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = "allow"  # Allow extra environment variables
 
     def get_embedding_config(self) -> dict:
         """Get embedding model configuration."""
@@ -183,7 +184,12 @@ class Settings(BaseSettings):
         
     def get_cors_config(self) -> dict:
         """Get CORS configuration."""
-        origins = self.allowed_origins
+        # Convert comma-separated string to list
+        if isinstance(self.allowed_origins, str):
+            origins = [origin.strip() for origin in self.allowed_origins.split(",")]
+        else:
+            origins = self.allowed_origins
+            
         if self.debug:
             origins = ["*"]
             
@@ -279,8 +285,6 @@ def get_test_settings() -> Settings:
     """Get test-specific settings with test database."""
     settings = get_settings()
     # Override for testing - use a separate test database
-    settings.qdrant_url = "http://localhost:6333"
-    settings.vector_store_path = "./test_chroma_db"
     settings.documents_path = "./test_documents"
     settings.mock_llm_responses = True
     settings.debug = True

@@ -41,12 +41,39 @@ class HybridRAGService:
             from llama_index.core.response_synthesizers import ResponseMode, get_response_synthesizer
             from llama_index.core.llms import ChatMessage, MessageRole
             
-            # Create response synthesizer (this is where LlamaIndex adds value)
-            self._response_synthesizer = get_response_synthesizer(
-                response_mode=ResponseMode.COMPACT,  # Good for our use case
-                use_async=True,
-                streaming=False
-            )
+            # Try to set up HuggingFace LLM for LlamaIndex
+            try:
+                from llama_index.llms.huggingface import HuggingFaceLLM
+                
+                # Create HuggingFace LLM for LlamaIndex
+                llm = HuggingFaceLLM(
+                    model_name=settings.rag_llm_model,
+                    tokenizer_name=settings.rag_llm_model,
+                    device_map="auto",
+                    max_new_tokens=settings.rag_max_new_tokens,  # Set directly, not in generate_kwargs
+                    model_kwargs={"torch_dtype": "auto"},
+                    generate_kwargs={
+                        "temperature": settings.rag_temperature,
+                        "do_sample": settings.rag_do_sample,
+                        "top_p": settings.rag_top_p,
+                        "top_k": settings.rag_top_k,
+                        # Removed max_new_tokens from here to avoid conflict
+                    }
+                )
+                
+                # Create response synthesizer with our HuggingFace LLM
+                self._response_synthesizer = get_response_synthesizer(
+                    response_mode=ResponseMode.COMPACT,
+                    llm=llm,
+                    use_async=True,
+                    streaming=False
+                )
+                print("✓ LlamaIndex response synthesizer initialized with HuggingFace LLM")
+                
+            except Exception as llm_error:
+                print(f"⚠️ Could not initialize HuggingFace LLM for LlamaIndex: {llm_error}")
+                print("⚠️ Falling back to simple response synthesis without LlamaIndex")
+                self._response_synthesizer = None
             
             self._llamaindex_available = True
             print("✓ Hybrid RAG service initialized with LlamaIndex response synthesis")
@@ -105,7 +132,21 @@ class HybridRAGService:
                 method = "pgvector_retrieval + simple_synthesis"
             
             # Step 3: Build response with source attribution
-            sources = await self._build_source_attribution(similar_chunks)
+            try:
+                sources = await self._build_source_attribution(similar_chunks)
+            except Exception as attr_error:
+                print(f"⚠️ Hybrid RAG service failed: {attr_error}, falling back to traditional RAG")
+                # Fallback to simple source format
+                sources = [
+                    {
+                        'chunk_content': chunk.chunk_content,
+                        'score': score,
+                        'filename': f'chunk_{chunk.chunk_index}',
+                        'file_id': str(chunk.file_id),
+                        'chunk_index': chunk.chunk_index
+                    }
+                    for chunk, score in similar_chunks[:5]
+                ]
             
             return {
                 'query': query,

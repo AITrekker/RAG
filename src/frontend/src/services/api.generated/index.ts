@@ -29,7 +29,7 @@ export { SyncType } from './models/SyncType';
 export type { TenantResponse } from './models/TenantResponse';
 export type { ValidationError } from './models/ValidationError';
 
-export { AuditService } from './services/AuditService';
+// export { AuditService } from './services/AuditService'; // Removed: analytics complexity eliminated
 export { DocumentsService } from './services/DocumentsService';
 export { HealthService } from './services/HealthService';
 export { QueryService } from './services/QueryService';

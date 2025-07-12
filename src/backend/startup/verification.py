@@ -130,9 +130,7 @@ def verify_environment_config() -> Tuple[bool, str]:
     load_dotenv()
     
     required_vars = [
-        "DATABASE_URL",
-        "QDRANT_HOST", 
-        "QDRANT_PORT"
+        "DATABASE_URL"
     ]
     
     missing_vars = []

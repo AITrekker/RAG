@@ -2,7 +2,7 @@
 Backend startup and initialization modules.
 
 This package contains all startup logic for the RAG backend:
-- Dependency verification (PostgreSQL, Qdrant)
+- Dependency verification (PostgreSQL)
 - Database schema verification
 - Admin tenant verification
 - Health checks

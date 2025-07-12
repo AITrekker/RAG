@@ -69,9 +69,15 @@ class PgVectorEmbeddingService:
         """Try to load the embedding model"""
         try:
             from sentence_transformers import SentenceTransformer
-            self.embedding_model = SentenceTransformer(self.model_name)
+            
+            # Handle both full paths and short names
+            model_name = self.model_name
+            if not model_name.startswith('sentence-transformers/'):
+                model_name = f"sentence-transformers/{model_name}"
+            
+            self.embedding_model = SentenceTransformer(model_name)
             self.model_loaded = True
-            logger.info(f"✓ Loaded embedding model: {self.model_name}")
+            logger.info(f"✓ Loaded embedding model: {model_name}")
         except Exception as e:
             logger.warning(f"⚠️ Could not load embedding model: {e}")
             self.model_loaded = False
@@ -340,21 +346,36 @@ class PgVectorEmbeddingService:
             # Convert query embedding to pgvector format
             query_vector = str(query_embedding)
             
-            # Execute similarity search
+            # OPTIMIZED: Separate vector search from file filtering
+            # First, get valid file IDs (fast with regular indexes)
+            file_result = await self.db.execute(
+                text("""
+                    SELECT id FROM files 
+                    WHERE tenant_id = :tenant_id 
+                    AND sync_status = 'synced' 
+                    AND deleted_at IS NULL
+                """),
+                {'tenant_id': str(tenant_id)}
+            )
+            valid_file_ids = [str(row[0]) for row in file_result.fetchall()]
+            
+            if not valid_file_ids:
+                return []  # No valid files
+            
+            # Then, fast vector search (uses vector index efficiently)
             result = await self.db.execute(
                 text("""
                     SELECT ec.*, ec.embedding <=> :query_vector as similarity
                     FROM embedding_chunks ec
-                    JOIN files f ON ec.file_id = f.id
                     WHERE ec.tenant_id = :tenant_id
-                    AND f.sync_status = 'synced'
-                    AND f.deleted_at IS NULL
+                    AND ec.file_id = ANY(:valid_file_ids)
                     ORDER BY similarity ASC
                     LIMIT :limit
                 """),
                 {
                     'query_vector': query_vector,
                     'tenant_id': str(tenant_id),
+                    'valid_file_ids': valid_file_ids,
                     'limit': limit
                 }
             )

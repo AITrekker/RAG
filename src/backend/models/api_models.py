@@ -241,17 +241,7 @@ class QueryHistoryResponse(BaseModel):
     queries: List[Dict[str, Any]] = Field(..., description="Query history")
     total_count: int = Field(..., description="Total number of queries")
 
-class QueryFeedbackRequest(BaseModel):
-    """Query feedback request."""
-    query_id: str = Field(..., description="Query ID")
-    rating: int = Field(..., ge=1, le=5, description="Rating (1-5)")
-    feedback: Optional[str] = Field(None, description="Feedback text")
-    helpful: bool = Field(..., description="Whether answer was helpful")
-
-class QueryFeedbackResponse(BaseModel):
-    """Query feedback response."""
-    success: bool = Field(..., description="Whether feedback was saved")
-    message: str = Field(..., description="Feedback message")
+# QueryFeedback models removed - analytics complexity eliminated
 
 # =============================================================================
 # DOCUMENT MANAGEMENT MODELS

@@ -12,8 +12,7 @@ from src.backend.dependencies import (
     get_rag_service_dep,
     get_db
 )
-from src.backend.services.rag_service import RAGService
-from src.backend.services.analytics_service import AnalyticsService
+from src.backend.services.multitenant_rag_service import MultiTenantRAGService
 from src.backend.models.database import Tenant
 from sqlalchemy.orm import Session
 
@@ -25,13 +24,10 @@ async def process_query(
     request_data: Dict[str, Any],
     request: Request,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep),
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep),
     db: Session = Depends(get_db)
 ):
-    """Process a RAG query with comprehensive analytics tracking"""
-    start_time = time.time()
-    analytics = AnalyticsService(db)
-    query_log = None
+    """Process a RAG query - simplified without analytics tracking"""
     
     try:
         query = request_data.get("query", "").strip()
@@ -45,130 +41,26 @@ async def process_query(
         confidence_threshold = request_data.get("confidence_threshold", 0.7)
         metadata_filters = request_data.get("metadata_filters")
         
-        # Get request context for analytics
-        ip_address = request.client.host if request.client else None
-        user_agent = request.headers.get("user-agent")
-        session_id = request.headers.get("x-session-id")
-        
         # Process the query
-        response = await rag_service.process_query(
-            query=query,
+        response = await rag_service.query(
+            question=query,
             tenant_id=current_tenant.id,
-            max_sources=max_sources,
-            confidence_threshold=confidence_threshold,
-            metadata_filters=metadata_filters
+            max_sources=max_sources
         )
-        
-        # Calculate response time
-        end_time = time.time()
-        response_time_ms = int((end_time - start_time) * 1000)
-        
-        # Determine response type
-        response_type = "success"
-        if not response.answer or response.answer.lower().strip() in ["no answer", "no information found", ""]:
-            response_type = "no_answer"
-        elif response.confidence and response.confidence < confidence_threshold:
-            response_type = "low_confidence"
-        
-        # Log the query
-        query_log = await analytics.log_query(
-            tenant_id=current_tenant.id,
-            query_text=query,
-            response_text=response.answer,
-            response_type=response_type,
-            response_time_ms=response_time_ms,
-            confidence_score=response.confidence,
-            sources_count=len(response.sources),
-            chunks_retrieved=len(response.sources),
-            session_id=session_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            embedding_model=response.embedding_model if hasattr(response, 'embedding_model') else 'all-MiniLM-L6-v2',
-            llm_model=response.model_used,
-            tokens_used=response.tokens_used,
-            embedding_time_ms=response.embedding_time if hasattr(response, 'embedding_time') else None,
-            search_time_ms=response.search_time if hasattr(response, 'search_time') else None,
-            llm_time_ms=response.llm_time if hasattr(response, 'llm_time') else None
-        )
-        
-        # Log document access for each source
-        for idx, source in enumerate(response.sources):
-            analytics.log_document_access(
-                query_log_id=query_log.id,
-                file_id=source.file_id,
-                tenant_id=current_tenant.id,
-                relevance_score=source.score,
-                rank_position=idx + 1,
-                chunks_used=1,
-                included_in_response=True
-            )
-        
-        # Update session activity if session_id provided
-        if session_id:
-            analytics.update_session_activity(session_id, query_count_increment=1)
-        
-        # Commit analytics data
-        await analytics.commit()
         
         return {
             "query": response.query,
             "answer": response.answer,
-            "sources": [
-                {
-                    "chunk_id": str(source.chunk_id),
-                    "file_id": str(source.file_id),
-                    "content": source.content,
-                    "score": source.score,
-                    "metadata": source.metadata,
-                    "chunk_index": source.chunk_index,
-                    "filename": source.filename
-                }
-                for source in response.sources
-            ],
+            "sources": response.sources,  # Sources are already in correct format
             "confidence": response.confidence,
             "processing_time": response.processing_time,
-            "model_used": response.model_used,
-            "tokens_used": response.tokens_used,
-            "query_id": str(query_log.id) if query_log else None,
-            "response_type": response_type
+            "method": response.method,
+            "tenant_id": response.tenant_id
         }
         
     except HTTPException:
-        # Log failed query if we got far enough to create a log entry
-        if query_log:
-            end_time = time.time()
-            response_time_ms = int((end_time - start_time) * 1000)
-            query_log.response_type = "error"
-            query_log.response_time_ms = response_time_ms
-            await analytics.commit()
         raise
     except Exception as e:
-        # Log error query
-        try:
-            end_time = time.time()
-            response_time_ms = int((end_time - start_time) * 1000)
-            
-            ip_address = request.client.host if request.client else None
-            user_agent = request.headers.get("user-agent")
-            session_id = request.headers.get("x-session-id")
-            
-            await analytics.log_query(
-                tenant_id=current_tenant.id,
-                query_text=request_data.get("query", ""),
-                response_text=None,
-                response_type="error",
-                response_time_ms=response_time_ms,
-                confidence_score=None,
-                sources_count=0,
-                chunks_retrieved=0,
-                session_id=session_id,
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
-            await analytics.commit()
-        except:
-            pass  # Don't let analytics errors mask the original error
-            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process query: {str(e)}"
@@ -179,7 +71,7 @@ async def process_query(
 async def process_batch_queries(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Process multiple queries in batch - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -200,7 +92,7 @@ async def process_batch_queries(
 async def semantic_search(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Perform semantic search without answer generation"""
     try:
@@ -214,28 +106,19 @@ async def semantic_search(
         max_results = request.get("max_results", 20)
         metadata_filters = request.get("metadata_filters")
         
-        results = await rag_service.semantic_search(
-            query=query,
+        # Use the query method for semantic search (simplified)
+        response = await rag_service.query(
+            question=query,
             tenant_id=current_tenant.id,
-            max_results=max_results,
-            metadata_filters=metadata_filters
+            max_sources=max_results
         )
         
         return {
             "query": query,
-            "results": [
-                {
-                    "chunk_id": str(result.chunk_id),
-                    "file_id": str(result.file_id),
-                    "content": result.content,
-                    "score": result.score,
-                    "metadata": result.metadata,
-                    "chunk_index": result.chunk_index,
-                    "filename": result.filename
-                }
-                for result in results
-            ],
-            "total_results": len(results)
+            "results": response.sources,  # Use sources as results
+            "total_results": len(response.sources),
+            "answer": response.answer,  # Include answer for context
+            "method": "semantic_search_via_query"
         }
         
     except HTTPException:
@@ -253,18 +136,22 @@ async def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     search_query: Optional[str] = Query(None),
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """List documents with optional search"""
     try:
-        result = await rag_service.get_tenant_documents(
-            tenant_id=current_tenant.id,
-            page=page,
-            page_size=page_size,
-            search_query=search_query
-        )
+        # Get tenant stats as a proxy for document listing
+        stats = await rag_service.get_tenant_stats(current_tenant.id)
         
-        return result
+        return {
+            "documents": [],  # Stub - document listing not implemented in simplified service
+            "total_count": 0,
+            "page": page,
+            "page_size": page_size,
+            "tenant_stats": stats,
+            "message": "Document listing not implemented in simplified RAG service",
+            "status": "stubbed"
+        }
         
     except Exception as e:
         raise HTTPException(
@@ -277,7 +164,7 @@ async def list_documents(
 async def get_document(
     document_id: str,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Get specific document details - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -299,7 +186,7 @@ async def get_query_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Get query history - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -320,13 +207,22 @@ async def get_query_history(
 async def validate_query(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Validate a query without processing it"""
     try:
         query = request.get("query", "")
         
-        validation = await rag_service.validate_query(query, current_tenant.id)
+        # Simple query validation
+        validation = {
+            "query": query,
+            "is_valid": len(query.strip()) > 0,
+            "length": len(query),
+            "word_count": len(query.split()),
+            "tenant_id": str(current_tenant.id),
+            "status": "simplified_validation",
+            "message": "Query validation simplified in new service architecture"
+        }
         
         return validation
         
@@ -342,7 +238,7 @@ async def get_query_suggestions(
     partial_query: str = Query(..., min_length=1),
     max_suggestions: int = Query(5, ge=1, le=10),
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Get query suggestions - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
@@ -360,7 +256,7 @@ async def get_query_suggestions(
 @router.get("/stats")
 async def get_query_stats(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Get RAG usage statistics - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
@@ -383,7 +279,7 @@ async def get_query_stats(
 async def submit_feedback(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Submit query feedback - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
@@ -413,7 +309,7 @@ async def submit_feedback(
 @router.get("/config")
 async def get_query_config(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Get query configuration - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -434,7 +330,7 @@ async def get_query_config(
 async def update_query_config(
     config: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
+    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
 ):
     """Update query configuration - NOT IMPLEMENTED"""
     raise HTTPException(

@@ -50,9 +50,9 @@ async def get_db():
                 pass
 
 
-# Direct session access for non-dependency usage
-async def get_db_session() -> AsyncSession:
-    """Get database session directly (not for FastAPI dependencies)"""
+# Direct session access for non-dependency usage - USE CONTEXT MANAGER
+def get_db_session():
+    """Get database session context manager for direct usage"""
     return AsyncSessionLocal()
 
 
@@ -116,14 +116,56 @@ async def get_sync_service_dep(
     return SyncService(db, file_service, embedding_service)
 
 
+# Singleton LLM model with FastAPI caching (keeps performance, removes complexity)
+@lru_cache(maxsize=1)
+def get_llm_model():
+    """Get singleton LLM model instance - cached across all requests"""
+    try:
+        from transformers import pipeline
+        import torch
+        settings = get_settings()
+        
+        print(f"🧠 Loading LLM model: {settings.rag_llm_model}")
+        
+        # Use GPU if available, otherwise CPU
+        device = 0 if torch.cuda.is_available() else -1
+        
+        # Create text generation pipeline with configurable settings
+        llm_config = settings.get_rag_llm_config()
+        model = pipeline(
+            "text-generation",
+            model=settings.rag_llm_model,
+            device=device,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            max_length=llm_config["max_length"],
+            truncation=True,
+            do_sample=llm_config["do_sample"],
+            temperature=llm_config["temperature"],
+            top_p=llm_config["top_p"],
+            top_k=llm_config["top_k"],
+            repetition_penalty=llm_config["repetition_penalty"],
+            pad_token_id=50256  # GPT-2 EOS token
+        )
+        
+        print(f"✓ LLM model loaded successfully on {'GPU' if device == 0 else 'CPU'}")
+        return model
+        
+    except Exception as e:
+        print(f"❌ Failed to load LLM model: {e}")
+        # Return None to allow graceful degradation
+        return None
+
+
 async def get_rag_service_dep(
     db: AsyncSession = Depends(get_db),
     file_service: FileService = Depends(get_file_service_dep),
-    embedding_service = Depends(get_embedding_service_dep),
     embedding_model = Depends(get_embedding_model)
-) -> RAGService:
-    """Get RAG service with dependencies"""
-    service = RAGService(db, file_service, embedding_service, embedding_model)
+):
+    """Get clean multi-tenant RAG service"""
+    from src.backend.services.multitenant_rag_service import MultiTenantRAGService
+    
+    # Create and initialize the new consolidated service
+    service = MultiTenantRAGService(db, file_service, embedding_model)
     await service.initialize()
     return service
 

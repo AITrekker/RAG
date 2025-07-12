@@ -28,24 +28,7 @@ async def check_database_health() -> Tuple[bool, str]:
         return False, f"Database health check error: {e}"
 
 
-def check_qdrant_health() -> Tuple[bool, str]:
-    """Check if Qdrant connection is healthy."""
-    try:
-        import os
-        import requests
-        
-        qdrant_host = os.getenv("QDRANT_HOST", "qdrant")
-        qdrant_port = os.getenv("QDRANT_PORT", "6333")
-        qdrant_url = f"http://{qdrant_host}:{qdrant_port}"
-        
-        response = requests.get(f"{qdrant_url}/collections", timeout=5)
-        if response.status_code == 200:
-            return True, "Qdrant connection healthy"
-        else:
-            return False, f"Qdrant returned status {response.status_code}"
-            
-    except Exception as e:
-        return False, f"Qdrant health check error: {e}"
+# Qdrant health check removed - using PostgreSQL + pgvector instead
 
 
 async def check_services_health() -> Tuple[bool, str]:
@@ -78,7 +61,6 @@ async def run_health_checks() -> Tuple[bool, Dict[str, Any]]:
     
     checks = {
         "database": check_database_health,
-        "qdrant": check_qdrant_health,
         "services": check_services_health
     }
     

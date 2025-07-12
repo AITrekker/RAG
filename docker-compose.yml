@@ -32,8 +32,8 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env
       - ./demo_admin_keys.json:/app/demo_admin_keys.json
-      - huggingface_cache:/home/app/.cache/huggingface
-      - transformers_cache:/home/app/.cache/transformers
+      - ./cache/huggingface:/home/app/.cache/huggingface
+      - ./cache/transformers:/home/app/.cache/transformers
     env_file:
       - .env
     environment:
@@ -68,8 +68,8 @@ services:
       - ./logs:/app/logs
       - ./data:/app/data
       - ./.env:/app/.env
-      - huggingface_cache:/home/app/.cache/huggingface
-      - transformers_cache:/home/app/.cache/transformers
+      - ./cache/huggingface:/home/app/.cache/huggingface
+      - ./cache/transformers:/home/app/.cache/transformers
     env_file:
       - .env
     environment:

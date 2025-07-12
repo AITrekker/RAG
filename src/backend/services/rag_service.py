@@ -63,7 +63,7 @@ class RAGService:
         self._hybrid_available = False
     
     async def initialize(self):
-        """Initialize RAG components"""
+        """Initialize RAG components with injected models (lightweight)"""
         try:
             # Embedding service and model are now injected via constructor
             if self._embedding_service:
@@ -75,6 +75,12 @@ class RAGService:
                 print(f"✓ Using injected embedding model")
             else:
                 print(f"⚠️ No embedding model available")
+            
+            # LLM model is now injected via dependency injection
+            if self._llm_model:
+                print(f"✓ Using injected LLM model: {self._model_name}")
+            else:
+                print(f"⚠️ No LLM model available - will use fallback responses")
             
             # Try to initialize hybrid RAG service (optional LlamaIndex integration)
             try:
@@ -91,62 +97,8 @@ class RAGService:
                 print(f"⚠️ Error initializing hybrid RAG service: {e}")
                 self._hybrid_available = False
             
-            # Initialize LLM for answer generation
-            try:
-                from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-                import torch
-                
-                # Get LLM configuration from settings
-                llm_config = settings.get_rag_llm_config()
-                model_name = llm_config["model_name"]
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                
-                print(f"🧠 Loading LLM model: {model_name} on {device}")
-                print(f"🎛️  Config: temp={llm_config['temperature']}, top_p={llm_config['top_p']}, top_k={llm_config['top_k']}")
-                
-                # Create a text generation pipeline with configurable settings
-                self._llm_model = pipeline(
-                    "text-generation",
-                    model=model_name,
-                    device=0 if device == 'cuda' else -1,
-                    torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
-                    max_length=llm_config["max_length"],
-                    truncation=True,
-                    do_sample=llm_config["do_sample"],
-                    temperature=llm_config["temperature"],
-                    top_p=llm_config["top_p"],
-                    top_k=llm_config["top_k"],
-                    repetition_penalty=llm_config["repetition_penalty"],
-                    pad_token_id=50256  # GPT-2 EOS token
-                )
-                
-                print(f"✓ LLM model initialized: {model_name} on {device}")
-                self._model_name = model_name
-                
-            except ImportError as e:
-                print(f"⚠️ transformers not available for LLM: {e}")
-                self._llm_model = None
-            except Exception as e:
-                print(f"⚠️ Failed to load LLM model: {e}")
-                print("  Using a simpler model...")
-                try:
-                    # Fallback to a smaller model
-                    self._llm_model = pipeline(
-                        "text-generation",
-                        model="gpt2",
-                        device=0 if torch.cuda.is_available() else -1,
-                        max_length=256,
-                        truncation=True
-                    )
-                    print("✓ Fallback LLM model (GPT-2) initialized")
-                    self._model_name = "gpt2"
-                except Exception as e2:
-                    print(f"⚠️ Failed to load fallback model: {e2} - using mock responses")
-                    self._llm_model = None
-            
         except Exception as e:
             print(f"⚠️ Failed to initialize RAG components: {e}")
-            self._llm_model = None
     
     async def process_query(
         self, 

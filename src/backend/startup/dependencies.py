@@ -46,32 +46,7 @@ def wait_for_postgres(max_retries: int = 30, delay: int = 2) -> bool:
     return False
 
 
-def wait_for_qdrant(max_retries: int = 30, delay: int = 2) -> bool:
-    """Wait for Qdrant to become available."""
-    logger.info("Waiting for Qdrant to become available...")
-    
-    # Get Qdrant connection details from environment
-    qdrant_host = os.getenv("QDRANT_HOST", "qdrant")  # Default to service name for Docker
-    qdrant_port = os.getenv("QDRANT_PORT", "6333")
-    qdrant_url = f"http://{qdrant_host}:{qdrant_port}"
-    
-    logger.info(f"Connecting to Qdrant at: {qdrant_url}")
-    
-    for attempt in range(max_retries):
-        try:
-            import requests
-            response = requests.get(f"{qdrant_url}/collections", timeout=5)
-            if response.status_code == 200:
-                collections = response.json()
-                logger.info(f"✅ Qdrant is available! Found {len(collections.get('collections', []))} collections")
-                return True
-        except Exception as e:
-            logger.info(f"Attempt {attempt + 1}/{max_retries}: Qdrant not ready yet ({e})")
-            if attempt < max_retries - 1:
-                time.sleep(delay)
-    
-    logger.error("❌ Qdrant failed to become available within the expected time")
-    return False
+# Qdrant dependency check removed - using PostgreSQL + pgvector instead
 
 
 def wait_for_dependencies() -> Tuple[bool, str]:
