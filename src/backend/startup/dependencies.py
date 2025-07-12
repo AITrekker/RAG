@@ -46,7 +46,6 @@ def wait_for_postgres(max_retries: int = 30, delay: int = 2) -> bool:
     return False
 
 
-# Qdrant dependency check removed - using PostgreSQL + pgvector instead
 
 
 def wait_for_dependencies() -> Tuple[bool, str]:
@@ -62,7 +61,6 @@ def wait_for_dependencies() -> Tuple[bool, str]:
     if not wait_for_postgres():
         return False, "Failed to connect to PostgreSQL"
     
-    # Qdrant removed - using pgvector instead
     
     logger.info("✅ All external dependencies are available!")
     return True, ""

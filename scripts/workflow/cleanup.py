@@ -45,7 +45,7 @@ class CleanupManager:
         """Run shell command and return success status."""
         try:
             self.log(f"Running: {description}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
             
             if result.returncode == 0:
                 if not self.quiet and result.stdout:

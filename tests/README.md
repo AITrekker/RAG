@@ -30,7 +30,6 @@ python -m pytest tests/test_api_query.py -v
 - **`test_api_sync.py`** - Sync operations (may need updates)
 - **`test_api_query.py`** - RAG queries (may need updates) 
 - **`test_api_multitenancy.py`** - Tenant isolation and security
-- **`test_api_templates.py`** - Template management
 - ~~`test_analytics_api.py`~~ - Removed (analytics complexity eliminated)
 
 ### Legacy Service Tests (Need Updates)

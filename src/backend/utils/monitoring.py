@@ -22,11 +22,8 @@ import threading
 from contextlib import contextmanager
 
 from fastapi import Request, Response
-# from sqlalchemy.orm import Session
-# from sqlalchemy import text
 
 from ..config.settings import get_settings
-# from ..db.session import get_db
 
 settings = get_settings()
 

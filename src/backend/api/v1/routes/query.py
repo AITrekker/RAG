@@ -12,7 +12,7 @@ from src.backend.dependencies import (
     get_rag_service_dep,
     get_db
 )
-from src.backend.services.multitenant_rag_service import MultiTenantRAGService
+from src.backend.services.direct_rag_service import DirectRAGService
 from src.backend.models.database import Tenant
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,7 @@ async def process_query(
     request_data: Dict[str, Any],
     request: Request,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep),
+    rag_service: DirectRAGService = Depends(get_rag_service_dep),
     db: Session = Depends(get_db)
 ):
     """Process a RAG query - simplified without analytics tracking"""
@@ -45,7 +45,8 @@ async def process_query(
         response = await rag_service.query(
             question=query,
             tenant_id=current_tenant.id,
-            max_sources=max_sources
+            max_sources=max_sources,
+            similarity_threshold=confidence_threshold
         )
         
         return {
@@ -71,7 +72,7 @@ async def process_query(
 async def process_batch_queries(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Process multiple queries in batch - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -92,7 +93,7 @@ async def process_batch_queries(
 async def semantic_search(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Perform semantic search without answer generation"""
     try:
@@ -136,7 +137,7 @@ async def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     search_query: Optional[str] = Query(None),
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """List documents with optional search"""
     try:
@@ -164,7 +165,7 @@ async def list_documents(
 async def get_document(
     document_id: str,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Get specific document details - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -186,7 +187,7 @@ async def get_query_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Get query history - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -207,7 +208,7 @@ async def get_query_history(
 async def validate_query(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Validate a query without processing it"""
     try:
@@ -238,7 +239,7 @@ async def get_query_suggestions(
     partial_query: str = Query(..., min_length=1),
     max_suggestions: int = Query(5, ge=1, le=10),
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Get query suggestions - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
@@ -256,7 +257,7 @@ async def get_query_suggestions(
 @router.get("/stats")
 async def get_query_stats(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Get RAG usage statistics - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
@@ -279,7 +280,7 @@ async def get_query_stats(
 async def submit_feedback(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Submit query feedback - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
@@ -309,7 +310,7 @@ async def submit_feedback(
 @router.get("/config")
 async def get_query_config(
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Get query configuration - NOT IMPLEMENTED"""
     raise HTTPException(
@@ -330,7 +331,7 @@ async def get_query_config(
 async def update_query_config(
     config: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: MultiTenantRAGService = Depends(get_rag_service_dep)
+    rag_service: DirectRAGService = Depends(get_rag_service_dep)
 ):
     """Update query configuration - NOT IMPLEMENTED"""
     raise HTTPException(

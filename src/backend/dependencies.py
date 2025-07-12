@@ -12,8 +12,6 @@ from src.backend.services.tenant_service import TenantService
 from src.backend.services.file_service import FileService
 # Embedding service import moved to function level to avoid circular imports
 from src.backend.services.sync_service import SyncService
-from src.backend.services.rag_service import RAGService
-# Removed transactional embedding service to simplify
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
 
@@ -63,6 +61,7 @@ def get_embedding_model():
     try:
         from sentence_transformers import SentenceTransformer
         import torch
+        import os
         settings = get_settings()
         
         print(f"🤖 Loading embedding model: {settings.embedding_model}")
@@ -161,13 +160,11 @@ async def get_rag_service_dep(
     file_service: FileService = Depends(get_file_service_dep),
     embedding_model = Depends(get_embedding_model)
 ):
-    """Get clean multi-tenant RAG service"""
-    from src.backend.services.multitenant_rag_service import MultiTenantRAGService
+    """Get direct RAG service for embedding experimentation"""
+    from src.backend.services.direct_rag_service import DirectRAGService
     
-    # Create and initialize the new consolidated service
-    service = MultiTenantRAGService(db, file_service, embedding_model)
-    await service.initialize()
-    return service
+    # Simple, no-initialization direct service
+    return DirectRAGService(db, file_service, embedding_model)
 
 
 # Authentication dependencies
@@ -182,41 +179,3 @@ def get_current_tenant_id(request: Request) -> str:
     return str(tenant.id)
 
 
-# Combined service bundle for complex operations
-class ServiceBundle:
-    """Bundle of all services for complex operations"""
-    
-    def __init__(
-        self,
-        db: AsyncSession,
-        tenant_service: TenantService,
-        file_service: FileService,
-        embedding_service,
-        sync_service: SyncService,
-        rag_service: RAGService
-    ):
-        self.db = db
-        self.tenant_service = tenant_service
-        self.file_service = file_service
-        self.embedding_service = embedding_service
-        self.sync_service = sync_service
-        self.rag_service = rag_service
-
-
-async def get_service_bundle(
-    db: AsyncSession = Depends(get_db),
-    tenant_service: TenantService = Depends(get_tenant_service_dep),
-    file_service: FileService = Depends(get_file_service_dep),
-    embedding_service = Depends(get_embedding_service_dep),
-    sync_service: SyncService = Depends(get_sync_service_dep),
-    rag_service: RAGService = Depends(get_rag_service_dep)
-) -> ServiceBundle:
-    """Get bundle of all services"""
-    return ServiceBundle(
-        db=db,
-        tenant_service=tenant_service,
-        file_service=file_service,
-        embedding_service=embedding_service,
-        sync_service=sync_service,
-        rag_service=rag_service
-    )

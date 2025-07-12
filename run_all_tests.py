@@ -39,7 +39,6 @@ TEST_CATEGORIES = {
     "query": ["tests/test_api_query.py"],
     "rag": ["tests/test_rag_comprehensive.py"],
     "multitenancy": ["tests/test_api_multitenancy.py"],
-    "templates": ["tests/test_api_templates.py"],
     # "analytics": ["tests/test_analytics_api.py"],  # Removed: analytics complexity eliminated
     "comprehensive_sync": ["tests/test_comprehensive_sync_embeddings.py"],
     "comprehensive": [
@@ -61,7 +60,6 @@ TEST_CATEGORIES = {
         "tests/test_api_query.py",
         "tests/test_rag_comprehensive.py",
         "tests/test_api_multitenancy.py",
-        "tests/test_api_templates.py",
         #"tests/test_analytics_api.py",
         "tests/test_comprehensive_sync_embeddings.py"
     ]

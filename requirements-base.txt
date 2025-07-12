@@ -25,10 +25,9 @@ pgvector==0.2.4
 langchain==0.2.11
 langchain-core>=0.1.52
 
-# LlamaIndex ecosystem (for document processing)
-llama-index>=0.12.0
-llama-index-core>=0.12.0
-llama-index-readers-file>=0.4.0
+# ===== REMOVED LLAMAINDEX FOR DIRECT EXPERIMENTATION =====
+# Removed to enable direct control over embedding and chunking experiments
+# Focus on: sentence-transformers + pgvector + custom chunking/reranking
 
 # ===== DOCUMENT PROCESSING =====
 # Heavy document processing libraries

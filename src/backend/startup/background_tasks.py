@@ -15,11 +15,6 @@ from src.backend.database import AsyncSessionLocal
 from src.backend.services.sync_operations_manager import SyncOperationsManager, SyncOperationConfig
 from src.backend.services.sync_service import SyncService
 from src.backend.services.file_service import FileService
-from src.backend.services.embedding_service import EmbeddingService
-# DEPRECATED: Consistency checker and recovery service no longer needed with pgvector
-# from src.backend.services.consistency_checker import get_consistency_checker
-# from src.backend.services.recovery_service import get_recovery_service
-from src.backend.monitoring.performance_monitor import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +45,6 @@ class BackgroundTaskManager:
             name="health_check"
         )
         
-        # DEPRECATED: Consistency monitoring no longer needed with pgvector
-        # self.tasks["consistency_monitor"] = asyncio.create_task(
-        #     self._consistency_monitoring_loop(),
-        #     name="consistency_monitor"
-        # )
-        
-        # DEPRECATED: Auto-recovery no longer needed with pgvector
-        # self.tasks["auto_recovery"] = asyncio.create_task(
-        #     self._auto_recovery_loop(),
-        #     name="auto_recovery"
-        # )
         
         logger.info(f"Started {len(self.tasks)} background tasks")
     
@@ -121,34 +105,10 @@ class BackgroundTaskManager:
                 await asyncio.sleep(60)
     
     async def _performance_monitoring_loop(self):
-        """Background loop for performance monitoring"""
-        logger.info("Started performance monitoring background task")
-        
-        while self.running:
-            try:
-                # Create performance monitor
-                async with AsyncSessionLocal() as db_session:
-                    monitor = PerformanceMonitor(db_session)
-                    
-                    # Get system health
-                    health_data = await monitor.get_system_health()
-                    
-                    # Log critical health issues
-                    if health_data.get('memory_usage_percent', 0) > 90:
-                        logger.warning(f"High memory usage: {health_data['memory_usage_percent']:.1f}%")
-                    
-                    if health_data.get('disk_usage_percent', 0) > 90:
-                        logger.warning(f"High disk usage: {health_data['disk_usage_percent']:.1f}%")
-                
-                # Check every 5 minutes
-                await asyncio.sleep(300)
-                
-            except asyncio.CancelledError:
-                logger.info("Performance monitoring task cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Error in performance monitoring loop: {e}")
-                await asyncio.sleep(60)
+        """DISABLED: Background loop for performance monitoring"""
+        logger.info("Performance monitoring disabled - using utils.monitoring instead")
+        # DISABLED: This used the removed duplicate performance monitor
+        # Use utils.monitoring.system_monitor instead if needed
     
     async def _health_check_loop(self):
         """Background loop for system health checks"""

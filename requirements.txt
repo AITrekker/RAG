@@ -48,16 +48,12 @@ black==25.1.0
 flake8==7.3.0
 debugpy==1.8.2
 
-# ===== LLAMAINDEX INTEGRATION (OPTIONAL) =====
-# LlamaIndex core components for advanced document processing
-llama-index-core>=0.11.0
-llama-index-readers-file>=0.2.0
-llama-index-embeddings-huggingface>=0.3.0
-llama-index-llms-huggingface>=0.3.0
-llama-index-vector-stores-postgres>=0.2.0  # ADD HERE
-
-# Note: PDF reader omitted due to compatibility issues with Python 3.12
-# The system will use pypdf2 for PDF processing when LlamaIndex PDF reader unavailable
+# ===== REMOVED LLAMAINDEX - FOCUSING ON DIRECT EMBEDDING EXPERIMENTATION =====
+# LlamaIndex removed to enable direct control over:
+# - Chunking strategies (fixed, sliding window, semantic)
+# - Multiple embedding models for comparison
+# - Reranking techniques (cross-encoders, hybrid scoring)
+# - Performance measurement and optimization
 
 # ===== OPTIONAL DEVELOPMENT =====
 # Uncomment these for development/analysis

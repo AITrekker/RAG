@@ -15,10 +15,10 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
 
-# LlamaIndex imports
-from llama_index.core.readers.base import BaseReader
-from llama_index.readers.file import PDFReader, DocxReader, UnstructuredReader
-from llama_index.core.text_splitter import TokenTextSplitter
+# LlamaIndex imports - REMOVED FOR DIRECT EXPERIMENTATION
+# from llama_index.core.readers.base import BaseReader
+# from llama_index.readers.file import PDFReader, DocxReader, UnstructuredReader
+# from llama_index.core.text_splitter import TokenTextSplitter
 
 from ..services.document_processing.processors.html_processor import HTMLProcessor
 

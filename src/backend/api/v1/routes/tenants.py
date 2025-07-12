@@ -28,8 +28,8 @@ from src.backend.models.api_models import (
     SyncHistoryResponse
 )
 from src.backend.middleware.auth import get_current_tenant, get_tenant_context, verify_tenant_access
-from src.backend.api.v1.providers import get_document_service  # , get_delta_sync  # Disabled: needs migration from Qdrant to pgvector
-from src.backend.core.document_processor import DocumentProcessor
+# from src.backend.api.v1.providers import get_document_service  # Removed: using simplified direct processing
+# from src.backend.core.document_processor import DocumentProcessor  # Removed: using simplified direct processing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -166,7 +166,7 @@ async def list_tenant_documents(
     document_type: Optional[str] = Query(None, description="Filter by document type"),
     status: Optional[str] = Query(None, description="Filter by document status"),
     current_tenant: dict = Depends(get_current_tenant),
-    document_service = Depends(get_document_service)
+    # document_service = Depends(get_document_service)  # Removed: using simplified direct processing
 ):
     """
     List documents for current tenant (scoped access).

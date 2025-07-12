@@ -46,7 +46,6 @@ def setup_environment_file():
 def create_directories():
     """Create essential directories if they don't exist."""
     directories = [
-        "data/tenants",
         "logs",
         "cache/transformers",
         "cache/huggingface"

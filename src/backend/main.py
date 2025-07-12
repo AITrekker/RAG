@@ -27,7 +27,7 @@ from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitor
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 from src.backend.middleware.api_key_auth import api_key_auth_middleware
 from src.backend.database import startup_database_checks, close_database
-from src.backend.startup import wait_for_dependencies, verify_system_requirements, run_health_checks
+from src.backend.startup import wait_for_dependencies, verify_system_requirements
 from src.backend.startup.background_tasks import start_background_tasks, stop_background_tasks
 
 # Import service modules for initialization
@@ -35,7 +35,6 @@ from src.backend.services.tenant_service import TenantService
 from src.backend.services.file_service import FileService
 from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
 from src.backend.services.sync_service import SyncService
-from src.backend.services.rag_service import RAGService
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -47,7 +46,6 @@ tenant_service: TenantService = None
 file_service: FileService = None
 embedding_service: PgVectorEmbeddingService = None
 sync_service: SyncService = None
-rag_service: RAGService = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -71,15 +69,6 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ System requirements check failed: {req_error}")
             raise RuntimeError(f"System requirements not met: {req_error}")
         
-        # Step 3: Run health checks (temporarily disabled for debugging)
-        logger.info("🏥 Skipping health checks (debugging mode)...")
-        # health_success, health_results = await run_health_checks()
-        # if not health_success:
-        #     logger.error("❌ Health checks failed!")
-        #     for check_name, result in health_results.items():
-        #         if not result["success"]:
-        #             logger.error(f"   {check_name}: {result['message']}")
-        #     raise RuntimeError("Health checks failed")
         
         # Step 4: Original database startup checks and service initialization
         logger.info("🗄️ Running database startup checks...")
@@ -111,11 +100,9 @@ async def lifespan(app: FastAPI):
             
             # Initialize services with dependencies
             sync_service = SyncService(db, file_service, embedding_service)
-            rag_service = RAGService(db, file_service, embedding_service)
             
             # Initialize services that need async setup  
             # Note: PgVectorEmbeddingService doesn't need async initialization
-            await rag_service.initialize()
             
             logger.info("Service layer initialized successfully")
             break  # Only need first session for initialization
@@ -125,7 +112,6 @@ async def lifespan(app: FastAPI):
         app.state.file_service = file_service
         app.state.embedding_service = embedding_service
         app.state.sync_service = sync_service
-        app.state.rag_service = rag_service
         
         # Step 7: Start background tasks
         logger.info("🔄 Starting background tasks...")
@@ -200,14 +186,12 @@ app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health",
 app.include_router(auth_routes.router, prefix=f"{settings.api_v1_str}/auth", tags=["Authentication"])
 app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
-# audit routes removed - analytics complexity eliminated
 app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
 
 # Service-based routes
 app.include_router(file_routes.router, prefix=f"{settings.api_v1_str}/files", tags=["Files"])
 app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
 app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
-# analytics routes removed - analytics complexity eliminated
 
 @app.get("/", include_in_schema=False)
 async def root():
