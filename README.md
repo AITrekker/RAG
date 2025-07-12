@@ -132,6 +132,25 @@ python -m pytest tests/
 ✅ **Fast**: Direct pgvector queries, no abstractions  
 ✅ **Ready**: Perfect for embedding/reranking experiments  
 
+## 🔬 Future Enhancements
+
+### Query-Level Experimentation Controls
+- **Similarity Threshold Slider** (0.0-1.0) - Real-time relevance tuning
+- **Max Sources Control** (1-50) - Result count optimization
+- **Search Method Toggle** - Vector-only, keyword-only, or hybrid search
+- **Embedding Model Selector** - Switch between sentence-transformer models
+- **Reranking Controls** - Enable cross-encoder reranking with different models
+- **Hybrid Weights** - Balance embedding similarity vs reranker scores
+- **Answer Generation Tuning** - Temperature, length, style controls
+- **Advanced Filtering** - File type, date range, chunk size overrides
+- **Query Expansion** - Automatic synonym and related term injection
+
+### Performance & Analytics
+- **A/B Testing Framework** - Compare different RAG configurations
+- **Query Analytics** - Success rates, response times, user satisfaction
+- **Model Benchmarking** - Automated evaluation across embedding models
+- **Real-time Metrics** - Live performance monitoring dashboard
+
 ---
 
 **Goal**: Learn embedding strategies and reranking techniques through direct experimentation.
