@@ -8,9 +8,7 @@ from functools import lru_cache
 
 from src.backend.database import get_async_db, AsyncSessionLocal
 from src.backend.models.database import Tenant
-from src.backend.services.tenant_service import TenantService
-from src.backend.services.file_service import FileService
-# Old sync service removed - using simplified core modules now
+# Services removed - using simplified core modules now
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
 
@@ -80,19 +78,7 @@ def get_embedding_model():
         raise
 
 
-# Service dependencies
-async def get_tenant_service_dep(
-    db: AsyncSession = Depends(get_db)
-) -> TenantService:
-    """Get tenant service"""
-    return TenantService(db)
-
-
-async def get_file_service_dep(
-    db: AsyncSession = Depends(get_db)
-) -> FileService:
-    """Get file service"""
-    return FileService(db_session=db)
+# Service dependencies removed - using core modules directly
 
 
 # Old complex service dependencies removed

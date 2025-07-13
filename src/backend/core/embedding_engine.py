@@ -84,20 +84,36 @@ class SingletonEmbeddingModel:
     
     @classmethod
     def _load_model(cls, model_name: str):
-        """Load embedding model"""
+        """Load embedding model with GPU optimization"""
         try:
             from sentence_transformers import SentenceTransformer
             import torch
+            import gc
+            
+            # Clear any existing model first
+            if cls._model is not None:
+                print(f"🔄 Clearing existing model")
+                del cls._model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
             
             print(f"🤖 Loading embedding model: {model_name}")
             
-            # Use GPU if available
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            # Use GPU if available, otherwise CPU
+            if torch.cuda.is_available():
+                device = 'cuda'
+                print(f"🚀 GPU detected: {torch.cuda.get_device_name()}")
+            else:
+                device = 'cpu'
+                print("💻 Using CPU (no GPU available)")
+            
             cls._model = SentenceTransformer(model_name, device=device)
             cls._current_model_name = model_name
             
-            # Clear CUDA cache
-            if torch.cuda.is_available():
+            # Set model to eval mode and optimize memory
+            cls._model.eval()
+            if device == 'cuda':
                 torch.cuda.empty_cache()
             
             print(f"✅ Model loaded on {device}")
@@ -210,19 +226,61 @@ def chunk_text(text: str, strategy: ChunkingStrategy, chunk_size: int = 512, ove
 
 
 def generate_embeddings(chunks: List[TextChunk], config: EmbeddingConfig) -> List[EmbeddedChunk]:
-    """Generate embeddings for text chunks"""
+    """Generate embeddings with optimized GPU memory management"""
     if not chunks:
         return []
     
     try:
+        import gc
+        import torch
+        
         # Get singleton model
         model = SingletonEmbeddingModel.get_model(config.model.value)
+        device = next(model.parameters()).device if hasattr(model, 'parameters') else 'cpu'
+        is_gpu = device.type == 'cuda'
+        
+        print(f"🔢 Generating embeddings for {len(chunks)} chunks on {device}")
         
         # Extract texts
         texts = [chunk.text for chunk in chunks]
         
-        # Generate embeddings
-        embeddings = model.encode(texts, convert_to_tensor=False, show_progress_bar=False)
+        # Adaptive batch size based on device and text length
+        if is_gpu:
+            # Smaller batches for GPU to prevent OOM
+            avg_text_len = sum(len(text) for text in texts) / len(texts) if texts else 0
+            if avg_text_len > 1000:  # Long texts
+                batch_size = 8
+            elif avg_text_len > 500:  # Medium texts
+                batch_size = 16
+            else:  # Short texts
+                batch_size = 32
+        else:
+            # Larger batches for CPU
+            batch_size = 64
+        
+        embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            print(f"   📦 Processing batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1} ({len(batch_texts)} items)")
+            
+            # Generate embeddings with memory optimization
+            with torch.no_grad():  # Disable gradients for inference
+                batch_embeddings = model.encode(
+                    batch_texts,
+                    convert_to_tensor=False,
+                    show_progress_bar=False,
+                    batch_size=min(8, len(batch_texts)) if is_gpu else min(32, len(batch_texts))
+                )
+            
+            embeddings.extend(batch_embeddings)
+            
+            # Aggressive memory cleanup after each batch
+            if is_gpu and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()  # Wait for GPU operations to complete
+            
+            gc.collect()
         
         # Create embedded chunks
         embedded_chunks = []
@@ -233,10 +291,24 @@ def generate_embeddings(chunks: List[TextChunk], config: EmbeddingConfig) -> Lis
                 embedding_model=config.model.value
             ))
         
+        # Final cleanup
+        if is_gpu and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        gc.collect()
+        
+        print(f"✅ Generated {len(embedded_chunks)} embeddings successfully")
         return embedded_chunks
         
     except Exception as e:
         print(f"❌ Failed to generate embeddings: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Emergency cleanup on failure
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
         return []
 
 

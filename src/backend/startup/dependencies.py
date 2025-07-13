@@ -1,8 +1,5 @@
 """
 Dependency verification for backend startup.
-
-Waits for external dependencies to become available before
-starting the main application.
 """
 
 import os
@@ -17,7 +14,6 @@ def wait_for_postgres(max_retries: int = 10, delay: int = 1) -> bool:
     """Wait for PostgreSQL to become available."""
     logger.info("Waiting for PostgreSQL to become available...")
     
-    # Get database connection details from environment
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         logger.error("❌ DATABASE_URL environment variable not set")
@@ -27,10 +23,8 @@ def wait_for_postgres(max_retries: int = 10, delay: int = 1) -> bool:
         try:
             from sqlalchemy import create_engine, text
             
-            # Create a test engine
             test_engine = create_engine(database_url, pool_pre_ping=True)
             
-            # Test connection
             with test_engine.connect() as conn:
                 result = conn.execute(text("SELECT 1"))
                 if result.scalar() == 1:
@@ -46,21 +40,12 @@ def wait_for_postgres(max_retries: int = 10, delay: int = 1) -> bool:
     return False
 
 
-
-
 def wait_for_dependencies() -> Tuple[bool, str]:
-    """
-    Wait for all external dependencies to become available.
-    
-    Returns:
-        Tuple[bool, str]: (success, error_message)
-    """
+    """Wait for all external dependencies to become available."""
     logger.info("🔍 Waiting for external dependencies...")
     
-    # Wait for PostgreSQL
     if not wait_for_postgres():
         return False, "Failed to connect to PostgreSQL"
-    
     
     logger.info("✅ All external dependencies are available!")
     return True, ""

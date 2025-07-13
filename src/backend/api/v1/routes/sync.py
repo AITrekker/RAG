@@ -70,7 +70,7 @@ async def get_sync_status(
 
 @router.post("/trigger")
 async def trigger_sync(
-    request: SyncRequest,
+    request: SyncRequest = None,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -78,6 +78,10 @@ async def trigger_sync(
     
     try:
         coordinator = SyncCoordinator(db)
+        
+        # Default values if no request provided
+        if request is None:
+            request = SyncRequest()
         
         # Determine sync type
         force_full_sync = (request.sync_type == "full") or request.force_reprocess

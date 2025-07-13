@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 import logging
 
 from src.backend.database import get_async_db, AsyncSessionLocal
-from src.backend.services.tenant_service import TenantService
+from src.backend.models.database import Tenant
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +92,25 @@ async def api_key_auth_middleware(request: Request, call_next):
                 response.headers["Access-Control-Allow-Credentials"] = "true"
             return response
         
-        # Look up tenant by API key using service with proper session management
+        # Look up tenant by API key using direct database query
         async with AsyncSessionLocal() as db:
-            tenant_service = TenantService(db)
-            tenant = await tenant_service.get_tenant_by_api_key(api_key)
+            result = await db.execute(text("""
+                SELECT slug, name, api_key, created_at, updated_at
+                FROM tenants 
+                WHERE api_key = :api_key
+            """), {"api_key": api_key})
+            
+            row = result.fetchone()
+            if row:
+                tenant = Tenant(
+                    slug=row.slug,
+                    name=row.name,
+                    api_key=row.api_key,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at
+                )
+            else:
+                tenant = None
         
         if not tenant:
             logger.warning(f"Invalid API key attempted: {api_key[:20]}...")

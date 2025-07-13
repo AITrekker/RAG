@@ -15,13 +15,10 @@ import asyncio
 
 from src.backend.config.settings import get_settings
 from src.backend.api.v1.routes import api_router
-# from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware  # Removed for simplicity
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 from src.backend.middleware.api_key_auth import api_key_auth_middleware
 from src.backend.database import startup_database_checks, close_database
 from src.backend.startup import wait_for_dependencies, verify_system_requirements
-# Background tasks removed for simplified architecture
-# Old service imports removed - using simplified core modules
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -50,13 +47,12 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ System requirements check failed: {req_error}")
             raise RuntimeError(f"System requirements not met: {req_error}")
         
-        # Step 3: Original database startup checks and service initialization
+        # Step 3: Database startup checks
         logger.info("🗄️ Running database startup checks...")
         try:
             await startup_database_checks()
         except Exception as e:
             logger.error(f"❌ Database startup failed: {e}")
-            # Continue anyway for debugging
             logger.warning("⚠️ Continuing despite database startup issues (debugging mode)")
         
         logger.info("🎉 API startup completed successfully!")
@@ -98,7 +94,6 @@ app.add_middleware(
 setup_exception_handlers(app)
 
 app.middleware("http")(api_key_auth_middleware)
-# app.middleware("http")(monitoring_middleware)  # Removed for simplicity
 app.middleware("http")(error_tracking_middleware)
 
 def custom_openapi():
