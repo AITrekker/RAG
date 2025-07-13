@@ -5,7 +5,7 @@ RAG Query API Routes - Using the new service architecture
 import time
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Request
 from typing import List, Optional, Dict, Any
-from uuid import UUID
+# UUID no longer needed - using string slugs
 
 from src.backend.dependencies import (
     get_current_tenant_dep,
@@ -44,7 +44,7 @@ async def process_query(
         # Process the query
         response = await rag_service.query(
             question=query,
-            tenant_id=current_tenant.id,
+            tenant_slug=current_tenant.slug,
             max_sources=max_sources,
             similarity_threshold=confidence_threshold
         )
@@ -56,7 +56,7 @@ async def process_query(
             "confidence": response.confidence,
             "processing_time": response.processing_time,
             "method": response.method,
-            "tenant_id": response.tenant_id
+            "tenant_id": response.tenant_slug
         }
         
     except HTTPException:
@@ -110,7 +110,7 @@ async def semantic_search(
         # Use the query method for semantic search (simplified)
         response = await rag_service.query(
             question=query,
-            tenant_id=current_tenant.id,
+            tenant_slug=current_tenant.slug,
             max_sources=max_results
         )
         
@@ -142,7 +142,7 @@ async def list_documents(
     """List documents with optional search"""
     try:
         # Get tenant stats as a proxy for document listing
-        stats = await rag_service.get_tenant_stats(current_tenant.id)
+        stats = await rag_service.get_tenant_stats(current_tenant.slug)
         
         return {
             "documents": [],  # Stub - document listing not implemented in simplified service
@@ -220,7 +220,7 @@ async def validate_query(
             "is_valid": len(query.strip()) > 0,
             "length": len(query),
             "word_count": len(query.split()),
-            "tenant_id": str(current_tenant.id),
+            "tenant_id": current_tenant.slug,
             "status": "simplified_validation",
             "message": "Query validation simplified in new service architecture"
         }
@@ -262,7 +262,7 @@ async def get_query_stats(
     """Get RAG usage statistics - STUBBED"""
     # This is stubbed in the RAG service, so we'll return a proper stub response
     return {
-        "tenant_id": str(current_tenant.id),
+        "tenant_id": current_tenant.slug,
         "total_queries": 0,
         "successful_queries": 0,
         "failed_queries": 0,

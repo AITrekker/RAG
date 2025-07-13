@@ -82,26 +82,27 @@ async def create_tenants():
         tenant_keys = {}
         
         for tenant_data in tenants:
-            # Generate simple data
-            tenant_id = uuid4()
-            api_key = f"tenant_{tenant_data['slug']}_{secrets.token_hex(16)}"
+            # Generate simple data (slug-based system)
+            tenant_slug = tenant_data['slug']
+            api_key = f"tenant_{tenant_slug}_{secrets.token_hex(16)}"
             
             print(f"  ✓ Creating {tenant_data['name']}...")
             
-            # Insert tenant
+            # Insert tenant (slug-based schema)
             await conn.execute("""
                 INSERT INTO tenants (
-                    id, name, slug, api_key, created_at, updated_at
+                    slug, name, api_key, created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, NOW(), NOW())
+                VALUES ($1, $2, $3, NOW(), NOW())
                 ON CONFLICT (slug) DO UPDATE SET
-                    api_key = $4,
+                    api_key = $3,
                     updated_at = NOW()
-            """, tenant_id, tenant_data['name'], tenant_data['slug'], api_key)
+            """, tenant_slug, tenant_data['name'], api_key)
             
-            tenant_keys[str(tenant_id)] = {
+            # Use slug as key instead of UUID for user-friendly keys file
+            tenant_keys[tenant_slug] = {
                 "api_key": api_key,
-                "slug": tenant_data['slug'],
+                "slug": tenant_slug,
                 "description": f"Demo {tenant_data['name']} with company documents (development)"
             }
         
@@ -143,14 +144,13 @@ def copy_demo_files():
     
     files_copied = 0
     
-    for tenant_id, info in tenant_data.items():
-        tenant_slug = info["slug"]
+    for tenant_slug, info in tenant_data.items():
         print(f"  📂 Processing {tenant_slug}...")
         
         # Source: demo-data/tenant1, tenant2, tenant3
         demo_source_dir = PROJECT_ROOT / "demo-data" / tenant_slug
-        # Destination: data/uploads/{tenant-id}/
-        tenant_upload_dir = PROJECT_ROOT / "data" / "uploads" / tenant_id
+        # Destination: data/uploads/{tenant-slug}/
+        tenant_upload_dir = PROJECT_ROOT / "data" / "uploads" / tenant_slug
         
         if not demo_source_dir.exists():
             print(f"    ⚠️ No demo files found for {tenant_slug}")

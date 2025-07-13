@@ -42,15 +42,15 @@ def get_current_tenant_id(
             detail="Invalid or expired API key",
         )
         
-    return str(tenant.id)
+    return str(tenant.slug)
 
 def require_authentication(
-    tenant_id: str = Depends(get_current_tenant_id)
+    tenant_slug: str = Depends(get_current_tenant_id)
 ) -> str:
     """
     A simple dependency that just runs get_current_tenant_id to protect an endpoint.
     """
-    return tenant_id 
+    return tenant_slug 
 
 def get_current_tenant(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(api_key_security),
@@ -74,7 +74,7 @@ def get_current_tenant(
     
     # Convert tenant object to dict
     tenant_dict = {
-        "id": str(tenant.id),
+        "id": str(tenant.slug),
         "name": tenant.name,
         "slug": tenant.slug,
         "status": "active",  # Simplified - no status field

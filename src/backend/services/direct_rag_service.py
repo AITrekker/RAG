@@ -6,7 +6,7 @@ No LlamaIndex dependencies - direct control over chunking, embeddings, and retri
 import time
 import asyncio
 from typing import List, Dict, Any, Optional
-from uuid import UUID
+# UUID no longer needed - using string slugs
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,7 +29,7 @@ class RAGResult:
     confidence: float
     processing_time: float
     method: str
-    tenant_id: str
+    tenant_slug: str
 
 
 class DirectRAGService:
@@ -52,7 +52,7 @@ class DirectRAGService:
     async def query(
         self, 
         question: str, 
-        tenant_id: UUID,
+        tenant_slug: str,
         max_sources: int = 5,
         similarity_threshold: float = 0.1
     ) -> RAGResult:
@@ -67,7 +67,7 @@ class DirectRAGService:
             
             # Direct pgvector similarity search
             sources = await self._vector_search(
-                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
                 query_embedding=query_embedding,
                 max_results=max_sources,
                 threshold=similarity_threshold
@@ -85,7 +85,7 @@ class DirectRAGService:
                 confidence=self._calculate_confidence(sources),
                 processing_time=processing_time,
                 method="direct_vector_search",
-                tenant_id=str(tenant_id)
+                tenant_slug=tenant_slug
             )
             
         except Exception as e:
@@ -96,12 +96,12 @@ class DirectRAGService:
                 confidence=0.0,
                 processing_time=time.time() - start_time,
                 method="error",
-                tenant_id=str(tenant_id)
+                tenant_slug=tenant_slug
             )
     
     async def _vector_search(
         self,
-        tenant_id: UUID,
+        tenant_slug: str,
         query_embedding: np.ndarray,
         max_results: int,
         threshold: float
@@ -125,7 +125,7 @@ class DirectRAGService:
                     f.file_size
                 FROM embedding_chunks ec
                 JOIN files f ON ec.file_id = f.id
-                WHERE ec.tenant_id = :tenant_id 
+                WHERE ec.tenant_slug = :tenant_slug 
                 AND f.sync_status = 'synced'
                 AND f.deleted_at IS NULL
                 ORDER BY ec.embedding <=> :query_embedding
@@ -135,7 +135,7 @@ class DirectRAGService:
             result = await self.db.execute(
                 query,
                 {
-                    "tenant_id": tenant_id,
+                    "tenant_slug": tenant_slug,
                     "query_embedding": embedding_list,
                     "max_results": max_results
                 }
@@ -184,7 +184,7 @@ class DirectRAGService:
     async def add_document(
         self, 
         file_content: str, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         file_record: File
     ) -> bool:
         """Add document with direct chunking and embedding"""
@@ -201,7 +201,7 @@ class DirectRAGService:
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 chunk_record = EmbeddingChunk(
                     file_id=file_record.id,
-                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
                     chunk_index=i,
                     chunk_content=chunk["text"],
                     token_count=len(chunk["text"].split()),
@@ -253,13 +253,13 @@ class DirectRAGService:
         
         return chunks
     
-    async def get_tenant_stats(self, tenant_id: UUID) -> Dict[str, Any]:
+    async def get_tenant_stats(self, tenant_slug: str) -> Dict[str, Any]:
         """Get basic tenant statistics"""
         # Use explicit transaction management to prevent rollbacks
         async with self.db.begin():
             # Count files
             file_count_query = select(File).where(
-                File.tenant_id == tenant_id,
+                File.tenant_slug == tenant_slug,
                 File.deleted_at.is_(None)
             )
             file_result = await self.db.execute(file_count_query)
@@ -267,13 +267,13 @@ class DirectRAGService:
             
             # Count chunks
             chunk_count_query = select(EmbeddingChunk).where(
-                EmbeddingChunk.tenant_id == tenant_id
+                EmbeddingChunk.tenant_slug == tenant_slug
             )
             chunk_result = await self.db.execute(chunk_count_query)
             chunk_count = len(chunk_result.fetchall())
             
             return {
-                "tenant_id": str(tenant_id),
+                "tenant_id": tenant_slug,
                 "file_count": file_count,
                 "chunk_count": chunk_count,
                 "embedding_model": getattr(self.embedding_model, 'name', 'sentence-transformers'),

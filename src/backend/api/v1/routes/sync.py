@@ -1,5 +1,5 @@
 """
-Simple Sync Routes - Use existing simple_sync function
+Delta Sync Routes - Use proper SyncService for file discovery and processing
 """
 
 from fastapi import APIRouter, Depends
@@ -7,10 +7,11 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from src.backend.dependencies import get_current_tenant_dep
+from src.backend.dependencies import get_current_tenant_dep, get_file_service_dep, get_sync_service_dep
 from src.backend.database import get_async_db
 from src.backend.models.database import Tenant, File
-from src.backend.services.simple_sync import simple_sync_files
+from src.backend.services.sync_service import SyncService
+from src.backend.services.file_service import FileService
 
 router = APIRouter()
 
@@ -26,13 +27,13 @@ async def get_sync_status(
     
     # Count files
     result = await db.execute(
-        select(File).where(File.tenant_id == current_tenant.id)
+        select(File).where(File.tenant_slug == current_tenant.slug)
     )
     files = result.scalars().all()
     total_files = len(files)
     
     return {
-        "tenant_id": str(current_tenant.id),
+        "tenant_id": current_tenant.slug,
         "status": "idle",
         "latest_sync": None,
         "file_status": {
@@ -59,20 +60,44 @@ async def get_sync_history(
 async def trigger_sync(
     request: SyncTriggerRequest,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    db: AsyncSession = Depends(get_async_db)
+    sync_service: SyncService = Depends(get_sync_service_dep)
 ):
-    """Trigger sync using existing simple_sync_files function"""
+    """Trigger delta sync using proper SyncService with file discovery"""
     
-    # Use the existing working simple sync function
-    result = await simple_sync_files(db, current_tenant.id)
-    
-    return {
-        "message": f"Sync triggered for tenant {current_tenant.slug}",
-        "status": result["status"],
-        "files_processed": result["files_processed"],
-        "chunks_created": result["chunks_created"],
-        "details": result["message"]
-    }
+    try:
+        # Use the proper delta sync service that can discover new files
+        sync_plan = await sync_service.detect_file_changes(current_tenant.slug)
+        
+        if sync_plan.total_changes == 0:
+            return {
+                "message": f"No changes detected for tenant {current_tenant.slug}",
+                "status": "completed",
+                "files_processed": 0,
+                "chunks_created": 0,
+                "details": "No new, updated, or deleted files found"
+            }
+        
+        # Execute the sync plan
+        sync_operation = await sync_service.execute_sync_plan(sync_plan)
+        
+        return {
+            "message": f"Sync triggered for tenant {current_tenant.slug}",
+            "status": "completed",
+            "sync_operation_id": str(sync_operation.id),
+            "new_files": len(sync_plan.new_files),
+            "updated_files": len(sync_plan.updated_files),
+            "deleted_files": len(sync_plan.deleted_files),
+            "total_changes": sync_plan.total_changes
+        }
+        
+    except Exception as e:
+        return {
+            "message": f"Sync failed for tenant {current_tenant.slug}",
+            "status": "failed",
+            "error": str(e),
+            "files_processed": 0,
+            "chunks_created": 0
+        }
 
 @router.post("/detect-changes")
 async def detect_changes(
@@ -82,7 +107,7 @@ async def detect_changes(
     """Preview changes"""
     
     result = await db.execute(
-        select(File).where(File.tenant_id == current_tenant.id)
+        select(File).where(File.tenant_slug == current_tenant.slug)
     )
     files = result.scalars().all()
     

@@ -188,20 +188,15 @@ def setup_admin_tenant() -> bool:
         from dotenv import load_dotenv
         load_dotenv()
         
-        admin_tenant_id = os.getenv("ADMIN_TENANT_ID")
+        # Check for both old UUID-based and new slug-based admin tenant identifiers
+        admin_tenant_id = os.getenv("ADMIN_TENANT_ID")  # Old UUID-based 
+        admin_tenant_slug = os.getenv("ADMIN_TENANT_SLUG")  # New slug-based
         logger.info(f"📋 Found existing ADMIN_TENANT_ID: {'Yes' if admin_tenant_id else 'No'}")
+        logger.info(f"📋 Found existing ADMIN_TENANT_SLUG: {'Yes' if admin_tenant_slug else 'No'}")
         
-        if admin_tenant_id:
-            # Admin tenant ID exists, just update the API key in env file
-            logger.info(f"✅ Admin tenant ID found: {admin_tenant_id}")
-            logger.info("🔄 Updating API key in environment file (skipping database update for now)...")
-            update_env_file(admin_tenant_id, new_admin_api_key)
-            logger.info("✅ Admin tenant API key updated in environment")
-            return True
-        
-        # No admin tenant ID, create new admin tenant
-        logger.info("🏗️ No existing admin tenant found, creating new admin tenant...")
-        result = create_admin_tenant_with_fresh_key(new_admin_api_key)
+        # Always use the inline tenant creation for slug-based system
+        logger.info("🏗️ Using inline admin tenant creation for slug-based system...")
+        result = create_admin_tenant_inline()
         logger.info(f"🎯 Admin tenant creation result: {result}")
         return result
             
@@ -223,7 +218,7 @@ def verify_admin_tenant_exists(admin_tenant_id: str) -> bool:
             
             async for db in get_async_db():
                 tenant_service = TenantService(db)
-                tenant = await tenant_service.get_tenant_by_id(admin_tenant_id)
+                tenant = await tenant_service.get_tenant_by_id(admin_tenant_slug)
                 return tenant is not None
                 
         except Exception as e:
@@ -249,7 +244,7 @@ def create_admin_tenant_with_existing_credentials(admin_tenant_id: str, admin_ap
                 
                 # Create simplified tenant with the existing ID and API key
                 tenant = Tenant(
-                    id=UUID(admin_tenant_id),
+                    id=UUID(admin_tenant_slug),
                     name="admin",
                     slug="admin",
                     api_key=admin_api_key
@@ -260,7 +255,7 @@ def create_admin_tenant_with_existing_credentials(admin_tenant_id: str, admin_ap
                 await db.commit()
                 await db.refresh(tenant)
                 
-                logger.info(f"✅ Admin tenant recreated with existing credentials: {tenant.id}")
+                logger.info(f"✅ Admin tenant recreated with existing credentials: {tenant.slug}")
                 return True
                 
         except Exception as e:
@@ -292,37 +287,36 @@ def create_admin_tenant_inline() -> bool:
                 # Check if admin tenant already exists
                 existing_admin = await tenant_service.get_tenant_by_slug("admin")
                 if existing_admin:
-                    logger.info(f"✅ Admin tenant already exists: {existing_admin.id}")
-                    admin_tenant_id = str(existing_admin.id)
+                    logger.info(f"✅ Admin tenant already exists: {existing_admin.slug}")
+                    admin_tenant_slug = existing_admin.slug
                     
                     # ALWAYS generate a fresh API key for security
                     logger.info("🔑 Generating fresh admin API key for security...")
                     import secrets
                     admin_api_key = f"tenant_admin_{secrets.token_hex(16)}"
                     
-                    # Update the tenant with the new API key
-                    await tenant_service.update_tenant_api_key(existing_admin.id, admin_api_key)
+                    # Update the tenant with the new API key (using slug)
+                    await tenant_service.update_tenant_api_key_by_slug(existing_admin.slug, admin_api_key)
                     logger.info("🔐 Admin API key regenerated successfully")
                 else:
                     logger.info("🏗️ Creating new admin tenant...")
                     # Create new admin tenant
                     tenant_result = await tenant_service.create_tenant(
-                        name="admin",
-                        description="System administrator tenant"
+                        name="admin"
                     )
                     logger.info(f"🔧 Tenant creation result: {tenant_result}")
                     
                     logger.info("🔍 Retrieving created admin tenant details...")
                     # Get the created tenant details
                     admin_tenant = await tenant_service.get_tenant_by_slug("admin")
-                    admin_tenant_id = str(admin_tenant.id)
+                    admin_tenant_slug = admin_tenant.slug
                     admin_api_key = admin_tenant.api_key
                     
-                    logger.info(f"✅ Admin tenant created: {admin_tenant_id}")
+                    logger.info(f"✅ Admin tenant created: {admin_tenant_slug}")
                 
                 logger.info("📝 Updating .env file with admin credentials...")
-                # Update .env file with admin credentials
-                update_env_file(admin_tenant_id, admin_api_key)
+                # Update .env file with admin credentials (using slug)
+                update_env_file(admin_tenant_slug, admin_api_key)
                 logger.info("✅ .env file updated successfully")
                 
                 break  # Only need first session
@@ -364,7 +358,7 @@ def update_admin_tenant_api_key(admin_tenant_id: str, new_api_key: str) -> bool:
                 session = AsyncSessionLocal()
                 # Find the admin tenant
                 result = await session.execute(
-                    select(Tenant).where(Tenant.id == UUID(admin_tenant_id))
+                    select(Tenant).where(Tenant.id == UUID(admin_tenant_slug))
                 )
                 tenant = result.scalar_one_or_none()
                 
@@ -404,7 +398,7 @@ def create_admin_tenant_with_new_key(admin_tenant_id: str, new_api_key: str) -> 
             async with AsyncSessionLocal() as session:
                 # Create simplified admin tenant with existing ID
                 admin_tenant = Tenant(
-                    id=UUID(admin_tenant_id),
+                    id=UUID(admin_tenant_slug),
                     name="admin",
                     slug="admin",
                     api_key=new_api_key
@@ -447,7 +441,7 @@ def create_admin_tenant_with_fresh_key(new_api_key: str) -> bool:
                 session.add(admin_tenant)
                 await session.commit()
                 logger.info(f"✅ Created new admin tenant with ID {new_tenant_id}")
-                return str(new_tenant_id)
+                return str(new_tenant_slug)
         
         new_tenant_id = asyncio.run(create_tenant())
         if new_tenant_id:
@@ -460,7 +454,7 @@ def create_admin_tenant_with_fresh_key(new_api_key: str) -> bool:
         return False
 
 
-def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
+def update_env_file(admin_tenant_slug: str, admin_api_key: str) -> None:
     """Update .env file with admin credentials and environment information."""
     env_file = Path(".env")
     
@@ -477,7 +471,8 @@ def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
     skip_next_empty = False
     
     for line in lines:
-        if (line.strip().startswith('ADMIN_TENANT_ID=') or 
+        if (line.strip().startswith('ADMIN_TENANT_ID=') or
+            line.strip().startswith('ADMIN_TENANT_SLUG=') or 
             line.strip().startswith('ADMIN_API_KEY=') or
             line.strip().startswith('RAG_ENVIRONMENT=') or
             line.strip().startswith('DATABASE_URL_')):
@@ -501,7 +496,7 @@ def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
     
     cleaned_lines.extend([
         '# Admin credentials (auto-generated)\n',
-        f'ADMIN_TENANT_ID={admin_tenant_id}\n',
+        f'ADMIN_TENANT_SLUG={admin_tenant_slug}\n',
         f'ADMIN_API_KEY={admin_api_key}\n',
         f'RAG_ENVIRONMENT={CURRENT_ENVIRONMENT}\n',
         '\n',
@@ -519,16 +514,16 @@ def update_env_file(admin_tenant_id: str, admin_api_key: str) -> None:
     logger.info("✅ Admin credentials and environment URLs saved to .env file")
     
     # Also write admin key to JSON file for frontend access
-    write_admin_config_json(admin_tenant_id, admin_api_key)
+    write_admin_config_json(admin_tenant_slug, admin_api_key)
 
 
-def write_admin_config_json(admin_tenant_id: str, admin_api_key: str) -> None:
+def write_admin_config_json(admin_tenant_slug: str, admin_api_key: str) -> None:
     """Write admin configuration to JSON file for frontend access."""
     import json
     from datetime import datetime, timezone
     
     admin_config = {
-        "admin_tenant_id": admin_tenant_id,
+        "admin_tenant_slug": admin_tenant_slug,
         "admin_api_key": admin_api_key,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source": "init_container"

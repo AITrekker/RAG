@@ -69,11 +69,16 @@ def verify_admin_tenant() -> Tuple[bool, str]:
         load_dotenv()
         
         # Check if .env has admin credentials first (no async needed)
-        env_tenant_id = os.getenv("ADMIN_TENANT_ID")
+        # Support both old UUID-based and new slug-based admin tenant identification
+        env_tenant_id = os.getenv("ADMIN_TENANT_ID")  # Legacy UUID-based
+        env_tenant_slug = os.getenv("ADMIN_TENANT_SLUG")  # New slug-based
         env_api_key = os.getenv("ADMIN_API_KEY")
         
-        if not env_tenant_id or not env_api_key:
+        if (not env_tenant_id and not env_tenant_slug) or not env_api_key:
             return False, "Admin credentials not found in .env file"
+        
+        # Use slug if available, otherwise fall back to UUID
+        admin_identifier = env_tenant_slug if env_tenant_slug else env_tenant_id
         
         # Simple database check using sync connection for verification
         from sqlalchemy import create_engine, text
@@ -91,19 +96,33 @@ def verify_admin_tenant() -> Tuple[bool, str]:
         
         engine = create_engine(database_url)
         with engine.connect() as conn:
-            # Check if admin tenant exists with matching ID
-            result = conn.execute(text("""
-                SELECT id, slug FROM tenants 
-                WHERE slug = 'admin'
-            """))
+            # Check if admin tenant exists 
+            if env_tenant_slug:
+                # New slug-based system
+                result = conn.execute(text("""
+                    SELECT slug, name FROM tenants 
+                    WHERE slug = :identifier
+                """), {"identifier": admin_identifier})
+            else:
+                # Legacy UUID-based system (fallback)
+                result = conn.execute(text("""
+                    SELECT id, slug, name FROM tenants 
+                    WHERE id = :identifier
+                """), {"identifier": admin_identifier})
             
             admin_row = result.fetchone()
             if not admin_row:
                 return False, "Admin tenant not found in database"
             
             # Verify credentials match
-            if str(admin_row.id) != env_tenant_id:
-                return False, "Admin tenant ID mismatch between database and .env"
+            if env_tenant_slug:
+                # New slug-based verification
+                if admin_row.slug != admin_identifier:
+                    return False, f"Admin tenant slug mismatch: expected {admin_identifier}, got {admin_row.slug}"
+            else:
+                # Legacy UUID-based verification (if still using old system)
+                if str(admin_row.id) != admin_identifier:
+                    return False, f"Admin tenant ID mismatch: expected {admin_identifier}, got {admin_row.id}"
         
         success, message = True, "Admin tenant verified successfully"
         

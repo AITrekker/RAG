@@ -49,7 +49,7 @@ class FileChange:
 @dataclass
 class SyncPlan:
     """Plan of changes to be made during sync"""
-    tenant_id: UUID
+    tenant_slug: str
     changes: List[FileChange]
     
     @property
@@ -81,21 +81,24 @@ class SyncService:
         # Use the properly injected async session
         self.db = db_session
         self.file_service = file_service
-        # Create synchronous embedding service
+        # Import and create async embedding service
+        from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
+        self.embedding_service = PgVectorEmbeddingService(db_session, embedding_model)
+        # Create synchronous embedding service for legacy support
         self.sync_embedding_service = SyncEmbeddingService(embedding_model=embedding_model)
         self.settings = get_settings()
     
-    async def check_for_running_syncs(self, tenant_id: UUID) -> Optional[SyncOperation]:
+    async def check_for_running_syncs(self, tenant_slug: str) -> Optional[SyncOperation]:
         """Check if there's already a running sync for this tenant"""
         result = await self.db.execute(
             select(SyncOperation).where(
-                SyncOperation.tenant_id == tenant_id,
+                SyncOperation.tenant_slug == tenant_slug,
                 SyncOperation.status == 'running'
             ).order_by(SyncOperation.started_at.desc())
         )
         return result.scalar_one_or_none()
     
-    async def detect_file_changes(self, tenant_id: UUID) -> SyncPlan:
+    async def detect_file_changes(self, tenant_slug: str) -> SyncPlan:
         """
         Detect file changes by comparing filesystem with database
         
@@ -106,15 +109,15 @@ class SyncService:
             SyncPlan: Plan of changes to be executed
         """
         # Get current files from filesystem
-        fs_files = await self.file_service.scan_tenant_files(tenant_id)
+        fs_files = await self.file_service.scan_tenant_files(tenant_slug)
         fs_file_map = {f['path']: f for f in fs_files}
         
         # Get current files from database (hard delete means no deleted_at filter needed)
-        db_files = await self.file_service.list_files(tenant_id, limit=10000)
+        db_files = await self.file_service.list_files(tenant_slug, limit=10000)
         db_file_map = {f.file_path: f for f in db_files}
         
         # DEBUG: Log what we found
-        print(f"🔍 DEBUG Tenant {tenant_id}:")
+        print(f"🔍 DEBUG Tenant {tenant_slug}:")
         print(f"  Filesystem files: {len(fs_files)} - {list(fs_file_map.keys())[:3]}...")
         print(f"  Database files: {len(db_files)} - {list(db_file_map.keys())[:3]}...")
         
@@ -155,7 +158,7 @@ class SyncService:
                     old_hash=db_file.file_hash
                 ))
         
-        return SyncPlan(tenant_id=tenant_id, changes=changes)
+        return SyncPlan(tenant_slug=tenant_slug, changes=changes)
     
     async def execute_sync_plan(
         self, 
@@ -171,13 +174,13 @@ class SyncService:
             SyncOperation: Record of the sync operation
         """
         # Check if there's already a running sync
-        running_sync = await self.check_for_running_syncs(sync_plan.tenant_id)
+        running_sync = await self.check_for_running_syncs(sync_plan.tenant_slug)
         if running_sync:
-            raise Exception(f"Sync already in progress for tenant {sync_plan.tenant_id}. Operation ID: {running_sync.id}")
+            raise Exception(f"Sync already in progress for tenant {sync_plan.tenant_slug}. Operation ID: {running_sync.id}")
         
         # Create sync operation record with detailed progress fields
         sync_op = SyncOperation(
-            tenant_id=sync_plan.tenant_id,
+            tenant_slug=sync_plan.tenant_slug,
             operation_type='delta_sync',
             status='running',
             started_at=datetime.utcnow(),
@@ -194,48 +197,14 @@ class SyncService:
             if sync_plan.deleted_files:
                 await self._process_deleted_files_async(sync_plan.deleted_files, sync_op)
             
-            # Process new and updated files with synchronous embedding
-            files_to_process = []
-            for change in sync_plan.new_files + sync_plan.updated_files:
-                if change.file_id:
-                    # Get file record from database
-                    result = await self.db.execute(
-                        select(File).where(File.id == change.file_id)
-                    )
-                    file_record = result.scalar_one_or_none()
-                    if file_record:
-                        files_to_process.append(file_record)
+            # Process new files (create records and generate embeddings)
+            for change in sync_plan.new_files:
+                await self._process_new_file(change, sync_op)
             
-            if files_to_process:
-                # Use synchronous embedding service with progress tracking
-                # This runs in the background to avoid blocking the async context
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    self.sync_embedding_service.process_files_with_progress,
-                    files_to_process,
-                    sync_plan.tenant_id,
-                    sync_op.id
-                )
-                
-                # Update final counts
-                await self.db.execute(
-                    text("""
-                        UPDATE sync_operations 
-                        SET files_processed = :files_processed,
-                            chunks_created = :chunks_created,
-                            files_added = :files_added,
-                            files_updated = :files_updated
-                        WHERE id = :sync_op_id
-                    """),
-                    {
-                        'sync_op_id': sync_op.id,
-                        'files_processed': result['files_processed'],
-                        'chunks_created': result['chunks_created'],
-                        'files_added': len(sync_plan.new_files),
-                        'files_updated': len(sync_plan.updated_files)
-                    }
-                )
-                await self.db.commit()
+            # Process updated files (files that already exist in database)
+            for change in sync_plan.updated_files:
+                if change.file_id:
+                    await self._process_updated_file(change, sync_op)
             
             # Mark sync as completed
             await self.db.execute(
@@ -474,7 +443,7 @@ class SyncService:
                     print(f"⚠️ Failed to process deleted file {change.file_id}: {e2}")
                     continue
     
-    async def cleanup_orphaned_embeddings(self, tenant_id: UUID) -> int:
+    async def cleanup_orphaned_embeddings(self, tenant_slug: str) -> int:
         """
         Clean up orphaned embeddings for files that no longer exist
         With hard deletes, this should find chunks with no corresponding file records
@@ -489,7 +458,7 @@ class SyncService:
             select(EmbeddingChunk.file_id)
             .outerjoin(File, EmbeddingChunk.file_id == File.id)
             .where(
-                EmbeddingChunk.tenant_id == tenant_id,
+                EmbeddingChunk.tenant_slug == tenant_slug,
                 File.id.is_(None)  # No corresponding file record
             )
             .distinct()
@@ -515,7 +484,7 @@ class SyncService:
             
             # With hard delete, we just create a new file record (no soft-delete conflicts)
             file_record = File(
-                tenant_id=sync_op.tenant_id,
+                tenant_slug=sync_op.tenant_slug,
                 filename=Path(change.file_path).name,
                 file_path=change.file_path,
                 file_size=change.file_size or 0,
@@ -535,7 +504,7 @@ class SyncService:
             
             chunks = await self.embedding_service.process_file_to_chunks(
                 absolute_file_path, 
-                file_record.tenant_id, 
+                file_record.tenant_slug, 
                 file_record
             )
             # Generate embeddings (now async)
@@ -636,7 +605,7 @@ class SyncService:
             
             chunks = await self.embedding_service.process_file_to_chunks(
                 absolute_file_path, 
-                file_record.tenant_id, 
+                file_record.tenant_slug, 
                 file_record
             )
             # Generate embeddings (now async)
@@ -815,7 +784,7 @@ class SyncService:
     
     async def trigger_full_sync(
         self, 
-        tenant_id: UUID
+        tenant_slug: str
     ) -> SyncOperation:
         """
         Trigger a full sync for a tenant
@@ -826,7 +795,7 @@ class SyncService:
         Returns:
             SyncOperation: Record of the sync operation
         """
-        sync_plan = await self.detect_file_changes(tenant_id)
+        sync_plan = await self.detect_file_changes(tenant_slug)
         return await self.execute_sync_plan(sync_plan)
     
     async def trigger_file_sync(
@@ -868,7 +837,7 @@ class SyncService:
         # Create individual sync operation for this file
         
         sync_op = SyncOperation(
-            tenant_id=file_record.tenant_id,
+            tenant_slug=file_record.tenant_slug,
             operation_type='file_sync',
             status='running',
             started_at=datetime.utcnow()
@@ -907,7 +876,7 @@ class SyncService:
             
             chunks = await self.embedding_service.process_file_to_chunks(
                 absolute_file_path, 
-                file_record.tenant_id, 
+                file_record.tenant_slug, 
                 file_record
             )
             logger.info(f"Generated {len(chunks)} chunks for {file_id}")
@@ -989,14 +958,14 @@ class SyncService:
             
             return False
     
-    async def get_sync_status(self, tenant_id: UUID) -> Dict[str, Any]:
+    async def get_sync_status(self, tenant_slug: str) -> Dict[str, Any]:
         """Get current sync status for a tenant"""
         # Use explicit transaction management to prevent rollbacks
         async with self.db.begin():
             # Get latest sync operation
             result = await self.db.execute(
                 select(SyncOperation)
-                .where(SyncOperation.tenant_id == tenant_id)
+                .where(SyncOperation.tenant_slug == tenant_slug)
                 .order_by(SyncOperation.started_at.desc())
                 .limit(1)
             )
@@ -1010,7 +979,7 @@ class SyncService:
                     func.count(File.id).label('count')
                 )
                 .where(
-                    File.tenant_id == tenant_id,
+                    File.tenant_slug == tenant_slug,
                     File.deleted_at.is_(None)
                 )
                 .group_by(File.sync_status)
@@ -1039,7 +1008,7 @@ class SyncService:
     
     async def get_sync_history(
         self, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         limit: int = 50
     ) -> List[SyncOperation]:
         """Get sync history for a tenant"""
@@ -1047,25 +1016,25 @@ class SyncService:
         async with self.db.begin():
             result = await self.db.execute(
                 select(SyncOperation)
-                .where(SyncOperation.tenant_id == tenant_id)
+                .where(SyncOperation.tenant_slug == tenant_slug)
                 .order_by(SyncOperation.started_at.desc())
                 .limit(limit)
             )
             return result.scalars().all()
     
-    async def get_running_syncs(self, tenant_id: UUID) -> List[SyncOperation]:
+    async def get_running_syncs(self, tenant_slug: str) -> List[SyncOperation]:
         """Get all currently running sync operations for a tenant"""
         result = await self.db.execute(
             select(SyncOperation)
             .where(
-                SyncOperation.tenant_id == tenant_id,
+                SyncOperation.tenant_slug == tenant_slug,
                 SyncOperation.status == 'running'
             )
             .order_by(SyncOperation.started_at.desc())
         )
         return result.scalars().all()
     
-    async def cancel_sync_operation(self, sync_id: UUID, tenant_id: UUID) -> bool:
+    async def cancel_sync_operation(self, sync_id: UUID, tenant_slug: str) -> bool:
         """Cancel a specific sync operation"""
         try:
             # Check if sync operation exists and belongs to tenant
@@ -1073,7 +1042,7 @@ class SyncService:
                 select(SyncOperation)
                 .where(
                     SyncOperation.id == sync_id,
-                    SyncOperation.tenant_id == tenant_id,
+                    SyncOperation.tenant_slug == tenant_slug,
                     SyncOperation.status == 'running'
                 )
             )
@@ -1097,7 +1066,7 @@ class SyncService:
             await self.db.execute(
                 update(File)
                 .where(
-                    File.tenant_id == tenant_id,
+                    File.tenant_slug == tenant_slug,
                     File.sync_status == 'processing'
                 )
                 .values(sync_status='pending')
@@ -1111,14 +1080,14 @@ class SyncService:
             logger.error(f"Error cancelling sync operation {sync_id}: {e}")
             return False
     
-    async def cancel_all_running_syncs(self, tenant_id: UUID) -> int:
+    async def cancel_all_running_syncs(self, tenant_slug: str) -> int:
         """Cancel all running sync operations for a tenant"""
         try:
             # Get all running sync operations for this tenant
             result = await self.db.execute(
                 select(SyncOperation)
                 .where(
-                    SyncOperation.tenant_id == tenant_id,
+                    SyncOperation.tenant_slug == tenant_slug,
                     SyncOperation.status == 'running'
                 )
             )
@@ -1131,7 +1100,7 @@ class SyncService:
             await self.db.execute(
                 update(SyncOperation)
                 .where(
-                    SyncOperation.tenant_id == tenant_id,
+                    SyncOperation.tenant_slug == tenant_slug,
                     SyncOperation.status == 'running'
                 )
                 .values(
@@ -1145,7 +1114,7 @@ class SyncService:
             await self.db.execute(
                 update(File)
                 .where(
-                    File.tenant_id == tenant_id,
+                    File.tenant_slug == tenant_slug,
                     File.sync_status == 'processing'
                 )
                 .values(sync_status='pending')
@@ -1174,7 +1143,7 @@ async def get_sync_service(
 
 
 # Additional helper functions for sync operations
-async def schedule_tenant_sync(tenant_id: UUID):
+async def schedule_tenant_sync(tenant_slug: str):
     """Schedule a tenant sync operation (can be used by background tasks)"""
     # This would integrate with a task queue like Celery in production
     pass

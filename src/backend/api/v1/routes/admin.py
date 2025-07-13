@@ -13,7 +13,7 @@ All endpoints require admin authentication.
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
+# UUID no longer needed - using string slugs
 import psutil
 import os
 import logging
@@ -93,7 +93,7 @@ async def create_tenant(
         )
         
         # Get created tenant details
-        tenant = await tenant_service.get_tenant_by_id(UUID(result["id"]))
+        tenant = await tenant_service.get_tenant_by_slug(result["slug"])
         if not tenant:
             raise HTTPException(status_code=500, detail="Failed to retrieve created tenant")
             
@@ -101,7 +101,7 @@ async def create_tenant(
         api_keys = []
         if result.get("api_key"):
             api_keys = [ApiKeyResponse(
-                id=f"key_{tenant.id}",
+                id=f"key_{tenant.slug}",
                 name="Default Key",
                 key_prefix=result["api_key"][:8] + "..." + result["api_key"][-8:] if len(result["api_key"]) > 16 else result["api_key"],
                 is_active=True,
@@ -110,7 +110,7 @@ async def create_tenant(
             )]
             
         return TenantResponse(
-            id=str(tenant.id),
+            id=tenant.slug,
             name=tenant.name,
             description="Demo tenant",  # Simplified - no description field
             status="active",  # Simplified - no status field
@@ -165,7 +165,7 @@ async def list_tenants(
         tenant_responses = []
         for tenant in tenants:
             tenant_response = TenantResponse(
-                id=str(tenant.id),
+                id=tenant.slug,
                 name=tenant.name,
                 description="Demo tenant",  # Simplified - no description field
                 status="active",  # Simplified - no status field
@@ -179,7 +179,7 @@ async def list_tenants(
             
             # Add API keys if requested
             if include_api_keys:
-                api_keys = await tenant_service.list_api_keys(tenant.id)
+                api_keys = await tenant_service.list_api_keys(tenant.slug)
                 tenant_response.api_keys = [
                     ApiKeyResponse(
                         id=key.get("id", ""),
@@ -240,13 +240,13 @@ async def get_tenant(
                 detail="Admin access required"
             )
         
-        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
         
         if not tenant:
-            raise not_found_error("Tenant", tenant_id)
+            raise not_found_error("Tenant", tenant_slug)
             
         return TenantResponse(
-            id=str(tenant.id),
+            id=tenant.slug,
             name=tenant.name,
             description="Demo tenant",  # Simplified - no description field
             status="active",  # Simplified - no status field
@@ -290,13 +290,13 @@ async def update_tenant(
                 detail="Admin access required"
             )
         
-        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
         
         if not tenant:
-            raise not_found_error("Tenant", tenant_id)
+            raise not_found_error("Tenant", tenant_slug)
         
         updated_tenant = await tenant_service.update_tenant(
-            tenant_id=UUID(tenant_id),
+            tenant_slug=tenant_id,
             name=request.name,
             description=request.description,
             status=request.status,
@@ -305,7 +305,7 @@ async def update_tenant(
         )
         
         return TenantResponse(
-            id=str(updated_tenant.id),
+            id=updated_tenant.slug,
             name=updated_tenant.name,
             description="Demo tenant",  # Simplified - no description field
             status="active",  # Simplified - no status field
@@ -347,10 +347,10 @@ async def delete_tenant(
                 detail="Admin access required"
             )
         
-        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
         
         if not tenant:
-            raise not_found_error("Tenant", tenant_id)
+            raise not_found_error("Tenant", tenant_slug)
         
         # Prevent admin tenant deletion
         if tenant.name == "admin":
@@ -359,7 +359,7 @@ async def delete_tenant(
                 {"tenant_id": tenant_id, "tenant_name": "admin"}
             )
         
-        await tenant_service.delete_tenant(UUID(tenant_id))
+        await tenant_service.delete_tenant(tenant_slug)
         
         return SuccessResponse(message=f"Tenant {tenant_id} deleted successfully")
         
@@ -399,12 +399,12 @@ async def create_api_key(
                 detail="Admin access required"
             )
         
-        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
         
         if not tenant:
-            raise not_found_error("Tenant", tenant_id)
+            raise not_found_error("Tenant", tenant_slug)
         
-        api_key = await tenant_service.create_api_key(UUID(tenant_id), request.name)
+        api_key = await tenant_service.create_api_key(tenant_slug)
         
         return ApiKeyCreateResponse(
             tenant_id=tenant_id,
@@ -442,12 +442,12 @@ async def list_api_keys(
                 detail="Admin access required"
             )
         
-        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
         
         if not tenant:
-            raise not_found_error("Tenant", tenant_id)
+            raise not_found_error("Tenant", tenant_slug)
         
-        api_keys = await tenant_service.list_api_keys(UUID(tenant_id))
+        api_keys = await tenant_service.list_api_keys(tenant_slug)
         return api_keys
         
     except HTTPException:
@@ -482,12 +482,12 @@ async def delete_api_key(
                 detail="Admin access required"
             )
         
-        tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+        tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
         
         if not tenant:
-            raise not_found_error("Tenant", tenant_id)
+            raise not_found_error("Tenant", tenant_slug)
         
-        await tenant_service.delete_api_key(UUID(tenant_id), key_id)
+        await tenant_service.delete_api_key(tenant_id, key_id)
         
         return SuccessResponse(message=f"API key {key_id} deleted successfully")
         
@@ -787,7 +787,7 @@ async def setup_demo_environment(
         
         for tenant_id in request.demo_tenants:
             # Verify tenant exists
-            tenant = await tenant_service.get_tenant_by_id(UUID(tenant_id))
+            tenant = await tenant_service.get_tenant_by_slug(tenant_slug)
             if not tenant:
                 logger.warning(f"Tenant {tenant_id} not found, skipping")
                 continue
@@ -795,12 +795,7 @@ async def setup_demo_environment(
             api_keys = []
             if request.generate_api_keys:
                 # Generate demo API key for tenant
-                demo_api_key = await tenant_service.create_api_key(
-                    tenant_id=UUID(tenant_id),
-                    name="Demo API Key",
-                    description="Auto-generated for demo purposes",
-                    expires_at=demo_expires_at
-                )
+                demo_api_key = await tenant_service.create_api_key(tenant_slug)
                 
                 api_keys.append(ApiKeyCreateResponse(
                     api_key=demo_api_key,
@@ -869,7 +864,7 @@ async def list_demo_tenants(
                 continue
             
             # Get API keys for tenant
-            api_keys = await tenant_service.list_api_keys(tenant.id)
+            api_keys = await tenant_service.list_api_keys(tenant.slug)
             
             # Filter for demo keys (keys with "Demo" in name or description)
             demo_keys = []
@@ -882,7 +877,7 @@ async def list_demo_tenants(
             
             if demo_keys:  # Only include tenants with demo keys
                 demo_tenants.append(DemoTenantInfo(
-                    tenant_id=tenant.id,
+                    tenant_id=tenant.slug,
                     tenant_name=tenant.name,
                     description="Demo tenant",  # Simplified - no description field
                     api_keys=demo_keys,
@@ -931,19 +926,19 @@ async def cleanup_demo_environment(
                 continue
             
             # Get API keys for tenant
-            api_keys = await tenant_service.list_api_keys(tenant.id)
+            api_keys = await tenant_service.list_api_keys(tenant.slug)
             
             # Find and delete demo keys
             for key in api_keys:
                 if "demo" in key.get("name", "").lower() or "demo" in key.get("description", "").lower():
                     try:
-                        await tenant_service.delete_api_key(tenant.id, key.get("id"))
+                        await tenant_service.delete_api_key(tenant.slug, key.get("id"))
                         expired_keys += 1
                     except Exception as e:
                         logger.warning(f"Failed to delete demo key {key.get('id')}: {e}")
             
             # If tenant only had demo keys and no other keys, mark as cleaned
-            remaining_keys = await tenant_service.list_api_keys(tenant.id)
+            remaining_keys = await tenant_service.list_api_keys(tenant.slug)
             if not remaining_keys:
                 cleaned_tenants += 1
         

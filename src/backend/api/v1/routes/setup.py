@@ -114,7 +114,7 @@ async def initialize_system(request: SetupInitializeRequest):
         )
         
         # Initialize embedding manager for admin tenant
-        embedding_manager = EmbeddingManager(tenant_id=admin_tenant_id)
+        embedding_manager = EmbeddingManager(tenant_id=admin_tenant_slug)
         await embedding_manager.initialize_collections()
         
         # Write admin credentials to .env file if it doesn't exist

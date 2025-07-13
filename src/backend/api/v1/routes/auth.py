@@ -49,7 +49,7 @@ async def list_tenants(
     tenants = await tenant_service.list_tenants()
     return [
         TenantResponse(
-            id=tenant.id,
+            id=tenant.slug,
             name=tenant.name,
             slug=tenant.slug,
             plan_tier="free",  # Simplified - no plan_tier field
@@ -81,7 +81,7 @@ async def create_tenant(
         tenant = await tenant_service.get_tenant_by_slug(tenant_result["slug"])
         
         return TenantResponse(
-            id=tenant.id,
+            id=tenant.slug,
             name=tenant.name,
             slug=tenant.slug,
             plan_tier="free",  # Simplified - no plan_tier field
@@ -110,7 +110,7 @@ async def get_tenant(
         )
     
     return TenantResponse(
-        id=tenant.id,
+        id=tenant.slug,
         name=tenant.name,
         slug=tenant.slug,
         plan_tier="free",  # Simplified - no plan_tier field
@@ -136,7 +136,7 @@ async def create_api_key(
         )
     
     try:
-        api_key = await tenant_service.regenerate_api_key(tenant.id)
+        api_key = await tenant_service.regenerate_api_key(tenant.slug)
         
         return ApiKeyResponse(
             api_key=api_key,
@@ -187,7 +187,7 @@ async def revoke_api_key(
         )
     
     try:
-        await tenant_service.revoke_api_key(tenant.id)
+        await tenant_service.revoke_api_key(tenant.slug)
         return {"message": f"API key revoked for tenant {tenant.slug}"}
     except Exception as e:
         raise HTTPException(
@@ -205,7 +205,7 @@ async def get_current_tenant_info(
     # The tenant is injected by the middleware
     
     return TenantResponse(
-        id=tenant.id,
+        id=tenant.slug,
         name=tenant.name,
         slug=tenant.slug,
         plan_tier="free",  # Simplified - no plan_tier field

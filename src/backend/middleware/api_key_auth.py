@@ -138,17 +138,17 @@ async def api_key_auth_middleware(request: Request, call_next):
                 }
             )
         
-        # Add tenant context to request state (convert UUID to string for JSON serialization)
-        request.state.tenant_id = str(tenant.id)
-        request.state.tenant = tenant  # Keep the full tenant object
+        # Add tenant context to request state (using slug as identifier)
         request.state.tenant_slug = tenant.slug
+        request.state.tenant_id = tenant.slug  # For backward compatibility
+        request.state.tenant = tenant  # Keep the full tenant object
         request.state.api_key = api_key
         
         # Update API key last used timestamp (async, don't wait)
         try:
             async with AsyncSessionLocal() as db:
                 tenant_service = TenantService(db)
-                await tenant_service.update_api_key_last_used(tenant.id)
+                await tenant_service.update_api_key_last_used(tenant.slug)
         except Exception as e:
             # Don't fail request if we can't update usage
             logger.error(f"Failed to update API key usage: {e}")
@@ -159,8 +159,8 @@ async def api_key_auth_middleware(request: Request, call_next):
         response = await call_next(request)
         
         # Add tenant info to response headers for debugging
-        response.headers["X-Tenant-ID"] = str(tenant.id)
         response.headers["X-Tenant-Slug"] = tenant.slug
+        response.headers["X-Tenant-ID"] = tenant.slug  # For backward compatibility
         
         return response
         
@@ -187,10 +187,10 @@ def get_current_tenant(request: Request):
 
 
 def get_current_tenant_id(request: Request):
-    """FastAPI dependency to get current tenant ID as string"""
-    if not hasattr(request.state, 'tenant_id'):
+    """FastAPI dependency to get current tenant slug as string"""
+    if not hasattr(request.state, 'tenant_slug'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No authenticated tenant found"
         )
-    return request.state.tenant_id  # Already a string
+    return request.state.tenant_slug  # Return slug as identifier

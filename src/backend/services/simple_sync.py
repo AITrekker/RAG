@@ -4,7 +4,6 @@ Super Simple Sync - No fancy patterns, just straightforward code
 
 import logging
 from typing import List
-from uuid import UUID
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,17 +16,17 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-async def simple_sync_files(db: AsyncSession, tenant_id: UUID) -> dict:
+async def simple_sync_files(db: AsyncSession, tenant_slug: str) -> dict:
     """
     Simple file sync - no complex abstractions
     Just process files one by one with basic logging
     """
-    logger.info(f"🚀 Starting simple sync for tenant {tenant_id}")
+    logger.info(f"🚀 Starting simple sync for tenant {tenant_slug}")
     
     try:
         # Get all files for this tenant
         result = await db.execute(
-            select(File).where(File.tenant_id == tenant_id)
+            select(File).where(File.tenant_slug == tenant_slug)
         )
         files = result.scalars().all()
         

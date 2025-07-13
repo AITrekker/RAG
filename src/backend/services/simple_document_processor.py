@@ -60,7 +60,7 @@ class SimpleDocumentProcessor:
             # Add to RAG service (handles chunking and embedding)
             success = await self.rag_service.add_document(
                 file_content=text_content,
-                tenant_id=file_record.tenant_id,
+                tenant_slug=file_record.tenant_slug,
                 file_record=file_record
             )
             

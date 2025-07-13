@@ -243,7 +243,7 @@ class SyncEmbeddingService:
     def process_files_with_progress(
         self, 
         files: List[File], 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         sync_op_id: UUID
     ) -> Dict[str, Any]:
         """Process multiple files with detailed progress tracking"""
@@ -279,7 +279,7 @@ class SyncEmbeddingService:
                 
                 try:
                     # Extract text
-                    file_path = Path(settings.upload_directory) / str(tenant_id) / file_record.filename
+                    file_path = Path(settings.upload_directory) / str(tenant_slug) / file_record.filename
                     text_content, extraction_method = self.extract_text_from_file(file_path)
                     
                     progress.update(

@@ -33,7 +33,7 @@ async def upload_file(
     """Upload a file for the authenticated tenant"""
     try:
         file_record = await file_service.upload_file(
-            tenant_id=current_tenant.id,
+            tenant_id=current_tenant.slug,
             file=file
         )
         
@@ -63,7 +63,7 @@ async def list_files(
     """List files for the authenticated tenant"""
     try:
         files = await file_service.list_files(
-            tenant_id=current_tenant.id,
+            tenant_id=current_tenant.slug,
             skip=skip,
             limit=limit,
             sync_status=sync_status
@@ -106,7 +106,7 @@ async def get_file(
     file_service: FileService = Depends(get_file_service_dep)
 ):
     """Get file details"""
-    file_record = await file_service.get_file(current_tenant.id, file_id)
+    file_record = await file_service.get_file(current_tenant.slug, file_id)
     
     if not file_record:
         raise HTTPException(
@@ -135,7 +135,7 @@ async def delete_file(
     file_service: FileService = Depends(get_file_service_dep)
 ):
     """Delete a file"""
-    success = await file_service.delete_file(current_tenant.id, file_id)
+    success = await file_service.delete_file(current_tenant.slug, file_id)
     
     if not success:
         raise HTTPException(
@@ -171,5 +171,5 @@ async def get_file_chunks(
     rag_service = Depends(get_rag_service_dep)
 ):
     """Get all chunks for a file"""
-    chunks = await rag_service.get_document_chunks(file_id, current_tenant.id)
+    chunks = await rag_service.get_document_chunks(file_id, current_tenant.slug)
     return {"chunks": chunks}

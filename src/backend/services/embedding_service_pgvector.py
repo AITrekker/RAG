@@ -6,7 +6,7 @@ Simplified, single-database implementation
 import asyncio
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4  # Still needed for chunk and file IDs
 import hashlib
 import logging
 from pathlib import Path
@@ -112,7 +112,7 @@ class PgVectorEmbeddingService:
     async def process_file_to_chunks(
         self, 
         file_path: Path, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         file_record: File
     ) -> List[DocumentChunk]:
         """
@@ -120,7 +120,7 @@ class PgVectorEmbeddingService:
         
         Args:
             file_path: Path to the file to process
-            tenant_id: Tenant ID for the file
+            tenant_slug: Tenant ID for the file
             file_record: Database file record
             
         Returns:
@@ -150,7 +150,7 @@ class PgVectorEmbeddingService:
                             chunk_index=chunk_index,
                             metadata={
                                 'file_id': str(file_record.id),
-                                'tenant_id': str(tenant_id),
+                                'tenant_slug': tenant_slug,
                                 'filename': file_record.filename,
                                 'file_path': file_record.file_path,
                                 'start_word': start,
@@ -245,16 +245,16 @@ class PgVectorEmbeddingService:
                 await self.db.execute(
                     text("""
                         INSERT INTO embedding_chunks 
-                        (id, file_id, tenant_id, chunk_index, chunk_content, chunk_hash, 
+                        (id, file_id, tenant_slug, chunk_index, chunk_content, chunk_hash, 
                          token_count, embedding, embedding_model, processed_at, created_at, updated_at)
                         VALUES 
-                        (:id, :file_id, :tenant_id, :chunk_index, :chunk_content, :chunk_hash,
+                        (:id, :file_id, :tenant_slug, :chunk_index, :chunk_content, :chunk_hash,
                          :token_count, (:embedding)::vector, :embedding_model, :processed_at, :created_at, :updated_at)
                     """),
                     {
                         'id': str(chunk_id),
                         'file_id': str(file_record.id),
-                        'tenant_id': str(file_record.tenant_id),
+                        'tenant_slug': file_record.tenant_slug,
                         'chunk_index': chunk.chunk_index,
                         'chunk_content': chunk.content,
                         'chunk_hash': chunk.hash,
@@ -271,7 +271,7 @@ class PgVectorEmbeddingService:
                 chunk_record = EmbeddingChunk(
                     id=chunk_id,
                     file_id=file_record.id,
-                    tenant_id=file_record.tenant_id,
+                    tenant_slug=file_record.tenant_slug,
                     chunk_index=chunk.chunk_index,
                     chunk_content=chunk.content,
                     chunk_hash=chunk.hash,
@@ -357,7 +357,7 @@ class PgVectorEmbeddingService:
     async def search_similar_chunks(
         self, 
         query_embedding: List[float], 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         limit: int = 10
     ) -> List[Tuple[EmbeddingChunk, float]]:
         """
@@ -365,7 +365,7 @@ class PgVectorEmbeddingService:
         
         Args:
             query_embedding: Query vector
-            tenant_id: Tenant ID to filter by
+            tenant_slug: Tenant ID to filter by
             limit: Maximum number of results
             
         Returns:
@@ -382,11 +382,11 @@ class PgVectorEmbeddingService:
                 file_result = await self.db.execute(
                     text("""
                         SELECT id FROM files 
-                        WHERE tenant_id = :tenant_id 
+                        WHERE tenant_slug = :tenant_slug 
                         AND sync_status = 'synced' 
                         AND deleted_at IS NULL
                     """),
-                    {'tenant_id': str(tenant_id)}
+                    {'tenant_slug': tenant_id}
                 )
                 valid_file_ids = [str(row[0]) for row in file_result.fetchall()]
                 
@@ -398,14 +398,14 @@ class PgVectorEmbeddingService:
                     text("""
                         SELECT ec.*, ec.embedding <=> :query_vector as similarity
                         FROM embedding_chunks ec
-                        WHERE ec.tenant_id = :tenant_id
+                        WHERE ec.tenant_slug = :tenant_slug
                         AND ec.file_id = ANY(:valid_file_ids)
                         ORDER BY similarity ASC
                         LIMIT :limit
                     """),
                     {
                         'query_vector': query_vector,
-                        'tenant_id': str(tenant_id),
+                        'tenant_slug': tenant_slug,
                         'valid_file_ids': valid_file_ids,
                         'limit': limit
                     }
@@ -417,7 +417,7 @@ class PgVectorEmbeddingService:
                     chunk = EmbeddingChunk(
                         id=row.id,
                         file_id=row.file_id,
-                        tenant_id=row.tenant_id,
+                        tenant_slug=row.tenant_slug,
                         chunk_index=row.chunk_index,
                         chunk_content=row.chunk_content,
                         chunk_hash=row.chunk_hash,
@@ -438,13 +438,13 @@ class PgVectorEmbeddingService:
             logger.error(f"❌ Error searching similar chunks: {e}")
             return []
     
-    async def get_tenant_chunk_count(self, tenant_id: UUID) -> int:
+    async def get_tenant_chunk_count(self, tenant_slug: str) -> int:
         """Get total number of chunks for a tenant"""
         try:
             # Use explicit transaction management to prevent rollbacks
             async with self.db.begin():
                 result = await self.db.execute(
-                    select(func.count(EmbeddingChunk.id)).where(EmbeddingChunk.tenant_id == tenant_id)
+                    select(func.count(EmbeddingChunk.id)).where(EmbeddingChunk.tenant_slug == tenant_slug)
                 )
                 return result.scalar() or 0
         except Exception as e:
@@ -464,7 +464,7 @@ class PgVectorEmbeddingService:
         from src.backend.config.settings import get_settings
         settings = get_settings()
         file_path = Path(settings.documents_path) / file_record.file_path
-        return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
+        return await self.process_file_to_chunks(file_path, file_record.tenant_slug, file_record)
     
     async def process_and_store_file(
         self, 
@@ -490,7 +490,7 @@ class PgVectorEmbeddingService:
                 chunks = await self._process_with_hybrid_approach(file_path, file_record)
             else:
                 chunks = await self.process_file_to_chunks(
-                    file_path, file_record.tenant_id, file_record
+                    file_path, file_record.tenant_slug, file_record
                 )
             
             if not chunks:
@@ -520,7 +520,7 @@ class PgVectorEmbeddingService:
         Process file using SimpleDocumentProcessor (hybrid processing removed for simplicity)
         """
         logger.info(f"✓ Processing {file_record.filename} using SimpleDocumentProcessor")
-        return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
+        return await self.process_file_to_chunks(file_path, file_record.tenant_slug, file_record)
 
 
 # Factory function for dependency injection

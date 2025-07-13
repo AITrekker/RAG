@@ -40,13 +40,15 @@ class BaseModel(Base):
 # CORE TABLES (4 TABLES TOTAL)
 # =============================================
 
-class Tenant(BaseModel):
-    """Simple tenant model for RAG experimentation"""
+class Tenant(Base):
+    """Simple tenant model for RAG experimentation - slug-based primary key"""
     __tablename__ = "tenants"
     
+    slug: Mapped[str] = mapped_column(String(50), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     api_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     files: Mapped[List["File"]] = relationship("File", back_populates="tenant")
@@ -62,7 +64,7 @@ class File(BaseModel):
     """File tracking model"""
     __tablename__ = "files"
     
-    tenant_id: Mapped[UUID] = mapped_column(PostgreUUID(as_uuid=True), ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False)
+    tenant_slug: Mapped[str] = mapped_column(String(50), ForeignKey('tenants.slug', ondelete='CASCADE'), nullable=False)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -92,13 +94,13 @@ class File(BaseModel):
     
     # Constraints
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'file_path', name='uq_tenant_file_path'),
+        UniqueConstraint('tenant_slug', 'file_path', name='uq_tenant_file_path'),
         CheckConstraint('file_size > 0', name='check_file_size_positive'),
         CheckConstraint("sync_status IN ('pending', 'processing', 'synced', 'failed', 'deleted')", name='check_sync_status'),
-        Index('idx_files_tenant_id', 'tenant_id'),
+        Index('idx_files_tenant_slug', 'tenant_slug'),
         Index('idx_files_sync_status', 'sync_status', 'updated_at'),
-        Index('idx_files_hash_lookup', 'tenant_id', 'file_hash'),
-        Index('idx_files_path_lookup', 'tenant_id', 'file_path')
+        Index('idx_files_hash_lookup', 'tenant_slug', 'file_hash'),
+        Index('idx_files_path_lookup', 'tenant_slug', 'file_path')
     )
 
 class EmbeddingChunk(BaseModel):
@@ -106,7 +108,7 @@ class EmbeddingChunk(BaseModel):
     __tablename__ = "embedding_chunks"
     
     file_id: Mapped[UUID] = mapped_column(PostgreUUID(as_uuid=True), ForeignKey('files.id', ondelete='CASCADE'), nullable=False)
-    tenant_id: Mapped[UUID] = mapped_column(PostgreUUID(as_uuid=True), ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False)
+    tenant_slug: Mapped[str] = mapped_column(String(50), ForeignKey('tenants.slug', ondelete='CASCADE'), nullable=False)
     
     # Chunk Information
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -134,7 +136,7 @@ class EmbeddingChunk(BaseModel):
             UniqueConstraint('file_id', 'chunk_index', name='uq_file_chunk_index'),
             CheckConstraint('chunk_index >= 0', name='check_chunk_index_non_negative'),
             CheckConstraint('token_count > 0', name='check_token_count_positive'),
-            Index('idx_chunks_tenant_id', 'tenant_id'),
+            Index('idx_chunks_tenant_slug', 'tenant_slug'),
             Index('idx_chunks_file_id', 'file_id', 'chunk_index'),
             Index('idx_chunks_embedding', 'embedding', postgresql_using='ivfflat', postgresql_ops={'embedding': 'vector_cosine_ops'})
         )
@@ -143,7 +145,7 @@ class EmbeddingChunk(BaseModel):
             UniqueConstraint('file_id', 'chunk_index', name='uq_file_chunk_index'),
             CheckConstraint('chunk_index >= 0', name='check_chunk_index_non_negative'),
             CheckConstraint('token_count > 0', name='check_token_count_positive'),
-            Index('idx_chunks_tenant_id', 'tenant_id'),
+            Index('idx_chunks_tenant_slug', 'tenant_slug'),
             Index('idx_chunks_file_id', 'file_id', 'chunk_index')
         )
 
@@ -151,7 +153,7 @@ class SyncOperation(BaseModel):
     """Sync operation tracking"""
     __tablename__ = "sync_operations"
     
-    tenant_id: Mapped[UUID] = mapped_column(PostgreUUID(as_uuid=True), ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False)
+    tenant_slug: Mapped[str] = mapped_column(String(50), ForeignKey('tenants.slug', ondelete='CASCADE'), nullable=False)
     operation_type: Mapped[str] = mapped_column(String(20), nullable=False)
     
     # Operation Status
@@ -199,10 +201,10 @@ class SyncOperation(BaseModel):
         CheckConstraint("progress_percentage >= 0 AND progress_percentage <= 100", name='check_progress_range'),
         CheckConstraint("current_file_index >= 0", name='check_current_file_index'),
         CheckConstraint("total_files_to_process >= 0", name='check_total_files'),
-        Index('idx_sync_operations_tenant', 'tenant_id', 'started_at'),
+        Index('idx_sync_operations_tenant', 'tenant_slug', 'started_at'),
         Index('idx_sync_operations_status', 'status', 'started_at'),
         Index('idx_sync_operations_heartbeat', 'status', 'heartbeat_at'),
-        Index('idx_sync_operations_progress', 'tenant_id', 'status', 'progress_stage')
+        Index('idx_sync_operations_progress', 'tenant_slug', 'status', 'progress_stage')
     )
 
 # =============================================

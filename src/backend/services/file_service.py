@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, BinaryIO
-from uuid import UUID
+from uuid import UUID  # Still needed for file IDs
 
 from fastapi import UploadFile, HTTPException
 from sqlalchemy import select, update, delete
@@ -27,14 +27,14 @@ class FileService:
     
     async def upload_file(
         self, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         file: UploadFile
     ) -> File:
         """
         Upload a file for a tenant
         
         Args:
-            tenant_id: Tenant ID
+            tenant_slug: Tenant ID
             file: FastAPI UploadFile object
             
         Returns:
@@ -45,7 +45,7 @@ class FileService:
             raise HTTPException(400, "File too large")
         
         # Create tenant upload directory
-        tenant_upload_dir = Path(f"./data/uploads/{tenant_id}")
+        tenant_upload_dir = Path(f"./data/uploads/{tenant_slug}")
         tenant_upload_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate unique filename to avoid conflicts
@@ -65,7 +65,7 @@ class FileService:
         
         # Create file record
         file_record = File(
-            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
             filename=file.filename,
             file_path=str(file_path.relative_to("./data/uploads/")),
             file_size=len(content),
@@ -80,21 +80,21 @@ class FileService:
         
         return file_record
     
-    async def get_file(self, tenant_id: UUID, file_id: UUID) -> Optional[File]:
+    async def get_file(self, tenant_slug: str, file_id: UUID) -> Optional[File]:
         """Get file by ID with tenant isolation"""
         # Use explicit transaction management to prevent rollbacks
         async with self.db.begin():
             result = await self.db.execute(
                 select(File).where(
                     File.id == file_id,
-                    File.tenant_id == tenant_id
+                    File.tenant_slug == tenant_slug
                 )
             )
             return result.scalar_one_or_none()
     
     async def list_files(
         self, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         skip: int = 0, 
         limit: int = 100,
         sync_status: Optional[str] = None
@@ -103,7 +103,7 @@ class FileService:
         # Use explicit transaction management to prevent rollbacks
         async with self.db.begin():
             query = select(File).where(
-                File.tenant_id == tenant_id
+                File.tenant_slug == tenant_slug
             )
             
             if sync_status:
@@ -117,12 +117,12 @@ class FileService:
     async def update_file_metadata(
         self, 
         file_id: UUID, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         metadata: Dict[str, Any]
     ) -> Optional[File]:
         """Update file metadata"""
         # First check if file exists and belongs to tenant
-        file_record = await self.get_file(tenant_id, file_id)
+        file_record = await self.get_file(tenant_slug, file_id)
         if not file_record:
             return None
         
@@ -169,9 +169,9 @@ class FileService:
         )
         await self.db.commit()
     
-    async def delete_file(self, tenant_id: UUID, file_id: UUID) -> bool:
+    async def delete_file(self, tenant_slug: str, file_id: UUID) -> bool:
         """Hard delete a file"""
-        file_record = await self.get_file(tenant_id, file_id)
+        file_record = await self.get_file(tenant_slug, file_id)
         if not file_record:
             return False
         
@@ -198,12 +198,12 @@ class FileService:
         # Run hash calculation in executor to prevent blocking
         return await asyncio.get_event_loop().run_in_executor(None, _sync_hash_calculation)
     
-    async def scan_tenant_files(self, tenant_id: UUID) -> List[Dict[str, Any]]:
+    async def scan_tenant_files(self, tenant_slug: str) -> List[Dict[str, Any]]:
         """
         Scan filesystem for tenant files and return file info
         Used by sync service for delta detection
         """
-        tenant_upload_dir = Path(f"./data/uploads/{tenant_id}")
+        tenant_upload_dir = Path(f"./data/uploads/{tenant_slug}")
         if not tenant_upload_dir.exists():
             return []
         
@@ -222,19 +222,19 @@ class FileService:
     
     async def get_files_by_sync_status(
         self, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         status: str
     ) -> List[File]:
         """Get files by sync status for processing"""
         result = await self.db.execute(
             select(File).where(
-                File.tenant_id == tenant_id,
+                File.tenant_slug == tenant_slug,
                 File.sync_status == status
             )
         )
         return result.scalars().all()
     
-    async def get_tenant_storage_usage(self, tenant_id: UUID) -> Dict[str, Any]:
+    async def get_tenant_storage_usage(self, tenant_slug: str) -> Dict[str, Any]:
         """Get storage usage statistics for a tenant"""
         # TODO: Implement storage usage calculation
         return {

@@ -6,7 +6,7 @@ import hashlib
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
-from uuid import UUID
+# UUID no longer needed - using string slugs as primary keys
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,12 +42,11 @@ class TenantService:
         )
         return result.scalar_one_or_none()
     
-    async def get_tenant_by_id(self, tenant_id: UUID) -> Optional[Tenant]:
-        """Get tenant by ID."""
-        result = await self.db.execute(
-            select(Tenant).where(Tenant.id == tenant_id)
-        )
-        return result.scalar_one_or_none()
+    async def get_tenant_by_id(self, tenant_id: str) -> Optional[Tenant]:
+        """Get tenant by ID - DEPRECATED: Use get_tenant_by_slug instead."""
+        # This method is kept for backward compatibility but should not be used
+        # since Tenant model no longer has UUID id field
+        return None
     
     async def get_tenant_by_slug(self, slug: str) -> Optional[Tenant]:
         """Get tenant by slug."""
@@ -56,11 +55,11 @@ class TenantService:
         )
         return result.scalar_one_or_none()
     
-    async def update_api_key_last_used(self, tenant_id: UUID) -> None:
+    async def update_api_key_last_used(self, tenant_slug: str) -> None:
         """Update tenant last used (simplified - no dedicated field)."""
         await self.db.execute(
             update(Tenant)
-            .where(Tenant.id == tenant_id)
+            .where(Tenant.slug == tenant_slug)
             .values(updated_at=func.now())
         )
         await self.db.commit()
@@ -97,37 +96,36 @@ class TenantService:
             raise e
         
         return {
-            "id": str(tenant.id),
-            "name": tenant.name,
             "slug": tenant.slug,
+            "name": tenant.name,
             "api_key": api_key,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None
         }
     
     async def update_tenant(
         self,
-        tenant_id: UUID,
+        tenant_slug: str,
         name: Optional[str] = None,
-        slug: Optional[str] = None
+        new_slug: Optional[str] = None
     ) -> Optional[Tenant]:
         """Update tenant details."""
-        tenant = await self.get_tenant_by_id(tenant_id)
+        tenant = await self.get_tenant_by_slug(tenant_slug)
         if not tenant:
             return None
         
         # Update fields if provided
         if name is not None:
             tenant.name = name
-        if slug is not None:
-            tenant.slug = slug
+        if new_slug is not None:
+            tenant.slug = new_slug
         
         await self.db.commit()
         await self.db.refresh(tenant)
         return tenant
     
-    async def delete_tenant(self, tenant_id: UUID) -> bool:
+    async def delete_tenant(self, tenant_slug: str) -> bool:
         """Delete a tenant."""
-        tenant = await self.get_tenant_by_id(tenant_id)
+        tenant = await self.get_tenant_by_slug(tenant_slug)
         if not tenant:
             return False
         
@@ -137,63 +135,76 @@ class TenantService:
     
     async def update_tenant_api_key(
         self, 
-        tenant_id: UUID, 
+        tenant_slug: str, 
         api_key: str
     ) -> None:
-        """Update tenant API key."""
+        """Update tenant API key by slug."""
         await self.db.execute(
             update(Tenant)
-            .where(Tenant.id == tenant_id)
+            .where(Tenant.slug == tenant_slug)
             .values(api_key=api_key)
         )
         await self.db.commit()
     
-    async def regenerate_api_key(self, tenant_id: UUID) -> str:
+    async def update_tenant_api_key_by_slug(
+        self, 
+        tenant_slug: str, 
+        api_key: str
+    ) -> None:
+        """Update tenant API key by slug."""
+        await self.db.execute(
+            update(Tenant)
+            .where(Tenant.slug == tenant_slug)
+            .values(api_key=api_key)
+        )
+        await self.db.commit()
+    
+    async def regenerate_api_key(self, tenant_slug: str) -> str:
         """Regenerate API key for a tenant."""
-        tenant = await self.get_tenant_by_id(tenant_id)
+        tenant = await self.get_tenant_by_slug(tenant_slug)
         if not tenant:
             raise ValueError("Tenant not found")
         
         # Generate new API key
         api_key = f"tenant_{tenant.slug}_{secrets.token_hex(16)}"
         
-        await self.update_tenant_api_key(tenant_id, api_key)
+        await self.update_tenant_api_key(tenant_slug, api_key)
         return api_key
     
-    async def revoke_api_key(self, tenant_id: UUID) -> None:
+    async def revoke_api_key(self, tenant_slug: str) -> None:
         """Revoke API key for a tenant."""
         await self.db.execute(
             update(Tenant)
-            .where(Tenant.id == tenant_id)
+            .where(Tenant.slug == tenant_slug)
             .values(api_key=None)
         )
         await self.db.commit()
     
     async def create_api_key(
         self, 
-        tenant_id: UUID
+        tenant_slug: str
     ) -> str:
         """Create a new API key for a tenant."""
-        tenant = await self.get_tenant_by_id(tenant_id)
+        tenant = await self.get_tenant_by_slug(tenant_slug)
         if not tenant:
             raise ValueError("Tenant not found")
         
         # Generate new API key
         api_key = f"tenant_{tenant.slug}_{secrets.token_hex(16)}"
         
-        await self.update_tenant_api_key(tenant_id, api_key)
+        await self.update_tenant_api_key(tenant_slug, api_key)
         return api_key
     
-    async def list_api_keys(self, tenant_id: UUID) -> List[Dict[str, Any]]:
+    async def list_api_keys(self, tenant_slug: str) -> List[Dict[str, Any]]:
         """List API keys for a tenant."""
-        tenant = await self.get_tenant_by_id(tenant_id)
+        tenant = await self.get_tenant_by_slug(tenant_slug)
         if not tenant:
             return []
         
         # Return the single API key
         if tenant.api_key:
             return [{
-                "id": f"key_{tenant.id}",
+                "id": f"key_{tenant.slug}",
                 "name": "Default Key",
                 "key_prefix": tenant.api_key[:8] + "..." + tenant.api_key[-8:] if len(tenant.api_key) > 16 else tenant.api_key,
                 "is_active": True,
@@ -204,22 +215,21 @@ class TenantService:
         
         return []
     
-    async def delete_api_key(self, tenant_id: UUID, key_id: str) -> bool:
+    async def delete_api_key(self, tenant_slug: str, key_id: str) -> bool:
         """Delete API key for a tenant."""
         # For now, this revokes the API key (can be extended for multiple keys)
-        await self.revoke_api_key(tenant_id)
+        await self.revoke_api_key(tenant_slug)
         return True
     
-    async def get_tenant_stats(self, tenant_id: UUID) -> Dict[str, Any]:
+    async def get_tenant_stats(self, tenant_slug: str) -> Dict[str, Any]:
         """Get tenant statistics."""
-        tenant = await self.get_tenant_by_id(tenant_id)
+        tenant = await self.get_tenant_by_slug(tenant_slug)
         if not tenant:
             return {}
         
         return {
-            "id": str(tenant.id),
-            "name": tenant.name,
             "slug": tenant.slug,
+            "name": tenant.name,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
             "last_activity": tenant.updated_at.isoformat() if tenant.updated_at else None,
             "has_api_key": bool(tenant.api_key)
@@ -241,8 +251,8 @@ async def get_tenant_by_api_key(api_key: str) -> Optional[Tenant]:
         return await service.get_tenant_by_api_key(api_key)
 
 
-async def update_api_key_usage(tenant_id: UUID) -> None:
+async def update_api_key_usage(tenant_slug: str) -> None:
     """Global function to update API key usage (for middleware)"""
     async for db in get_async_db():
         service = TenantService(db)
-        await service.update_api_key_last_used(tenant_id)
+        await service.update_api_key_last_used(tenant_slug)

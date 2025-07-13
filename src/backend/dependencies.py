@@ -176,6 +176,6 @@ def get_current_tenant_dep(request: Request) -> Tenant:
 def get_current_tenant_id(request: Request) -> str:
     """Get current tenant ID"""
     tenant = get_current_tenant(request)
-    return str(tenant.id)
+    return str(tenant.slug)
 
 

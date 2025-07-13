@@ -1,41 +1,20 @@
-# Development Frontend Dockerfile
+# Simplified Frontend Dockerfile for Teaching
 FROM node:20-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies for building native modules
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    git \
-    wget \
-    curl
-
-# Create non-root user early
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S react -u 1001 -G nodejs
-
 # Copy package files first for better caching
 COPY src/frontend/package*.json ./
-RUN chown -R react:nodejs /app
 
-# Switch to non-root user for npm operations
-USER react
+# Install dependencies
+RUN npm install
 
-# Install dependencies with optimizations
-RUN npm install --legacy-peer-deps --prefer-offline --no-audit
-
-# Copy source code (this will be overridden by volume in development)
-COPY --chown=react:nodejs src/frontend .
+# Copy source code
+COPY src/frontend .
 
 # Expose port for Vite dev server
 EXPOSE 3000
 
-# Health check for Vite dev server
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000 || exit 1
-
 # Start development server with hot reloading
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000", "--clearScreen", "false"] 
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
