@@ -57,18 +57,18 @@ sync_engine = create_engine(
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
     pool_pre_ping=True,
-    echo=settings.debug
+    echo=False
 )
 
-# Async engine for application usage with optimized pool settings
+# Async engine for application usage with conservative pool settings
 async_engine = create_async_engine(
     current_db_url.replace("postgresql://", "postgresql+asyncpg://", 1),
-    pool_size=30,  # Increased from settings for better concurrency
-    max_overflow=50,  # Increased overflow for peak load
-    pool_timeout=10,  # Reduced timeout to fail fast
+    pool_size=10,  # Reduced to prevent exhaustion
+    max_overflow=20,  # Conservative overflow
+    pool_timeout=30,  # Longer timeout to prevent churn
     pool_recycle=1800,  # Recycle connections every 30 minutes
     pool_pre_ping=True,
-    echo=False,  # Disable echo for performance
+    echo=False if os.getenv("DEBUG", "").lower() != "true" else False,  # Conditional logging
     # Additional async-specific settings for better connection handling
     connect_args={
         "server_settings": {
@@ -80,7 +80,7 @@ async_engine = create_async_engine(
         }
     },
     # Conservative connection handling to prevent session conflicts
-    pool_reset_on_return="rollback",
+    pool_reset_on_return="commit",
     # Enable connection pool logging for debugging
     logging_name="rag_pool",
     # Use LIFO to reuse recent connections
@@ -92,6 +92,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 AsyncSessionLocal = async_sessionmaker(
     async_engine, 
     expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
     class_=AsyncSession
 )
 
@@ -113,7 +115,7 @@ def get_environment_engine(environment: str, async_mode: bool = True):
                 pool_timeout=settings.db_pool_timeout,
                 pool_recycle=settings.db_pool_recycle,
                 pool_pre_ping=True,
-                echo=settings.debug
+                echo=False
             )
         else:
             engine = create_engine(
@@ -123,7 +125,7 @@ def get_environment_engine(environment: str, async_mode: bool = True):
                 pool_timeout=settings.db_pool_timeout,
                 pool_recycle=settings.db_pool_recycle,
                 pool_pre_ping=True,
-                echo=settings.debug
+                echo=False
             )
         
         _environment_engines[cache_key] = engine
@@ -165,8 +167,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     try:
         from sqlalchemy import text
         session = AsyncSessionLocal()
-        # Set session timeout
-        await session.execute(text("SET statement_timeout = '300s'"))
+        # Timeout removed - was causing hangs
         yield session
     except Exception as e:
         if session:
@@ -240,7 +241,9 @@ async def check_database_health() -> bool:
     try:
         from sqlalchemy import text
         async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
+            # Use begin() to properly manage the transaction
+            async with session.begin():
+                await session.execute(text("SELECT 1"))
             
             # Report pool statistics
             pool = async_engine.pool

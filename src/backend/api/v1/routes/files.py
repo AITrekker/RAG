@@ -32,12 +32,8 @@ async def upload_file(
 ):
     """Upload a file for the authenticated tenant"""
     try:
-        # TODO: Get actual user ID from authentication
-        user_id = UUID("00000000-0000-0000-0000-000000000000")  # Placeholder
-        
         file_record = await file_service.upload_file(
             tenant_id=current_tenant.id,
-            uploaded_by=user_id,
             file=file
         )
         
@@ -157,10 +153,7 @@ async def sync_file(
     sync_service: SyncService = Depends(get_sync_service_dep)
 ):
     """Trigger sync for a specific file"""
-    # TODO: Get actual user ID from authentication
-    user_id = UUID("00000000-0000-0000-0000-000000000000")  # Placeholder
-    
-    success = await sync_service.trigger_file_sync(file_id, user_id)
+    success = await sync_service.trigger_file_sync(file_id)
     
     if not success:
         raise HTTPException(

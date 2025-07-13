@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     api_v1_str: str = Field(default="/api/v1", env="API_V1_STR")
     
     # Logging settings
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
+    log_level: str = Field(default="DEBUG", env="LOG_LEVEL")
     log_format: str = Field(
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         env="LOG_FORMAT"

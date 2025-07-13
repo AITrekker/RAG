@@ -28,7 +28,6 @@ class FileService:
     async def upload_file(
         self, 
         tenant_id: UUID, 
-        uploaded_by: UUID, 
         file: UploadFile
     ) -> File:
         """
@@ -36,7 +35,6 @@ class FileService:
         
         Args:
             tenant_id: Tenant ID
-            uploaded_by: User ID who uploaded the file
             file: FastAPI UploadFile object
             
         Returns:
@@ -68,7 +66,6 @@ class FileService:
         # Create file record
         file_record = File(
             tenant_id=tenant_id,
-            uploaded_by=uploaded_by,
             filename=file.filename,
             file_path=str(file_path.relative_to("./data/uploads/")),
             file_size=len(content),
@@ -85,13 +82,15 @@ class FileService:
     
     async def get_file(self, tenant_id: UUID, file_id: UUID) -> Optional[File]:
         """Get file by ID with tenant isolation"""
-        result = await self.db.execute(
-            select(File).where(
-                File.id == file_id,
-                File.tenant_id == tenant_id
+        # Use explicit transaction management to prevent rollbacks
+        async with self.db.begin():
+            result = await self.db.execute(
+                select(File).where(
+                    File.id == file_id,
+                    File.tenant_id == tenant_id
+                )
             )
-        )
-        return result.scalar_one_or_none()
+            return result.scalar_one_or_none()
     
     async def list_files(
         self, 
@@ -101,17 +100,19 @@ class FileService:
         sync_status: Optional[str] = None
     ) -> List[File]:
         """List files for a tenant with pagination"""
-        query = select(File).where(
-            File.tenant_id == tenant_id
-        )
-        
-        if sync_status:
-            query = query.where(File.sync_status == sync_status)
-        
-        query = query.offset(skip).limit(limit).order_by(File.created_at.desc())
-        
-        result = await self.db.execute(query)
-        return result.scalars().all()
+        # Use explicit transaction management to prevent rollbacks
+        async with self.db.begin():
+            query = select(File).where(
+                File.tenant_id == tenant_id
+            )
+            
+            if sync_status:
+                query = query.where(File.sync_status == sync_status)
+            
+            query = query.offset(skip).limit(limit).order_by(File.created_at.desc())
+            
+            result = await self.db.execute(query)
+            return result.scalars().all()
     
     async def update_file_metadata(
         self, 
@@ -184,12 +185,18 @@ class FileService:
         return True
     
     async def calculate_file_hash(self, file_path: str) -> str:
-        """Calculate SHA-256 hash of a file"""
-        hasher = hashlib.sha256()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+        """Calculate SHA-256 hash of a file (async to prevent blocking)"""
+        import asyncio
+        
+        def _sync_hash_calculation():
+            hasher = hashlib.sha256()
+            with open(file_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        
+        # Run hash calculation in executor to prevent blocking
+        return await asyncio.get_event_loop().run_in_executor(None, _sync_hash_calculation)
     
     async def scan_tenant_files(self, tenant_id: UUID) -> List[Dict[str, Any]]:
         """

@@ -112,13 +112,19 @@ export const SyncDashboard = () => {
     queryKey: ['syncStatus', tenant],
     queryFn: fetchSyncStatus,
     enabled: !!tenant && !!tenantApiKey,
-    refetchInterval: isPolling ? 2000 : false,
+    refetchInterval: isPolling ? 5000 : false,  // Reduced from 2s to 5s
+    staleTime: 5000,  // Increased cache time to 5 seconds
+    gcTime: 30000,  // Keep in cache for 30 seconds
+    retry: 1,  // Reduce retries to prevent query explosion
   });
 
   const { data: syncHistory } = useQuery({
     queryKey: ['syncHistory', tenant],
     queryFn: fetchSyncHistory,
     enabled: !!tenant && !!tenantApiKey,
+    staleTime: 15000,  // Increased cache time to 15 seconds
+    gcTime: 60000,  // Keep in cache for 1 minute
+    retry: 1,  // Reduce retries to prevent query explosion
   });
 
   const { data: changeDetection, refetch: refetchChanges } = useQuery({

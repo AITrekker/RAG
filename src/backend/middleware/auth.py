@@ -77,8 +77,8 @@ def get_current_tenant(
         "id": str(tenant.id),
         "name": tenant.name,
         "slug": tenant.slug,
-        "status": tenant.status,
-        "is_active": tenant.is_active
+        "status": "active",  # Simplified - no status field
+        "is_active": True  # Simplified - all tenants active
     }
     return tenant_dict
 

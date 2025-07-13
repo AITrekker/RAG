@@ -41,30 +41,12 @@ class BaseModel(Base):
 # =============================================
 
 class Tenant(BaseModel):
-    """Tenant model for multi-tenancy"""
+    """Simple tenant model for RAG experimentation"""
     __tablename__ = "tenants"
     
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    plan_tier: Mapped[str] = mapped_column(String(50), nullable=False, default='free')
-    storage_limit_gb: Mapped[int] = mapped_column(Integer, default=10)
-    max_users: Mapped[int] = mapped_column(Integer, default=5)
-    settings: Mapped[dict] = mapped_column(JSONB, default={})
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    
-    # Additional tenant fields
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    auto_sync: Mapped[bool] = mapped_column(Boolean, default=False)
-    sync_interval: Mapped[int] = mapped_column(Integer, default=60)
-    status: Mapped[Optional[str]] = mapped_column(String(50), default='active')
-    environment: Mapped[str] = mapped_column(String(20), nullable=False, default='production')
-    
-    # API Key Authentication (no user system - direct tenant API keys)
-    api_key: Mapped[Optional[str]] = mapped_column(String(64), unique=True)
-    api_key_hash: Mapped[Optional[str]] = mapped_column(String(64))
-    api_key_name: Mapped[Optional[str]] = mapped_column(String(100))
-    api_key_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    api_key_last_used: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    api_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     
     # Relationships
     files: Mapped[List["File"]] = relationship("File", back_populates="tenant")
@@ -72,12 +54,8 @@ class Tenant(BaseModel):
     
     # Constraints
     __table_args__ = (
-        CheckConstraint("plan_tier IN ('free', 'pro', 'enterprise')", name='check_plan_tier'),
-        CheckConstraint("environment IN ('production', 'test', 'development', 'staging')", name='check_environment'),
         Index('idx_tenants_slug', 'slug'),
-        Index('idx_tenants_active', 'is_active'),
-        Index('idx_tenants_api_key', 'api_key'),
-        Index('idx_tenants_environment', 'environment')
+        Index('idx_tenants_api_key', 'api_key')
     )
 
 class File(BaseModel):
@@ -188,6 +166,15 @@ class SyncOperation(BaseModel):
     progress_percentage: Mapped[Optional[float]] = mapped_column(Float)
     total_files_to_process: Mapped[Optional[int]] = mapped_column(Integer)
     current_file_index: Mapped[Optional[int]] = mapped_column(Integer)
+    
+    # Detailed Progress Metrics
+    current_file_name: Mapped[Optional[str]] = mapped_column(String(255))
+    current_file_size: Mapped[Optional[int]] = mapped_column(Integer)
+    current_file_type: Mapped[Optional[str]] = mapped_column(String(10))
+    processing_speed_files_per_min: Mapped[Optional[float]] = mapped_column(Float)
+    processing_speed_chunks_per_min: Mapped[Optional[float]] = mapped_column(Float)
+    memory_usage_mb: Mapped[Optional[int]] = mapped_column(Integer)
+    extraction_method: Mapped[Optional[str]] = mapped_column(String(50))
     
     # Statistics
     files_processed: Mapped[int] = mapped_column(Integer, default=0)

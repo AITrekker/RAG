@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List
 import numpy as np
+import asyncio
 
 from src.backend.dependencies import get_embedding_model
 from src.backend.middleware.api_key_auth import get_current_tenant
@@ -38,8 +39,10 @@ async def generate_embedding(
 ):
     """Generate embedding for given text"""
     try:
-        # Generate embedding
-        embedding = embedding_model.encode(request.text, normalize_embeddings=request.normalize)
+        # Generate embedding async to prevent blocking
+        embedding = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: embedding_model.encode(request.text, normalize_embeddings=request.normalize)
+        )
         
         # Convert to list (numpy array -> list)
         embedding_list = embedding.tolist()
@@ -47,7 +50,7 @@ async def generate_embedding(
         return EmbeddingResponse(
             embedding=embedding_list,
             dimensions=len(embedding_list),
-            model=embedding_model.get_model_info().get('name', 'unknown')
+            model=getattr(embedding_model, '_model_name', 'sentence-transformers')
         )
         
     except Exception as e:
@@ -62,8 +65,15 @@ async def calculate_similarity(
     """Calculate cosine similarity between two texts"""
     try:
         # Generate embeddings for both texts
-        emb1 = embedding_model.encode(request.text1, normalize_embeddings=True)
-        emb2 = embedding_model.encode(request.text2, normalize_embeddings=True)
+        # Generate embeddings async to prevent blocking
+        emb1, emb2 = await asyncio.gather(
+            asyncio.get_event_loop().run_in_executor(
+                None, lambda: embedding_model.encode(request.text1, normalize_embeddings=True)
+            ),
+            asyncio.get_event_loop().run_in_executor(
+                None, lambda: embedding_model.encode(request.text2, normalize_embeddings=True)
+            )
+        )
         
         # Calculate cosine similarity
         similarity = float(np.dot(emb1, emb2))

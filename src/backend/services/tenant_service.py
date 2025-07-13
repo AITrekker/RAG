@@ -33,108 +33,74 @@ class TenantService:
         return hashlib.sha256(api_key.encode()).hexdigest()
     
     async def get_tenant_by_api_key(self, api_key: str) -> Optional[Tenant]:
-        """Get tenant by API key (supports both direct and hash validation)."""
+        """Get tenant by API key."""
         if not api_key:
             return None
         
-        # First try direct comparison (current approach)
         result = await self.db.execute(
-            select(Tenant).where(
-                Tenant.api_key == api_key,
-                Tenant.is_active == True
-            )
-        )
-        tenant = result.scalar_one_or_none()
-        
-        if tenant:
-            return tenant
-        
-        # If not found, try hash validation (for migrated keys)
-        api_key_hash = self._generate_api_key_hash(api_key)
-        result = await self.db.execute(
-            select(Tenant).where(
-                Tenant.api_key_hash == api_key_hash,
-                Tenant.is_active == True
-            )
+            select(Tenant).where(Tenant.api_key == api_key)
         )
         return result.scalar_one_or_none()
     
     async def get_tenant_by_id(self, tenant_id: UUID) -> Optional[Tenant]:
         """Get tenant by ID."""
         result = await self.db.execute(
-            select(Tenant).where(
-                Tenant.id == tenant_id,
-                Tenant.is_active == True
-            )
+            select(Tenant).where(Tenant.id == tenant_id)
         )
         return result.scalar_one_or_none()
     
     async def get_tenant_by_slug(self, slug: str) -> Optional[Tenant]:
         """Get tenant by slug."""
         result = await self.db.execute(
-            select(Tenant).where(
-                Tenant.slug == slug,
-                Tenant.is_active == True
-            )
+            select(Tenant).where(Tenant.slug == slug)
         )
         return result.scalar_one_or_none()
     
     async def update_api_key_last_used(self, tenant_id: UUID) -> None:
-        """Update the last used timestamp for the API key."""
+        """Update tenant last used (simplified - no dedicated field)."""
         await self.db.execute(
             update(Tenant)
             .where(Tenant.id == tenant_id)
-            .values(api_key_last_used=func.now())
+            .values(updated_at=func.now())
         )
         await self.db.commit()
     
     async def list_tenants(self) -> List[Tenant]:
-        """List all active tenants."""
-        result = await self.db.execute(
-            select(Tenant).where(Tenant.is_active == True)
-        )
+        """List all tenants."""
+        result = await self.db.execute(select(Tenant))
         return result.scalars().all()
     
     async def create_tenant(
         self, 
-        name: str, 
-        description: str = "",
-        auto_sync: bool = True,
-        sync_interval: int = 60
+        name: str
     ) -> Dict[str, Any]:
         """Create a new tenant with API key."""
         # Generate slug from name
         slug = name.lower().replace(" ", "_").replace("-", "_")
         
-        # Generate API key
+        # Generate simple API key
         api_key = f"tenant_{slug}_{secrets.token_hex(16)}"
-        api_key_hash = self._generate_api_key_hash(api_key)
         
-        # Create tenant
+        # Create simple tenant
         tenant = Tenant(
             name=name,
             slug=slug,
-            description=description,
-            auto_sync=auto_sync,
-            sync_interval=sync_interval,
-            api_key=api_key,
-            api_key_hash=api_key_hash,
-            api_key_name="Default Key",
-            is_active=True
+            api_key=api_key
         )
         
-        self.db.add(tenant)
-        await self.db.commit()
-        await self.db.refresh(tenant)
+        try:
+            self.db.add(tenant)
+            await self.db.commit()
+            await self.db.refresh(tenant)
+        except Exception as e:
+            await self.db.rollback()
+            raise e
         
         return {
             "id": str(tenant.id),
             "name": tenant.name,
             "slug": tenant.slug,
-            "description": tenant.description,
             "api_key": api_key,
-            "auto_sync": tenant.auto_sync,
-            "sync_interval": tenant.sync_interval,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None
         }
     
@@ -142,10 +108,7 @@ class TenantService:
         self,
         tenant_id: UUID,
         name: Optional[str] = None,
-        description: Optional[str] = None,
-        auto_sync: Optional[bool] = None,
-        sync_interval: Optional[int] = None,
-        status: Optional[str] = None
+        slug: Optional[str] = None
     ) -> Optional[Tenant]:
         """Update tenant details."""
         tenant = await self.get_tenant_by_id(tenant_id)
@@ -155,48 +118,33 @@ class TenantService:
         # Update fields if provided
         if name is not None:
             tenant.name = name
-        if description is not None:
-            tenant.description = description
-        if auto_sync is not None:
-            tenant.auto_sync = auto_sync
-        if sync_interval is not None:
-            tenant.sync_interval = sync_interval
-        if status is not None:
-            tenant.status = status
+        if slug is not None:
+            tenant.slug = slug
         
         await self.db.commit()
         await self.db.refresh(tenant)
         return tenant
     
     async def delete_tenant(self, tenant_id: UUID) -> bool:
-        """Soft delete a tenant."""
+        """Delete a tenant."""
         tenant = await self.get_tenant_by_id(tenant_id)
         if not tenant:
             return False
         
-        tenant.is_active = False
-        tenant.deleted_at = datetime.utcnow()
+        await self.db.delete(tenant)
         await self.db.commit()
         return True
     
     async def update_tenant_api_key(
         self, 
         tenant_id: UUID, 
-        api_key: str, 
-        api_key_name: str = "Development Key"
+        api_key: str
     ) -> None:
         """Update tenant API key."""
-        api_key_hash = self._generate_api_key_hash(api_key)
-        
         await self.db.execute(
             update(Tenant)
             .where(Tenant.id == tenant_id)
-            .values(
-                api_key=api_key,
-                api_key_hash=api_key_hash,
-                api_key_name=api_key_name,
-                api_key_last_used=None
-            )
+            .values(api_key=api_key)
         )
         await self.db.commit()
     
@@ -209,7 +157,7 @@ class TenantService:
         # Generate new API key
         api_key = f"tenant_{tenant.slug}_{secrets.token_hex(16)}"
         
-        await self.update_tenant_api_key(tenant_id, api_key, "Regenerated Key")
+        await self.update_tenant_api_key(tenant_id, api_key)
         return api_key
     
     async def revoke_api_key(self, tenant_id: UUID) -> None:
@@ -217,22 +165,13 @@ class TenantService:
         await self.db.execute(
             update(Tenant)
             .where(Tenant.id == tenant_id)
-            .values(
-                api_key=None,
-                api_key_hash=None,
-                api_key_name=None,
-                api_key_expires_at=None,
-                api_key_last_used=None
-            )
+            .values(api_key=None)
         )
         await self.db.commit()
     
     async def create_api_key(
         self, 
-        tenant_id: UUID, 
-        name: str, 
-        description: str = "",
-        expires_at: Optional[datetime] = None
+        tenant_id: UUID
     ) -> str:
         """Create a new API key for a tenant."""
         tenant = await self.get_tenant_by_id(tenant_id)
@@ -242,7 +181,7 @@ class TenantService:
         # Generate new API key
         api_key = f"tenant_{tenant.slug}_{secrets.token_hex(16)}"
         
-        await self.update_tenant_api_key(tenant_id, api_key, name)
+        await self.update_tenant_api_key(tenant_id, api_key)
         return api_key
     
     async def list_api_keys(self, tenant_id: UUID) -> List[Dict[str, Any]]:
@@ -251,16 +190,16 @@ class TenantService:
         if not tenant:
             return []
         
-        # For now, return the single API key (can be extended for multiple keys)
+        # Return the single API key
         if tenant.api_key:
             return [{
-                "id": f"key_{tenant.id}",  # Use a different ID format for API keys
-                "name": tenant.api_key_name or "Default Key",
+                "id": f"key_{tenant.id}",
+                "name": "Default Key",
                 "key_prefix": tenant.api_key[:8] + "..." + tenant.api_key[-8:] if len(tenant.api_key) > 16 else tenant.api_key,
-                "is_active": tenant.is_active,
-                "created_at": tenant.created_at,  # Return datetime object directly
-                "expires_at": tenant.api_key_expires_at,  # Return datetime object directly
-                "last_used": tenant.api_key_last_used  # Return datetime object directly
+                "is_active": True,
+                "created_at": tenant.created_at,
+                "expires_at": None,
+                "last_used": tenant.updated_at
             }]
         
         return []
@@ -281,11 +220,8 @@ class TenantService:
             "id": str(tenant.id),
             "name": tenant.name,
             "slug": tenant.slug,
-            "status": tenant.status,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
-            "last_activity": tenant.api_key_last_used.isoformat() if tenant.api_key_last_used else None,
-            "auto_sync": tenant.auto_sync,
-            "sync_interval": tenant.sync_interval,
+            "last_activity": tenant.updated_at.isoformat() if tenant.updated_at else None,
             "has_api_key": bool(tenant.api_key)
         }
 

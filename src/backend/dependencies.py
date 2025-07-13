@@ -23,8 +23,7 @@ async def get_db():
     try:
         from sqlalchemy import text
         session = AsyncSessionLocal()
-        # Set session-level timeout
-        await session.execute(text("SET statement_timeout = '120s'"))  # 2 minutes for API operations
+        # Timeout removed - was causing hangs
         yield session
     except Exception as e:
         if session:
@@ -98,21 +97,22 @@ async def get_file_service_dep(
 
 
 async def get_embedding_service_dep(
-    db: AsyncSession = Depends(get_db),
-    embedding_model = Depends(get_embedding_model)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get pgvector embedding service with singleton model"""
+    """Get pgvector embedding service with model dependency"""
     from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
-    return PgVectorEmbeddingService(db, embedding_model)
+    # Get the embedding model
+    embedding_model = get_embedding_model()
+    return PgVectorEmbeddingService(db, embedding_model=embedding_model)
 
 
 async def get_sync_service_dep(
     db: AsyncSession = Depends(get_db),
     file_service: FileService = Depends(get_file_service_dep),
-    embedding_service = Depends(get_embedding_service_dep)
+    embedding_model = Depends(get_embedding_model)
 ) -> SyncService:
     """Get sync service with dependencies"""
-    return SyncService(db, file_service, embedding_service)
+    return SyncService(db, file_service, embedding_model)
 
 
 # Singleton LLM model with FastAPI caching (keeps performance, removes complexity)

@@ -17,7 +17,7 @@ from sqlalchemy.sql import func
 
 from src.backend.models.database import File, EmbeddingChunk
 from src.backend.config.settings import get_settings
-from .document_processing.factory import DocumentProcessorFactory
+# Document processing factory removed - using SimpleDocumentProcessor directly
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -63,24 +63,51 @@ class PgVectorEmbeddingService:
             self.model_loaded = False
             self._try_load_model()
         
-        self.processor_factory = DocumentProcessorFactory()
+        # self.processor_factory = DocumentProcessorFactory()  # Removed - using SimpleDocumentProcessor directly
     
     def _try_load_model(self):
         """Try to load the embedding model"""
         try:
             from sentence_transformers import SentenceTransformer
+            import torch
             
-            # Handle both full paths and short names
-            model_name = self.model_name
-            if not model_name.startswith('sentence-transformers/'):
-                model_name = f"sentence-transformers/{model_name}"
+            logger.info(f"🤖 Loading embedding model: {self.model_name}")
             
-            self.embedding_model = SentenceTransformer(model_name)
+            # Use GPU if available, otherwise CPU
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.embedding_model = SentenceTransformer(self.model_name, device=device)
+            
+            # Clear any existing CUDA cache
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             self.model_loaded = True
-            logger.info(f"✓ Loaded embedding model: {model_name}")
+            logger.info(f"✓ Embedding model loaded successfully on {device}")
+            
         except Exception as e:
-            logger.warning(f"⚠️ Could not load embedding model: {e}")
+            logger.error(f"❌ Failed to load embedding model: {e}")
             self.model_loaded = False
+            self.embedding_model = None
+    
+    def _extract_text_sync(self, file_path: Path) -> str:
+        """Simple synchronous text extraction"""
+        try:
+            if file_path.suffix.lower() in ['.txt', '.md']:
+                return file_path.read_text(encoding='utf-8', errors='ignore')
+            else:
+                logger.warning(f"Unsupported file type: {file_path.suffix}")
+                return ""
+        except Exception as e:
+            logger.error(f"Error extracting text from {file_path}: {e}")
+            return ""
+    
+    async def _extract_text_simple(self, file_path: Path) -> str:
+        """Simple text extraction in executor"""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self._extract_text_sync, file_path
+        )
+
+
     
     async def process_file_to_chunks(
         self, 
@@ -100,34 +127,44 @@ class PgVectorEmbeddingService:
             List of DocumentChunk objects
         """
         try:
-            # Get appropriate processor for file type
-            processor = self.processor_factory.get_processor(str(file_path))
-            
-            if processor is None:
-                logger.error(f"❌ No processor available for file type: {file_path.suffix}")
-                return []
-            
-            # Process file to get processed document (run sync call in thread pool)
-            import asyncio
-            processed_doc = await asyncio.get_event_loop().run_in_executor(
-                None, processor.process_document, str(file_path), self.chunk_size
-            )
-            
-            # Convert to our DocumentChunk objects
+            # Simple direct text reading
+            text_content = file_path.read_text(encoding='utf-8', errors='ignore')
             doc_chunks = []
-            for doc_chunk in processed_doc.chunks:
-                chunk = DocumentChunk(
-                    content=doc_chunk.content,
-                    chunk_index=doc_chunk.chunk_index,
-                    metadata={
-                        'file_id': str(file_record.id),
-                        'tenant_id': str(tenant_id),
-                        'filename': file_record.filename,
-                        'file_path': file_record.file_path,
-                        **doc_chunk.metadata  # Include original metadata
-                    }
-                )
-                doc_chunks.append(chunk)
+            if text_content:
+                # Simple word-based chunking
+                words = text_content.split()
+                chunk_index = 0
+                start = 0
+                
+                max_iterations = 1000  # Safety limit
+                iteration_count = 0
+                
+                while start < len(words) and iteration_count < max_iterations:
+                    iteration_count += 1
+                    end = min(start + self.chunk_size, len(words))
+                    chunk_text = " ".join(words[start:end])
+                    
+                    if chunk_text.strip():  # Only create non-empty chunks
+                        chunk = DocumentChunk(
+                            content=chunk_text,
+                            chunk_index=chunk_index,
+                            metadata={
+                                'file_id': str(file_record.id),
+                                'tenant_id': str(tenant_id),
+                                'filename': file_record.filename,
+                                'file_path': file_record.file_path,
+                                'start_word': start,
+                                'end_word': end
+                            }
+                        )
+                        doc_chunks.append(chunk)
+                        chunk_index += 1
+                    
+                    # Ensure we always advance by at least 1 word to prevent infinite loops
+                    start = max(start + 1, end - self.chunk_overlap)
+                
+                if iteration_count >= max_iterations:
+                    logger.warning(f"Chunking loop exceeded {max_iterations} iterations")
             
             logger.info(f"✓ Processed '{file_record.filename}' into {len(doc_chunks)} chunks")
             return doc_chunks
@@ -136,7 +173,7 @@ class PgVectorEmbeddingService:
             logger.error(f"❌ Error processing file {file_path}: {e}")
             return []
     
-    def generate_embeddings(self, chunks: List[DocumentChunk]) -> List[EmbeddingResult]:
+    async def generate_embeddings(self, chunks: List[DocumentChunk]) -> List[EmbeddingResult]:
         """
         Generate embeddings for a list of chunks
         
@@ -146,43 +183,35 @@ class PgVectorEmbeddingService:
         Returns:
             List of EmbeddingResult objects
         """
-        if not self.model_loaded:
-            logger.warning("⚠️ No embedding model available, using mock embeddings")
-            return [
-                EmbeddingResult(
-                    vector=[0.0] * 384,  # Mock embedding
-                    metadata=chunk.metadata
-                ) for chunk in chunks
-            ]
+        if not self.model_loaded or not self.embedding_model:
+            raise RuntimeError("Embedding model not loaded")
         
         try:
-            # Extract text content for embedding
+            # Extract text content from chunks
             texts = [chunk.content for chunk in chunks]
             
-            # Generate embeddings in batch
-            embeddings = self.embedding_model.encode(texts, convert_to_tensor=False)
+            # Generate embeddings using sentence-transformers
+            # Run in executor to prevent blocking the event loop
+            embeddings = await asyncio.get_event_loop().run_in_executor(
+                None, 
+                lambda: self.embedding_model.encode(texts, normalize_embeddings=True)
+            )
             
-            # Convert to EmbeddingResult objects
+            # Convert to list format and create results
             results = []
-            for chunk, embedding in zip(chunks, embeddings):
+            for i, embedding in enumerate(embeddings):
                 result = EmbeddingResult(
                     vector=embedding.tolist(),
-                    metadata=chunk.metadata
+                    metadata=chunks[i].metadata
                 )
                 results.append(result)
             
-            logger.info(f"✓ Generated {len(results)} embeddings")
+            logger.info(f"✓ Generated {len(results)} real embeddings using {self.model_name}")
             return results
             
         except Exception as e:
             logger.error(f"❌ Error generating embeddings: {e}")
-            # Return mock embeddings as fallback
-            return [
-                EmbeddingResult(
-                    vector=[0.0] * 384,
-                    metadata=chunk.metadata
-                ) for chunk in chunks
-            ]
+            raise
     
     async def store_embeddings(
         self, 
@@ -260,8 +289,8 @@ class PgVectorEmbeddingService:
             
         except Exception as e:
             logger.error(f"❌ Error storing embeddings: {e}")
-            await self.db.rollback()
-            raise
+            # Don't rollback - let the caller handle transaction state
+            return []
     
     async def delete_file_embeddings(self, file_id: UUID) -> int:
         """
@@ -291,8 +320,8 @@ class PgVectorEmbeddingService:
             
         except Exception as e:
             logger.error(f"❌ Error deleting file embeddings: {e}")
-            await self.db.rollback()
-            raise
+            # Don't rollback - let the caller handle transaction state
+            return 0
     
     async def delete_multiple_files_embeddings(self, file_ids: List[UUID]) -> int:
         """
@@ -346,62 +375,64 @@ class PgVectorEmbeddingService:
             # Convert query embedding to pgvector format
             query_vector = str(query_embedding)
             
-            # OPTIMIZED: Separate vector search from file filtering
-            # First, get valid file IDs (fast with regular indexes)
-            file_result = await self.db.execute(
-                text("""
-                    SELECT id FROM files 
-                    WHERE tenant_id = :tenant_id 
-                    AND sync_status = 'synced' 
-                    AND deleted_at IS NULL
-                """),
-                {'tenant_id': str(tenant_id)}
-            )
-            valid_file_ids = [str(row[0]) for row in file_result.fetchall()]
-            
-            if not valid_file_ids:
-                return []  # No valid files
-            
-            # Then, fast vector search (uses vector index efficiently)
-            result = await self.db.execute(
-                text("""
-                    SELECT ec.*, ec.embedding <=> :query_vector as similarity
-                    FROM embedding_chunks ec
-                    WHERE ec.tenant_id = :tenant_id
-                    AND ec.file_id = ANY(:valid_file_ids)
-                    ORDER BY similarity ASC
-                    LIMIT :limit
-                """),
-                {
-                    'query_vector': query_vector,
-                    'tenant_id': str(tenant_id),
-                    'valid_file_ids': valid_file_ids,
-                    'limit': limit
-                }
-            )
-            
-            # Convert results to EmbeddingChunk objects with similarity scores
-            chunks_with_scores = []
-            for row in result.fetchall():
-                chunk = EmbeddingChunk(
-                    id=row.id,
-                    file_id=row.file_id,
-                    tenant_id=row.tenant_id,
-                    chunk_index=row.chunk_index,
-                    chunk_content=row.chunk_content,
-                    chunk_hash=row.chunk_hash,
-                    token_count=row.token_count,
-                    embedding=row.embedding,
-                    embedding_model=row.embedding_model,
-                    processed_at=row.processed_at,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at
+            # Use explicit transaction management to prevent rollbacks
+            async with self.db.begin():
+                # OPTIMIZED: Separate vector search from file filtering
+                # First, get valid file IDs (fast with regular indexes)
+                file_result = await self.db.execute(
+                    text("""
+                        SELECT id FROM files 
+                        WHERE tenant_id = :tenant_id 
+                        AND sync_status = 'synced' 
+                        AND deleted_at IS NULL
+                    """),
+                    {'tenant_id': str(tenant_id)}
                 )
-                similarity_score = float(row.similarity)
-                chunks_with_scores.append((chunk, similarity_score))
-            
-            logger.info(f"✓ Found {len(chunks_with_scores)} similar chunks")
-            return chunks_with_scores
+                valid_file_ids = [str(row[0]) for row in file_result.fetchall()]
+                
+                if not valid_file_ids:
+                    return []  # No valid files
+                
+                # Then, fast vector search (uses vector index efficiently)
+                result = await self.db.execute(
+                    text("""
+                        SELECT ec.*, ec.embedding <=> :query_vector as similarity
+                        FROM embedding_chunks ec
+                        WHERE ec.tenant_id = :tenant_id
+                        AND ec.file_id = ANY(:valid_file_ids)
+                        ORDER BY similarity ASC
+                        LIMIT :limit
+                    """),
+                    {
+                        'query_vector': query_vector,
+                        'tenant_id': str(tenant_id),
+                        'valid_file_ids': valid_file_ids,
+                        'limit': limit
+                    }
+                )
+                
+                # Convert results to EmbeddingChunk objects with similarity scores
+                chunks_with_scores = []
+                for row in result.fetchall():
+                    chunk = EmbeddingChunk(
+                        id=row.id,
+                        file_id=row.file_id,
+                        tenant_id=row.tenant_id,
+                        chunk_index=row.chunk_index,
+                        chunk_content=row.chunk_content,
+                        chunk_hash=row.chunk_hash,
+                        token_count=row.token_count,
+                        embedding=row.embedding,
+                        embedding_model=row.embedding_model,
+                        processed_at=row.processed_at,
+                        created_at=row.created_at,
+                        updated_at=row.updated_at
+                    )
+                    similarity_score = float(row.similarity)
+                    chunks_with_scores.append((chunk, similarity_score))
+                
+                logger.info(f"✓ Found {len(chunks_with_scores)} similar chunks")
+                return chunks_with_scores
             
         except Exception as e:
             logger.error(f"❌ Error searching similar chunks: {e}")
@@ -410,10 +441,12 @@ class PgVectorEmbeddingService:
     async def get_tenant_chunk_count(self, tenant_id: UUID) -> int:
         """Get total number of chunks for a tenant"""
         try:
-            result = await self.db.execute(
-                select(func.count(EmbeddingChunk.id)).where(EmbeddingChunk.tenant_id == tenant_id)
-            )
-            return result.scalar() or 0
+            # Use explicit transaction management to prevent rollbacks
+            async with self.db.begin():
+                result = await self.db.execute(
+                    select(func.count(EmbeddingChunk.id)).where(EmbeddingChunk.tenant_id == tenant_id)
+                )
+                return result.scalar() or 0
         except Exception as e:
             logger.error(f"❌ Error getting chunk count: {e}")
             return 0
@@ -464,8 +497,8 @@ class PgVectorEmbeddingService:
                 logger.warning(f"⚠️ No chunks extracted from {file_path}")
                 return []
             
-            # Step 2: Generate embeddings (same as before)
-            embeddings = self.generate_embeddings(chunks)
+            # Step 2: Generate embeddings (now async)
+            embeddings = await self.generate_embeddings(chunks)
             
             # Step 3: Store in PostgreSQL (same as before)
             chunk_records = await self.store_embeddings(chunks, embeddings, file_record)
@@ -484,27 +517,10 @@ class PgVectorEmbeddingService:
         file_record: File
     ) -> List['DocumentChunk']:
         """
-        Process file using hybrid approach (LlamaIndex + simple fallback)
+        Process file using SimpleDocumentProcessor (hybrid processing removed for simplicity)
         """
-        try:
-            # Import the hybrid processor
-            from .document_processing.llamaindex_adapter import create_hybrid_document_processor
-            
-            # Create and initialize hybrid processor
-            hybrid_processor = await create_hybrid_document_processor(self.db)
-            
-            # Process the file
-            chunks, method = await hybrid_processor.process_file(str(file_path), file_record)
-            
-            logger.info(f"✓ Processed {file_record.filename} using {method} method")
-            return chunks
-            
-        except ImportError:
-            logger.warning("⚠️ LlamaIndex adapter not available, using simple processing")
-            return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
-        except Exception as e:
-            logger.warning(f"⚠️ Hybrid processing failed, falling back to simple: {e}")
-            return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
+        logger.info(f"✓ Processing {file_record.filename} using SimpleDocumentProcessor")
+        return await self.process_file_to_chunks(file_path, file_record.tenant_id, file_record)
 
 
 # Factory function for dependency injection

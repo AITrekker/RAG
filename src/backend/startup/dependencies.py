@@ -13,7 +13,7 @@ from typing import Tuple
 logger = logging.getLogger(__name__)
 
 
-def wait_for_postgres(max_retries: int = 30, delay: int = 2) -> bool:
+def wait_for_postgres(max_retries: int = 10, delay: int = 1) -> bool:
     """Wait for PostgreSQL to become available."""
     logger.info("Waiting for PostgreSQL to become available...")
     

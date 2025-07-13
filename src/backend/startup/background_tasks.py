@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from src.backend.database import AsyncSessionLocal
-from src.backend.services.sync_operations_manager import SyncOperationsManager, SyncOperationConfig
+# from src.backend.services.sync_operations_manager import SyncOperationsManager, SyncOperationConfig  # Removed for simplicity
 from src.backend.services.sync_service import SyncService
 from src.backend.services.file_service import FileService
 
@@ -25,7 +25,6 @@ class BackgroundTaskManager:
     def __init__(self):
         self.tasks: Dict[str, asyncio.Task] = {}
         self.running = False
-        self._cleanup_config = SyncOperationConfig()
     
     async def start_all_tasks(self):
         """Start all background tasks"""
@@ -39,9 +38,9 @@ class BackgroundTaskManager:
         # DISABLED: sync cleanup task (causing complexity)
         # DISABLED: performance monitoring task (not essential)
         
-        # Only start essential health check task
+        # Only start essential health check task after delay to allow full startup
         self.tasks["health_check"] = asyncio.create_task(
-            self._health_check_loop(),
+            self._delayed_health_check_loop(),
             name="health_check"
         )
         
@@ -94,7 +93,7 @@ class BackgroundTaskManager:
                     pass
                 
                 # Wait for next cleanup cycle
-                await asyncio.sleep(self._cleanup_config.cleanup_interval_seconds)
+                await asyncio.sleep(3600)  # 1 hour cleanup interval
                 
             except asyncio.CancelledError:
                 logger.info("Sync cleanup task cancelled")
@@ -110,9 +109,13 @@ class BackgroundTaskManager:
         # DISABLED: This used the removed duplicate performance monitor
         # Use utils.monitoring.system_monitor instead if needed
     
-    async def _health_check_loop(self):
-        """Background loop for system health checks"""
-        logger.info("Started health check background task")
+    async def _delayed_health_check_loop(self):
+        """Health check loop with startup delay to prevent sync conflicts"""
+        logger.info("Started delayed health check background task")
+        
+        # Wait 30 seconds after startup to avoid interfering with initial sync operations
+        await asyncio.sleep(30)
+        logger.info("Health check delay completed, starting monitoring")
         
         while self.running:
             try:
@@ -122,7 +125,9 @@ class BackgroundTaskManager:
                 # Check database connectivity
                 try:
                     async with AsyncSessionLocal() as db_session:
-                        await db_session.execute(text("SELECT 1"))
+                        # Use begin() to properly manage the transaction
+                        async with db_session.begin():
+                            await db_session.execute(text("SELECT 1"))
                     db_healthy = True
                 except Exception as e:
                     logger.error(f"Database health check failed: {e}")

@@ -94,7 +94,7 @@ def verify_admin_tenant() -> Tuple[bool, str]:
             # Check if admin tenant exists with matching ID
             result = conn.execute(text("""
                 SELECT id, slug FROM tenants 
-                WHERE slug = 'admin' AND is_active = true
+                WHERE slug = 'admin'
             """))
             
             admin_row = result.fetchone()

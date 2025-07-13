@@ -60,8 +60,10 @@ class DirectRAGService:
         start_time = time.time()
         
         try:
-            # Generate query embedding
-            query_embedding = self.embedding_model.encode([question])[0]
+            # Generate query embedding (async to prevent blocking)
+            query_embedding = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.embedding_model.encode([question])[0]
+            )
             
             # Direct pgvector similarity search
             sources = await self._vector_search(
@@ -109,48 +111,50 @@ class DirectRAGService:
         # Convert numpy array to pgvector format
         embedding_list = str(list(query_embedding))
         
-        # Direct pgvector query with cosine similarity - TEMPORARILY REMOVE THRESHOLD FOR DEBUGGING
-        query = text("""
-            SELECT 
-                ec.id,
-                ec.chunk_content,
-                ec.chunk_index,
-                ec.embedding <=> :query_embedding AS similarity_score,
-                f.filename,
-                f.id as file_id,
-                f.file_size
-            FROM embedding_chunks ec
-            JOIN files f ON ec.file_id = f.id
-            WHERE ec.tenant_id = :tenant_id 
-            AND f.sync_status = 'synced'
-            AND f.deleted_at IS NULL
-            ORDER BY ec.embedding <=> :query_embedding
-            LIMIT :max_results
-        """)
-        
-        result = await self.db.execute(
-            query,
-            {
-                "tenant_id": tenant_id,
-                "query_embedding": embedding_list,
-                "max_results": max_results
-            }
-        )
-        
-        sources = []
-        for row in result.fetchall():
-            sources.append({
-                "chunk_id": str(row.id),
-                "content": row.chunk_content[:500] + "..." if len(row.chunk_content) > 500 else row.chunk_content,
-                "chunk_index": row.chunk_index,
-                "similarity_score": float(row.similarity_score),
-                "filename": row.filename,
-                "file_id": str(row.file_id),
-                "file_size": row.file_size,
-                "rank": len(sources) + 1
-            })
-        
-        return sources
+        # Use explicit transaction management to prevent rollbacks
+        async with self.db.begin():
+            # Direct pgvector query with cosine similarity - TEMPORARILY REMOVE THRESHOLD FOR DEBUGGING
+            query = text("""
+                SELECT 
+                    ec.id,
+                    ec.chunk_content,
+                    ec.chunk_index,
+                    ec.embedding <=> :query_embedding AS similarity_score,
+                    f.filename,
+                    f.id as file_id,
+                    f.file_size
+                FROM embedding_chunks ec
+                JOIN files f ON ec.file_id = f.id
+                WHERE ec.tenant_id = :tenant_id 
+                AND f.sync_status = 'synced'
+                AND f.deleted_at IS NULL
+                ORDER BY ec.embedding <=> :query_embedding
+                LIMIT :max_results
+            """)
+            
+            result = await self.db.execute(
+                query,
+                {
+                    "tenant_id": tenant_id,
+                    "query_embedding": embedding_list,
+                    "max_results": max_results
+                }
+            )
+            
+            sources = []
+            for row in result.fetchall():
+                sources.append({
+                    "chunk_id": str(row.id),
+                    "content": row.chunk_content[:500] + "..." if len(row.chunk_content) > 500 else row.chunk_content,
+                    "chunk_index": row.chunk_index,
+                    "similarity_score": float(row.similarity_score),
+                    "filename": row.filename,
+                    "file_id": str(row.file_id),
+                    "file_size": row.file_size,
+                    "rank": len(sources) + 1
+                })
+            
+            return sources
     
     def _generate_simple_answer(self, question: str, sources: List[Dict[str, Any]]) -> str:
         """Simple answer generation - replace with LLM/reranking later"""
@@ -188,8 +192,10 @@ class DirectRAGService:
             # Simple fixed-size chunking (replace with chunking experiments)
             chunks = self._chunk_text(file_content, chunk_size=512, overlap=50)
             
-            # Generate embeddings for all chunks
-            embeddings = self.embedding_model.encode([chunk["text"] for chunk in chunks])
+            # Generate embeddings for all chunks (async to prevent blocking)
+            embeddings = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.embedding_model.encode([chunk["text"] for chunk in chunks])
+            )
             
             # Store chunks and embeddings directly in pgvector
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
@@ -249,25 +255,27 @@ class DirectRAGService:
     
     async def get_tenant_stats(self, tenant_id: UUID) -> Dict[str, Any]:
         """Get basic tenant statistics"""
-        # Count files
-        file_count_query = select(File).where(
-            File.tenant_id == tenant_id,
-            File.deleted_at.is_(None)
-        )
-        file_result = await self.db.execute(file_count_query)
-        file_count = len(file_result.fetchall())
-        
-        # Count chunks
-        chunk_count_query = select(EmbeddingChunk).where(
-            EmbeddingChunk.tenant_id == tenant_id
-        )
-        chunk_result = await self.db.execute(chunk_count_query)
-        chunk_count = len(chunk_result.fetchall())
-        
-        return {
-            "tenant_id": str(tenant_id),
-            "file_count": file_count,
-            "chunk_count": chunk_count,
-            "embedding_model": getattr(self.embedding_model, 'name', 'sentence-transformers'),
-            "status": "direct_rag_ready"
-        }
+        # Use explicit transaction management to prevent rollbacks
+        async with self.db.begin():
+            # Count files
+            file_count_query = select(File).where(
+                File.tenant_id == tenant_id,
+                File.deleted_at.is_(None)
+            )
+            file_result = await self.db.execute(file_count_query)
+            file_count = len(file_result.fetchall())
+            
+            # Count chunks
+            chunk_count_query = select(EmbeddingChunk).where(
+                EmbeddingChunk.tenant_id == tenant_id
+            )
+            chunk_result = await self.db.execute(chunk_count_query)
+            chunk_count = len(chunk_result.fetchall())
+            
+            return {
+                "tenant_id": str(tenant_id),
+                "file_count": file_count,
+                "chunk_count": chunk_count,
+                "embedding_model": getattr(self.embedding_model, 'name', 'sentence-transformers'),
+                "status": "direct_rag_ready"
+            }

@@ -38,8 +38,8 @@ from src.backend.models.api_models import (
 )
 from src.backend.services.tenant_service import TenantService
 from src.backend.dependencies import get_tenant_service_dep
-from src.backend.core.embedding_manager import EmbeddingManager
-from src.backend.core.llm_service import get_llm_service
+# from src.backend.core.embedding_manager import EmbeddingManager  # Removed with core cleanup
+# from src.backend.core.llm_service import get_llm_service  # Removed with core cleanup
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
 # from src.backend.core.auditing import AuditLogger, get_audit_logger  # Disabled: migrated from Qdrant to pgvector
@@ -112,11 +112,11 @@ async def create_tenant(
         return TenantResponse(
             id=str(tenant.id),
             name=tenant.name,
-            description=tenant.description,
-            status=tenant.status or "active",
+            description="Demo tenant",  # Simplified - no description field
+            status="active",  # Simplified - no status field
             created_at=tenant.created_at,
-            auto_sync=tenant.auto_sync,
-            sync_interval=tenant.sync_interval,
+            auto_sync=False,  # Simplified - no auto_sync field
+            sync_interval=60,  # Simplified - no sync_interval field
             api_keys=api_keys,
             document_count=0,
             storage_used_mb=0.0,
@@ -167,11 +167,11 @@ async def list_tenants(
             tenant_response = TenantResponse(
                 id=str(tenant.id),
                 name=tenant.name,
-                description=tenant.description,
-                status=tenant.status or "active",
+                description="Demo tenant",  # Simplified - no description field
+                status="active",  # Simplified - no status field
                 created_at=tenant.created_at,
-                auto_sync=tenant.auto_sync,
-                sync_interval=tenant.sync_interval,
+                auto_sync=False,  # Simplified - no auto_sync field
+                sync_interval=60,  # Simplified - no sync_interval field
                 api_keys=[],
                 document_count=0,
                 storage_used_mb=0.0
@@ -248,11 +248,11 @@ async def get_tenant(
         return TenantResponse(
             id=str(tenant.id),
             name=tenant.name,
-            description=tenant.description,
-            status=tenant.status or "active",
+            description="Demo tenant",  # Simplified - no description field
+            status="active",  # Simplified - no status field
             created_at=tenant.created_at,
-            auto_sync=tenant.auto_sync,
-            sync_interval=tenant.sync_interval,
+            auto_sync=False,  # Simplified - no auto_sync field
+            sync_interval=60,  # Simplified - no sync_interval field
             api_keys=[],
             document_count=0,
             storage_used_mb=0.0
@@ -307,11 +307,11 @@ async def update_tenant(
         return TenantResponse(
             id=str(updated_tenant.id),
             name=updated_tenant.name,
-            description=updated_tenant.description,
-            status=updated_tenant.status or "active",
+            description="Demo tenant",  # Simplified - no description field
+            status="active",  # Simplified - no status field
             created_at=updated_tenant.created_at,
-            auto_sync=updated_tenant.auto_sync,
-            sync_interval=updated_tenant.sync_interval,
+            auto_sync=False,  # Simplified - no auto_sync field
+            sync_interval=60,  # Simplified - no sync_interval field
             api_keys=[],
             document_count=0,
             storage_used_mb=0.0
@@ -817,7 +817,7 @@ async def setup_demo_environment(
             demo_tenants.append(DemoTenantInfo(
                 tenant_id=tenant_id,
                 tenant_name=tenant.name,
-                description=tenant.description,
+                description="Demo tenant",  # Simplified - no description field
                 api_keys=api_keys,
                 demo_expires_at=demo_expires_at,
                 created_at=datetime.utcnow()
@@ -884,7 +884,7 @@ async def list_demo_tenants(
                 demo_tenants.append(DemoTenantInfo(
                     tenant_id=tenant.id,
                     tenant_name=tenant.name,
-                    description=tenant.description,
+                    description="Demo tenant",  # Simplified - no description field
                     api_keys=demo_keys,
                     demo_expires_at=datetime.utcnow() + timedelta(hours=24),  # Default expiration
                     created_at=tenant.created_at

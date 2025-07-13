@@ -11,19 +11,21 @@ from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 import logging
 from contextlib import asynccontextmanager
+import asyncio
 
 from src.backend.config.settings import get_settings
 from src.backend.api.v1.routes import (
-    health as health_routes,
+    # health as health_routes,  # Removed for simplicity
     admin as admin_routes,
     setup as setup_routes,
     tenants as tenant_routes,
     auth as auth_routes,
     files as file_routes,
     sync as sync_routes,
-    query as query_routes
+    query as query_routes,
+    embeddings as embedding_routes
 )
-from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware
+# from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware  # Removed for simplicity
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 from src.backend.middleware.api_key_auth import api_key_auth_middleware
 from src.backend.database import startup_database_checks, close_database
@@ -79,13 +81,8 @@ async def lifespan(app: FastAPI):
             # Continue anyway for debugging
             logger.warning("⚠️ Continuing despite database startup issues (debugging mode)")
         
-        # Step 5: Initialize monitoring system
-        logger.info("📊 Initializing monitoring system...")
-        try:
-            initialize_monitoring()
-        except Exception as e:
-            logger.error(f"❌ Monitoring initialization failed: {e}")
-            logger.warning("⚠️ Continuing without monitoring (debugging mode)")
+        # Step 5: Initialize monitoring system (removed for simplicity)
+        logger.info("📊 Monitoring system disabled for simplified setup")
         
         # Step 6: Initialize service architecture
         logger.info("⚙️ Initializing service layer...")
@@ -113,9 +110,13 @@ async def lifespan(app: FastAPI):
         app.state.embedding_service = embedding_service
         app.state.sync_service = sync_service
         
-        # Step 7: Start background tasks
+        # Step 7: Start background tasks with delay to prevent startup sync conflicts
         logger.info("🔄 Starting background tasks...")
         await start_background_tasks()
+        
+        # Add startup delay to allow any pending operations to settle
+        logger.info("⏳ Waiting 10 seconds to allow system stabilization...")
+        await asyncio.sleep(10)
         
         logger.info("🎉 API startup completed successfully!")
         
@@ -134,7 +135,7 @@ async def lifespan(app: FastAPI):
         await close_database()
         
         logger.info("Shutting down monitoring system...")
-        shutdown_monitoring()
+        # shutdown_monitoring()  # Removed for simplicity
         logger.info("API shutdown completed successfully")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
@@ -161,7 +162,7 @@ app.add_middleware(
 setup_exception_handlers(app)
 
 app.middleware("http")(api_key_auth_middleware)
-app.middleware("http")(monitoring_middleware)
+# app.middleware("http")(monitoring_middleware)  # Removed for simplicity
 app.middleware("http")(error_tracking_middleware)
 
 def custom_openapi():
@@ -182,7 +183,7 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # Core API routes
-app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])
+# app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])  # Removed for simplicity
 app.include_router(auth_routes.router, prefix=f"{settings.api_v1_str}/auth", tags=["Authentication"])
 app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
 app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
@@ -192,6 +193,7 @@ app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants"
 app.include_router(file_routes.router, prefix=f"{settings.api_v1_str}/files", tags=["Files"])
 app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
 app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
+app.include_router(embedding_routes.router, prefix=f"{settings.api_v1_str}/embeddings", tags=["Embeddings"])
 
 @app.get("/", include_in_schema=False)
 async def root():

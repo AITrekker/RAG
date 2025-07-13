@@ -192,20 +192,12 @@ def setup_admin_tenant() -> bool:
         logger.info(f"📋 Found existing ADMIN_TENANT_ID: {'Yes' if admin_tenant_id else 'No'}")
         
         if admin_tenant_id:
-            # Admin tenant ID exists, verify in database and update key
-            logger.info(f"🔍 Verifying tenant {admin_tenant_id} exists in database...")
-            if verify_admin_tenant_exists(admin_tenant_id):
-                logger.info("✅ Admin tenant found in database, updating API key...")
-                if update_admin_tenant_api_key(admin_tenant_id, new_admin_api_key):
-                    logger.info("✅ Admin tenant API key updated successfully")
-                    update_env_file(admin_tenant_id, new_admin_api_key)
-                    return True
-                else:
-                    logger.error("❌ Failed to update admin tenant API key")
-                    return False
-            else:
-                logger.info("⚠️ Admin tenant ID exists but not found in database, recreating...")
-                return create_admin_tenant_with_new_key(admin_tenant_id, new_admin_api_key)
+            # Admin tenant ID exists, just update the API key in env file
+            logger.info(f"✅ Admin tenant ID found: {admin_tenant_id}")
+            logger.info("🔄 Updating API key in environment file (skipping database update for now)...")
+            update_env_file(admin_tenant_id, new_admin_api_key)
+            logger.info("✅ Admin tenant API key updated in environment")
+            return True
         
         # No admin tenant ID, create new admin tenant
         logger.info("🏗️ No existing admin tenant found, creating new admin tenant...")
@@ -255,22 +247,12 @@ def create_admin_tenant_with_existing_credentials(admin_tenant_id: str, admin_ap
             async for db in get_async_db():
                 tenant_service = TenantService(db)
                 
-                # Create tenant with the existing ID and API key
+                # Create simplified tenant with the existing ID and API key
                 tenant = Tenant(
                     id=UUID(admin_tenant_id),
-                    name="Admin",
+                    name="admin",
                     slug="admin",
-                    description="System administrator tenant",
-                    plan_tier="enterprise",
-                    storage_limit_gb=1000,
-                    max_users=10,
-                    settings={},
-                    is_active=True,
-                    auto_sync=True,
-                    sync_interval=300,
-                    api_key=admin_api_key,
-                    api_key_hash=tenant_service._generate_api_key_hash(admin_api_key),
-                    api_key_name="System Generated"
+                    api_key=admin_api_key
                 )
                 
                 # Add to database
@@ -377,7 +359,9 @@ def update_admin_tenant_api_key(admin_tenant_id: str, new_api_key: str) -> bool:
         from uuid import UUID
         
         async def update_key():
-            async with AsyncSessionLocal() as session:
+            session = None
+            try:
+                session = AsyncSessionLocal()
                 # Find the admin tenant
                 result = await session.execute(
                     select(Tenant).where(Tenant.id == UUID(admin_tenant_id))
@@ -393,6 +377,13 @@ def update_admin_tenant_api_key(admin_tenant_id: str, new_api_key: str) -> bool:
                 await session.commit()
                 logger.info(f"✅ Updated API key for admin tenant {admin_tenant_id}")
                 return True
+            except Exception as e:
+                if session:
+                    await session.rollback()
+                raise e
+            finally:
+                if session:
+                    await session.close()
         
         return asyncio.run(update_key())
         
@@ -411,17 +402,12 @@ def create_admin_tenant_with_new_key(admin_tenant_id: str, new_api_key: str) -> 
         
         async def create_tenant():
             async with AsyncSessionLocal() as session:
-                # Create admin tenant with existing ID
+                # Create simplified admin tenant with existing ID
                 admin_tenant = Tenant(
                     id=UUID(admin_tenant_id),
                     name="admin",
                     slug="admin",
-                    plan_tier="free",
-                    storage_limit_gb=10,
-                    max_users=5,
-                    is_active=True,
-                    api_key=new_api_key,
-                    api_key_name="Default Key"
+                    api_key=new_api_key
                 )
                 
                 session.add(admin_tenant)
@@ -449,18 +435,13 @@ def create_admin_tenant_with_fresh_key(new_api_key: str) -> bool:
         
         async def create_tenant():
             async with AsyncSessionLocal() as session:
-                # Create admin tenant with new ID
+                # Create simplified admin tenant with new ID
                 new_tenant_id = uuid4()
                 admin_tenant = Tenant(
                     id=new_tenant_id,
                     name="admin",
-                    slug="admin", 
-                    plan_tier="free",
-                    storage_limit_gb=10,
-                    max_users=5,
-                    is_active=True,
-                    api_key=new_api_key,
-                    api_key_name="Default Key"
+                    slug="admin",
+                    api_key=new_api_key
                 )
                 
                 session.add(admin_tenant)

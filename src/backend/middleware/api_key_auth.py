@@ -6,7 +6,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 import logging
 
-from src.backend.database import get_async_db
+from src.backend.database import get_async_db, AsyncSessionLocal
 from src.backend.services.tenant_service import TenantService
 
 logger = logging.getLogger(__name__)
@@ -91,11 +91,10 @@ async def api_key_auth_middleware(request: Request, call_next):
                 response.headers["Access-Control-Allow-Credentials"] = "true"
             return response
         
-        # Look up tenant by API key using service
-        async for db in get_async_db():
+        # Look up tenant by API key using service with proper session management
+        async with AsyncSessionLocal() as db:
             tenant_service = TenantService(db)
             tenant = await tenant_service.get_tenant_by_api_key(api_key)
-            break
         
         if not tenant:
             logger.warning(f"Invalid API key attempted: {api_key[:20]}...")
@@ -113,7 +112,11 @@ async def api_key_auth_middleware(request: Request, call_next):
                 response.headers["Access-Control-Allow-Credentials"] = "true"
             return response
         
-        if not tenant.is_active:
+        # Simplified tenant model - no is_active field needed
+        # All tenants in database are considered active
+        
+        # Continue processing (removed is_active check)
+        if False:  # Keep structure but disable check
             logger.warning(f"Inactive tenant attempted access: {tenant.slug}")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -123,8 +126,9 @@ async def api_key_auth_middleware(request: Request, call_next):
                 }
             )
         
-        # Check if API key has expired
-        if tenant.api_key_expires_at and tenant.api_key_expires_at < tenant.updated_at:
+        # Simplified - no API key expiration
+        # API keys never expire in simplified model
+        if False:  # Keep structure but disable check
             logger.warning(f"Expired API key attempted: {tenant.slug}")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -142,10 +146,9 @@ async def api_key_auth_middleware(request: Request, call_next):
         
         # Update API key last used timestamp (async, don't wait)
         try:
-            async for db in get_async_db():
+            async with AsyncSessionLocal() as db:
                 tenant_service = TenantService(db)
                 await tenant_service.update_api_key_last_used(tenant.id)
-                break
         except Exception as e:
             # Don't fail request if we can't update usage
             logger.error(f"Failed to update API key usage: {e}")
