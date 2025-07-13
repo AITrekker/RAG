@@ -81,9 +81,9 @@ async def set_file_status(
 async def save_embeddings(
     db: AsyncSession,
     file_record: File,
-    embedded_chunks: List[EmbeddedChunk]
+    embedded_chunks
 ) -> int:
-    """Save embeddings to database"""
+    """Save embeddings to database (supports both old and new format)"""
     if not embedded_chunks:
         return 0
     
@@ -94,20 +94,39 @@ async def save_embeddings(
     
     # Create new embedding records
     embedding_records = []
-    for embedded_chunk in embedded_chunks:
-        chunk = embedded_chunk.chunk
-        
-        embedding_record = EmbeddingChunk(
-            file_id=file_record.id,
-            tenant_slug=file_record.tenant_slug,
-            chunk_index=chunk.index,
-            text=chunk.text,
-            token_count=chunk.token_count,
-            start_char=chunk.start_char,
-            end_char=chunk.end_char,
-            embedding=embedded_chunk.embedding,
-            embedding_model=embedded_chunk.embedding_model
-        )
+    
+    # Handle both old EmbeddedChunk objects and new simple dict format
+    for i, embedded_chunk in enumerate(embedded_chunks):
+        if isinstance(embedded_chunk, dict):
+            # New simple format from simple_embedder
+            import hashlib
+            chunk_text = embedded_chunk["text"]
+            chunk_hash = hashlib.sha256(chunk_text.encode()).hexdigest()
+            
+            embedding_record = EmbeddingChunk(
+                file_id=file_record.id,
+                tenant_slug=file_record.tenant_slug,
+                chunk_index=embedded_chunk["index"],
+                chunk_content=chunk_text,
+                chunk_hash=chunk_hash,
+                token_count=len(chunk_text.split()),
+                embedding=embedded_chunk["embedding"],
+                embedding_model=embedded_chunk["model"]
+            )
+        else:
+            # Old EmbeddedChunk object format (for backward compatibility)
+            chunk = embedded_chunk.chunk
+            embedding_record = EmbeddingChunk(
+                file_id=file_record.id,
+                tenant_slug=file_record.tenant_slug,
+                chunk_index=chunk.index,
+                text=chunk.text,
+                token_count=getattr(chunk, 'token_count', None),
+                start_char=getattr(chunk, 'start_char', None),
+                end_char=getattr(chunk, 'end_char', None),
+                embedding=embedded_chunk.embedding,
+                embedding_model=embedded_chunk.embedding_model
+            )
         embedding_records.append(embedding_record)
     
     # Bulk insert

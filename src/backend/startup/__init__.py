@@ -1,2 +1,2 @@
 from .dependencies import wait_for_dependencies
-from .verification import verify_system_requirements
+from .verification import verify_system_requirements, reload_environment_variables

@@ -160,11 +160,15 @@ async def api_key_auth_middleware(request: Request, call_next):
         request.state.tenant = tenant  # Keep the full tenant object
         request.state.api_key = api_key
         
-        # Update API key last used timestamp (async, don't wait)
+        # Update API key last used timestamp (simplified - optional)
         try:
             async with AsyncSessionLocal() as db:
-                tenant_service = TenantService(db)
-                await tenant_service.update_api_key_last_used(tenant.slug)
+                await db.execute(text("""
+                    UPDATE tenants 
+                    SET updated_at = NOW() 
+                    WHERE slug = :slug
+                """), {"slug": tenant.slug})
+                await db.commit()
         except Exception as e:
             # Don't fail request if we can't update usage
             logger.error(f"Failed to update API key usage: {e}")

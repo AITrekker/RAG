@@ -8,12 +8,20 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backend.core.document_discovery import create_sync_plan, get_sync_summary, SyncPlan
-from src.backend.core.embedding_engine import (
-    EmbeddingConfig, 
-    process_file_to_embeddings,
-    EmbeddingModel,
-    ChunkingStrategy
+from src.backend.simple_embedder import (
+    process_file_to_embeddings_simple,
+    get_available_models,
+    get_available_strategies
 )
+
+# Simple config class to replace complex EmbeddingConfig
+class SimpleEmbeddingConfig:
+    def __init__(self, model: str = "sentence-transformers/all-MiniLM-L6-v2", 
+                 chunk_size: int = 512, chunk_overlap: int = 50, max_chunks: int = 1000):
+        self.model = model
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.max_chunks = max_chunks
 from src.backend.core.database_operations import (
     create_file_record,
     update_file_record,
@@ -30,7 +38,7 @@ class SyncCoordinator:
     def __init__(self, db: AsyncSession, upload_dir: str = "./data/uploads"):
         self.db = db
         self.upload_dir = upload_dir
-        self.default_config = EmbeddingConfig()
+        self.default_config = SimpleEmbeddingConfig()
     
     async def discover_changes(
         self, 
@@ -44,7 +52,7 @@ class SyncCoordinator:
         self,
         tenant_slug: str,
         file_info,
-        config: EmbeddingConfig,
+        config: SimpleEmbeddingConfig,
         is_new_file: bool = True,
         existing_file_record = None
     ) -> Dict[str, Any]:
@@ -67,8 +75,14 @@ class SyncCoordinator:
             else:
                 file_record = await update_file_record(self.db, existing_file_record, file_info)
             
-            # Generate embeddings
-            embedded_chunks = process_file_to_embeddings(file_path, config)
+            # Generate embeddings using simple embedder (no memory leaks)
+            embedded_chunks = process_file_to_embeddings_simple(
+                file_path, 
+                chunk_size=config.chunk_size,
+                chunk_overlap=config.chunk_overlap,
+                model_name=config.model,
+                max_chunks=config.max_chunks
+            )
             
             if not embedded_chunks:
                 await set_file_status(self.db, file_record, "failed", "No embeddings generated")
@@ -78,8 +92,8 @@ class SyncCoordinator:
             # Save embeddings to database
             chunks_saved = await save_embeddings(self.db, file_record, embedded_chunks)
             
-            # Mark as completed
-            await set_file_status(self.db, file_record, "completed")
+            # Mark as synced
+            await set_file_status(self.db, file_record, "synced")
             
             result.update({
                 "success": True,
@@ -103,7 +117,7 @@ class SyncCoordinator:
         self,
         tenant_slug: str,
         plan: SyncPlan,
-        config: EmbeddingConfig = None
+        config: SimpleEmbeddingConfig = None
     ) -> Dict[str, Any]:
         """Execute a complete sync plan"""
         
@@ -121,10 +135,10 @@ class SyncCoordinator:
             "successful_files": [],
             "failed_files": [],
             "config_used": {
-                "model": config.model.value,
-                "chunking": config.chunking.value,
+                "model": config.model,
                 "chunk_size": config.chunk_size,
-                "chunk_overlap": config.chunk_overlap
+                "chunk_overlap": config.chunk_overlap,
+                "max_chunks": config.max_chunks
             }
         }
         
@@ -201,19 +215,13 @@ class SyncCoordinator:
     ) -> Dict[str, Any]:
         """Complete sync operation in one call"""
         
-        # Create config
-        config = EmbeddingConfig()
+        # Create simple config
+        config = SimpleEmbeddingConfig()
         if embedding_model:
-            try:
-                config.model = EmbeddingModel(embedding_model)
-            except ValueError:
-                pass  # Use default
-        
-        if chunking_strategy:
-            try:
-                config.chunking = ChunkingStrategy(chunking_strategy)
-            except ValueError:
-                pass  # Use default
+            # Validate model is available
+            available_models = [m["value"] for m in get_available_models()]
+            if embedding_model in available_models:
+                config.model = embedding_model
         
         # Discover changes
         plan = await self.discover_changes(tenant_slug, force_full_sync)

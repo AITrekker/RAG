@@ -5,8 +5,28 @@ Simplified system requirements verification.
 import os
 import logging
 from typing import Tuple
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+
+def reload_environment_variables() -> None:
+    """
+    Force reload .env file and clear settings cache.
+    
+    This is needed because the init container writes new credentials to .env
+    during runtime, but Pydantic settings are cached at startup time.
+    """
+    logger.info("🔄 Reloading environment variables from .env file...")
+    
+    # Reload .env file (override=True means existing env vars are updated)
+    load_dotenv(override=True)
+    
+    # Clear the settings cache so get_settings() will read new values
+    from src.backend.config.settings import get_settings
+    get_settings.cache_clear()
+    
+    logger.info("✅ Environment variables reloaded successfully")
 
 
 def verify_database_schema() -> Tuple[bool, str]:
@@ -51,9 +71,11 @@ def verify_admin_tenant() -> Tuple[bool, str]:
     try:
         admin_api_key = os.getenv("ADMIN_API_KEY")
         if not admin_api_key:
+            logger.warning("⚠️ ADMIN_API_KEY not found in environment variables")
             return False, "Admin credentials not found in .env file"
         
-        logger.info("✅ Admin tenant verified successfully")
+        # Log first few characters for verification (security: don't log full key)
+        logger.info(f"✅ Admin tenant verified successfully (key starts with: {admin_api_key[:12]}...)")
         return True, ""
         
     except Exception as e:
@@ -65,6 +87,9 @@ def verify_admin_tenant() -> Tuple[bool, str]:
 def verify_system_requirements() -> Tuple[bool, str]:
     """Verify all system requirements are met."""
     logger.info("🔍 Verifying system requirements...")
+    
+    # Force reload .env file to pick up changes from init container
+    reload_environment_variables()
     
     # Check DATABASE_URL
     if not os.getenv("DATABASE_URL"):

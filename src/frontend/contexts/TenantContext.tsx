@@ -145,9 +145,9 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       }
       
       const result = await response.json();
-      console.log(`🏢 Loaded ${result.total_count || 0} tenants using admin API key`);
+      console.log(`🏢 Loaded ${result.total || 0} tenants using admin API key`);
       
-      // The admin endpoint returns {tenants: [...], total_count: N}
+      // The admin endpoint returns {tenants: [...], total: N}
       return result.tenants || [];
     },
     enabled: !!adminApiKey, // Only run when admin API key is available
@@ -198,8 +198,8 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       if (nonAdminTenants.length > 0) {
         const firstTenant = nonAdminTenants[0];
-        console.log(`🎯 Auto-selecting first non-admin tenant: ${firstTenant.name} (${firstTenant.id})`);
-        selectTenant(firstTenant.id);
+        console.log(`🎯 Auto-selecting first non-admin tenant: ${firstTenant.name} (${firstTenant.slug})`);
+        selectTenant(firstTenant.slug);
       } else {
         console.log('⚠️ No non-admin tenants available for auto-selection');
       }

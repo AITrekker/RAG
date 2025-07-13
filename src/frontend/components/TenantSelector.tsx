@@ -24,7 +24,7 @@ export const TenantSelector: React.FC = () => {
       >
         <option value="" disabled>-- Select a Tenant --</option>
         {tenants.map((t) => (
-          <option key={t.id} value={t.id}>
+          <option key={t.slug} value={t.slug}>
             {t.name} ({t.slug})
           </option>
         ))}

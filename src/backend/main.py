@@ -18,7 +18,7 @@ from src.backend.api.v1.routes import api_router
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 from src.backend.middleware.api_key_auth import api_key_auth_middleware
 from src.backend.database import startup_database_checks, close_database
-from src.backend.startup import wait_for_dependencies, verify_system_requirements
+from src.backend.startup import wait_for_dependencies, verify_system_requirements, reload_environment_variables
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -40,14 +40,18 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Dependency check failed: {deps_error}")
             raise RuntimeError(f"Failed to connect to dependencies: {deps_error}")
         
-        # Step 2: Verify system requirements
+        # Step 2: Reload environment variables (init container may have updated .env)
+        logger.info("🔄 Reloading environment variables for init container updates...")
+        reload_environment_variables()
+        
+        # Step 3: Verify system requirements
         logger.info("🔍 Verifying system requirements...")
         req_success, req_error = verify_system_requirements()
         if not req_success:
             logger.error(f"❌ System requirements check failed: {req_error}")
             raise RuntimeError(f"System requirements not met: {req_error}")
         
-        # Step 3: Database startup checks
+        # Step 4: Database startup checks
         logger.info("🗄️ Running database startup checks...")
         try:
             await startup_database_checks()

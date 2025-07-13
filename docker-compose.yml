@@ -61,6 +61,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    # NVIDIA recommended settings for PyTorch
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    shm_size: 2gb
     volumes:
       - ./src/backend:/app/src/backend
       - ./scripts:/app/scripts
@@ -98,10 +104,13 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./src/frontend:/app
+      - ./src/frontend/src:/app/src
+      - ./src/frontend/package.json:/app/package.json
+      - ./src/frontend/public:/app/public
       - /app/node_modules
       - ./.env:/app/.env
       - ./demo_admin_keys.json:/app/public/demo_admin_keys.json
+      - ./demo_tenant_keys.json:/app/public/demo_tenant_keys.json
     env_file:
       - .env
     environment:

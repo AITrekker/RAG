@@ -12,12 +12,9 @@ from src.backend.dependencies import get_current_tenant_dep
 from src.backend.database import get_async_db
 from src.backend.models.database import Tenant
 from src.backend.core.sync_coordinator import SyncCoordinator
-from src.backend.core.embedding_engine import (
+from src.backend.simple_embedder import (
     get_available_models, 
-    get_available_strategies,
-    EmbeddingConfig,
-    EmbeddingModel,
-    ChunkingStrategy
+    get_available_strategies
 )
 
 router = APIRouter()
@@ -49,8 +46,8 @@ async def get_embedding_models():
         "models": get_available_models(),
         "strategies": get_available_strategies(),
         "default_config": {
-            "model": EmbeddingModel.MINI_LM.value,
-            "chunking_strategy": ChunkingStrategy.FIXED_SIZE.value,
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "chunking_strategy": "fixed-size",
             "chunk_size": 512,
             "chunk_overlap": 50
         }
