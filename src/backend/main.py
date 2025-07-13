@@ -14,47 +14,26 @@ from contextlib import asynccontextmanager
 import asyncio
 
 from src.backend.config.settings import get_settings
-from src.backend.api.v1.routes import (
-    # health as health_routes,  # Removed for simplicity
-    admin as admin_routes,
-    setup as setup_routes,
-    tenants as tenant_routes,
-    auth as auth_routes,
-    files as file_routes,
-    sync as sync_routes,
-    query as query_routes,
-    embeddings as embedding_routes
-)
+from src.backend.api.v1.routes import api_router
 # from src.backend.utils.monitoring import initialize_monitoring, shutdown_monitoring, monitoring_middleware  # Removed for simplicity
 from src.backend.middleware.error_handler import setup_exception_handlers, error_tracking_middleware
 from src.backend.middleware.api_key_auth import api_key_auth_middleware
 from src.backend.database import startup_database_checks, close_database
 from src.backend.startup import wait_for_dependencies, verify_system_requirements
-from src.backend.startup.background_tasks import start_background_tasks, stop_background_tasks
-
-# Import service modules for initialization
-from src.backend.services.tenant_service import TenantService
-from src.backend.services.file_service import FileService
-from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
-from src.backend.services.sync_service import SyncService
+# Background tasks removed for simplified architecture
+# Old service imports removed - using simplified core modules
 
 settings = get_settings()
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
 
-# Service instances
-tenant_service: TenantService = None
-file_service: FileService = None
-embedding_service: PgVectorEmbeddingService = None
-sync_service: SyncService = None
+# Service instances removed - using simplified dependency injection
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
     logger.info("🚀 Starting Enterprise RAG Platform API...")
-    
-    global tenant_service, file_service, embedding_service, sync_service, rag_service
     
     try:
         # Step 1: Wait for external dependencies
@@ -71,8 +50,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ System requirements check failed: {req_error}")
             raise RuntimeError(f"System requirements not met: {req_error}")
         
-        
-        # Step 4: Original database startup checks and service initialization
+        # Step 3: Original database startup checks and service initialization
         logger.info("🗄️ Running database startup checks...")
         try:
             await startup_database_checks()
@@ -80,43 +58,6 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Database startup failed: {e}")
             # Continue anyway for debugging
             logger.warning("⚠️ Continuing despite database startup issues (debugging mode)")
-        
-        # Step 5: Initialize monitoring system (removed for simplicity)
-        logger.info("📊 Monitoring system disabled for simplified setup")
-        
-        # Step 6: Initialize service architecture
-        logger.info("⚙️ Initializing service layer...")
-        from src.backend.database import get_async_db
-        
-        # Get database session for service initialization
-        async for db in get_async_db():
-            # Initialize core services
-            tenant_service = TenantService(db)
-            file_service = FileService(db)
-            embedding_service = PgVectorEmbeddingService(db)
-            
-            # Initialize services with dependencies
-            sync_service = SyncService(db, file_service, embedding_service)
-            
-            # Initialize services that need async setup  
-            # Note: PgVectorEmbeddingService doesn't need async initialization
-            
-            logger.info("Service layer initialized successfully")
-            break  # Only need first session for initialization
-        
-        # Set app state for services
-        app.state.tenant_service = tenant_service
-        app.state.file_service = file_service
-        app.state.embedding_service = embedding_service
-        app.state.sync_service = sync_service
-        
-        # Step 7: Start background tasks with delay to prevent startup sync conflicts
-        logger.info("🔄 Starting background tasks...")
-        await start_background_tasks()
-        
-        # Add startup delay to allow any pending operations to settle
-        logger.info("⏳ Waiting 10 seconds to allow system stabilization...")
-        await asyncio.sleep(10)
         
         logger.info("🎉 API startup completed successfully!")
         
@@ -127,15 +68,10 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("Shutting down Enterprise RAG Platform API...")
-    try:
-        logger.info("Stopping background tasks...")
-        await stop_background_tasks()
-        
+    try:        
         logger.info("Closing database connections...")
         await close_database()
         
-        logger.info("Shutting down monitoring system...")
-        # shutdown_monitoring()  # Removed for simplicity
         logger.info("API shutdown completed successfully")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
@@ -182,18 +118,8 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# Core API routes
-# app.include_router(health_routes.router, prefix=f"{settings.api_v1_str}/health", tags=["Health"])  # Removed for simplicity
-app.include_router(auth_routes.router, prefix=f"{settings.api_v1_str}/auth", tags=["Authentication"])
-app.include_router(setup_routes.router, prefix=f"{settings.api_v1_str}/setup", tags=["Setup"])
-app.include_router(admin_routes.router, prefix=f"{settings.api_v1_str}/admin", tags=["Admin"])
-app.include_router(tenant_routes.router, prefix=f"{settings.api_v1_str}/tenants", tags=["Tenants"])
-
-# Service-based routes
-app.include_router(file_routes.router, prefix=f"{settings.api_v1_str}/files", tags=["Files"])
-app.include_router(sync_routes.router, prefix=f"{settings.api_v1_str}/sync", tags=["Sync"])
-app.include_router(query_routes.router, prefix=f"{settings.api_v1_str}/query", tags=["Query"])
-app.include_router(embedding_routes.router, prefix=f"{settings.api_v1_str}/embeddings", tags=["Embeddings"])
+# Simplified API routes
+app.include_router(api_router, prefix=settings.api_v1_str)
 
 @app.get("/", include_in_schema=False)
 async def root():

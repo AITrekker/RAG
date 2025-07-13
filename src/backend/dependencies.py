@@ -10,8 +10,7 @@ from src.backend.database import get_async_db, AsyncSessionLocal
 from src.backend.models.database import Tenant
 from src.backend.services.tenant_service import TenantService
 from src.backend.services.file_service import FileService
-# Embedding service import moved to function level to avoid circular imports
-from src.backend.services.sync_service import SyncService
+# Old sync service removed - using simplified core modules now
 from src.backend.middleware.api_key_auth import get_current_tenant
 from src.backend.config.settings import get_settings
 
@@ -93,26 +92,11 @@ async def get_file_service_dep(
     db: AsyncSession = Depends(get_db)
 ) -> FileService:
     """Get file service"""
-    return FileService(db)
+    return FileService(db_session=db)
 
 
-async def get_embedding_service_dep(
-    db: AsyncSession = Depends(get_db)
-):
-    """Get pgvector embedding service with model dependency"""
-    from src.backend.services.embedding_service_pgvector import PgVectorEmbeddingService
-    # Get the embedding model
-    embedding_model = get_embedding_model()
-    return PgVectorEmbeddingService(db, embedding_model=embedding_model)
-
-
-async def get_sync_service_dep(
-    db: AsyncSession = Depends(get_db),
-    file_service: FileService = Depends(get_file_service_dep),
-    embedding_model = Depends(get_embedding_model)
-) -> SyncService:
-    """Get sync service with dependencies"""
-    return SyncService(db, file_service, embedding_model)
+# Old complex service dependencies removed
+# Now using simplified core modules directly in endpoints
 
 
 # Singleton LLM model with FastAPI caching (keeps performance, removes complexity)
@@ -155,16 +139,7 @@ def get_llm_model():
         return None
 
 
-async def get_rag_service_dep(
-    db: AsyncSession = Depends(get_db),
-    file_service: FileService = Depends(get_file_service_dep),
-    embedding_model = Depends(get_embedding_model)
-):
-    """Get direct RAG service for embedding experimentation"""
-    from src.backend.services.direct_rag_service import DirectRAGService
-    
-    # Simple, no-initialization direct service
-    return DirectRAGService(db, file_service, embedding_model)
+# Removed complex RAG service dependency - using simplified core modules
 
 
 # Authentication dependencies

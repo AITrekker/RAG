@@ -1,20 +1,17 @@
 """
-RAG Query API Routes - Using the new service architecture
+RAG Query API Routes - Simplified Implementation
 """
 
 import time
-from fastapi import APIRouter, HTTPException, Depends, status, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List, Optional, Dict, Any
-# UUID no longer needed - using string slugs
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.backend.dependencies import (
-    get_current_tenant_dep,
-    get_rag_service_dep,
-    get_db
-)
-from src.backend.services.direct_rag_service import DirectRAGService
+from src.backend.dependencies import get_current_tenant_dep
+from src.backend.database import get_async_db
 from src.backend.models.database import Tenant
-from sqlalchemy.orm import Session
+from src.backend.core.database_operations import search_embeddings
+from src.backend.core.embedding_engine import SingletonEmbeddingModel, EmbeddingModel
 
 router = APIRouter()
 
@@ -22,12 +19,10 @@ router = APIRouter()
 @router.post("/")
 async def process_query(
     request_data: Dict[str, Any],
-    request: Request,
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """Process a RAG query - simplified without analytics tracking"""
+    """Process a RAG query - simplified semantic search"""
     
     try:
         query = request_data.get("query", "").strip()
@@ -38,25 +33,49 @@ async def process_query(
             )
         
         max_sources = request_data.get("max_sources", 5)
-        confidence_threshold = request_data.get("confidence_threshold", 0.7)
-        metadata_filters = request_data.get("metadata_filters")
         
-        # Process the query
-        response = await rag_service.query(
-            question=query,
+        start_time = time.time()
+        
+        # Get embedding model
+        model = SingletonEmbeddingModel.get_model(EmbeddingModel.MINI_LM.value)
+        
+        # Generate query embedding
+        query_embedding = model.encode([query], convert_to_tensor=False, show_progress_bar=False)[0]
+        
+        # Search for similar embeddings
+        similar_chunks = await search_embeddings(
+            db=db,
             tenant_slug=current_tenant.slug,
-            max_sources=max_sources,
-            similarity_threshold=confidence_threshold
+            query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
+            limit=max_sources
         )
         
+        processing_time = time.time() - start_time
+        
+        # Format sources
+        sources = []
+        for chunk in similar_chunks:
+            sources.append({
+                "text": chunk.text,
+                "chunk_index": chunk.chunk_index,
+                "file_id": str(chunk.file_id),
+                "token_count": chunk.token_count
+            })
+        
+        # Simple answer (just concatenate top chunks for now)
+        if sources:
+            answer = "Based on the documents: " + " ".join([source["text"][:200] + "..." for source in sources[:3]])
+        else:
+            answer = "No relevant information found in the documents."
+        
         return {
-            "query": response.query,
-            "answer": response.answer,
-            "sources": response.sources,  # Sources are already in correct format
-            "confidence": response.confidence,
-            "processing_time": response.processing_time,
-            "method": response.method,
-            "tenant_id": response.tenant_slug
+            "query": query,
+            "answer": answer,
+            "sources": sources,
+            "confidence": 0.8 if sources else 0.0,
+            "processing_time": processing_time,
+            "method": "simplified_semantic_search",
+            "tenant_id": current_tenant.slug
         }
         
     except HTTPException:
@@ -68,32 +87,11 @@ async def process_query(
         )
 
 
-@router.post("/batch")
-async def process_batch_queries(
-    request: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Process multiple queries in batch - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Batch query processing not yet implemented",
-            "planned_features": [
-                "Parallel query processing",
-                "Batch response with success/failure counts",
-                "Optimized resource usage"
-            ],
-            "status": "planned"
-        }
-    )
-
-
 @router.post("/search")
 async def semantic_search(
     request: Dict[str, Any],
     current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Perform semantic search without answer generation"""
     try:
@@ -105,21 +103,36 @@ async def semantic_search(
             )
         
         max_results = request.get("max_results", 20)
-        metadata_filters = request.get("metadata_filters")
         
-        # Use the query method for semantic search (simplified)
-        response = await rag_service.query(
-            question=query,
+        # Get embedding model
+        model = SingletonEmbeddingModel.get_model(EmbeddingModel.MINI_LM.value)
+        
+        # Generate query embedding
+        query_embedding = model.encode([query], convert_to_tensor=False, show_progress_bar=False)[0]
+        
+        # Search for similar embeddings
+        similar_chunks = await search_embeddings(
+            db=db,
             tenant_slug=current_tenant.slug,
-            max_sources=max_results
+            query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
+            limit=max_results
         )
+        
+        # Format results
+        results = []
+        for chunk in similar_chunks:
+            results.append({
+                "text": chunk.text,
+                "chunk_index": chunk.chunk_index,
+                "file_id": str(chunk.file_id),
+                "token_count": chunk.token_count
+            })
         
         return {
             "query": query,
-            "results": response.sources,  # Use sources as results
-            "total_results": len(response.sources),
-            "answer": response.answer,  # Include answer for context
-            "method": "semantic_search_via_query"
+            "results": results,
+            "total_results": len(results),
+            "method": "simplified_semantic_search"
         }
         
     except HTTPException:
@@ -131,84 +144,10 @@ async def semantic_search(
         )
 
 
-@router.get("/documents")
-async def list_documents(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    search_query: Optional[str] = Query(None),
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """List documents with optional search"""
-    try:
-        # Get tenant stats as a proxy for document listing
-        stats = await rag_service.get_tenant_stats(current_tenant.slug)
-        
-        return {
-            "documents": [],  # Stub - document listing not implemented in simplified service
-            "total_count": 0,
-            "page": page,
-            "page_size": page_size,
-            "tenant_stats": stats,
-            "message": "Document listing not implemented in simplified RAG service",
-            "status": "stubbed"
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list documents: {str(e)}"
-        )
-
-
-@router.get("/documents/{document_id}")
-async def get_document(
-    document_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Get specific document details - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Document detail retrieval not yet implemented",
-            "planned_features": [
-                "Document metadata retrieval",
-                "Chunk information",
-                "Processing status"
-            ],
-            "status": "planned"
-        }
-    )
-
-
-@router.get("/history")
-async def get_query_history(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Get query history - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Query history not yet implemented",
-            "planned_features": [
-                "Query history with pagination",
-                "Search and filtering",
-                "Export capabilities"
-            ],
-            "status": "planned"
-        }
-    )
-
-
 @router.post("/validate")
 async def validate_query(
     request: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
+    current_tenant: Tenant = Depends(get_current_tenant_dep)
 ):
     """Validate a query without processing it"""
     try:
@@ -221,8 +160,7 @@ async def validate_query(
             "length": len(query),
             "word_count": len(query.split()),
             "tenant_id": current_tenant.slug,
-            "status": "simplified_validation",
-            "message": "Query validation simplified in new service architecture"
+            "status": "simplified_validation"
         }
         
         return validation
@@ -232,117 +170,3 @@ async def validate_query(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to validate query: {str(e)}"
         )
-
-
-@router.get("/suggestions")
-async def get_query_suggestions(
-    partial_query: str = Query(..., min_length=1),
-    max_suggestions: int = Query(5, ge=1, le=10),
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Get query suggestions - STUBBED"""
-    # This is stubbed in the RAG service, so we'll return a proper stub response
-    return {
-        "suggestions": [
-            f"{partial_query} example 1",
-            f"{partial_query} example 2", 
-            f"{partial_query} example 3"
-        ],
-        "status": "stubbed",
-        "message": "Query suggestions are stubbed - real implementation planned"
-    }
-
-
-@router.get("/stats")
-async def get_query_stats(
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Get RAG usage statistics - STUBBED"""
-    # This is stubbed in the RAG service, so we'll return a proper stub response
-    return {
-        "tenant_id": current_tenant.slug,
-        "total_queries": 0,
-        "successful_queries": 0,
-        "failed_queries": 0,
-        "average_processing_time": 0.0,
-        "average_confidence": 0.0,
-        "most_common_queries": [],
-        "query_trends": {},
-        "feedback_stats": {},
-        "status": "stubbed",
-        "message": "Query statistics are stubbed - real implementation planned"
-    }
-
-
-@router.post("/feedback")
-async def submit_feedback(
-    request: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Submit query feedback - STUBBED"""
-    # This is stubbed in the RAG service, so we'll return a proper stub response
-    query_id = request.get("query_id")
-    rating = request.get("rating")
-    feedback = request.get("feedback")
-    helpful = request.get("helpful")
-    
-    if not query_id or rating is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="query_id and rating are required"
-        )
-    
-    return {
-        "success": True,
-        "message": "Feedback received (stubbed - not yet stored)",
-        "query_id": query_id,
-        "rating": rating,
-        "feedback": feedback,
-        "helpful": helpful,
-        "status": "stubbed",
-        "note": "Feedback storage not yet implemented"
-    }
-
-
-@router.get("/config")
-async def get_query_config(
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Get query configuration - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Query configuration not yet implemented",
-            "planned_features": [
-                "Per-tenant query settings",
-                "Model configuration",
-                "Processing parameters"
-            ],
-            "status": "planned"
-        }
-    )
-
-
-@router.put("/config")
-async def update_query_config(
-    config: Dict[str, Any],
-    current_tenant: Tenant = Depends(get_current_tenant_dep),
-    rag_service: DirectRAGService = Depends(get_rag_service_dep)
-):
-    """Update query configuration - NOT IMPLEMENTED"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "message": "Query configuration updates not yet implemented",
-            "planned_features": [
-                "Configuration validation",
-                "Settings persistence",
-                "Configuration history"
-            ],
-            "status": "planned"
-        }
-    )
