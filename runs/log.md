@@ -213,3 +213,25 @@ I expected reranking to tighten the top five. It made every configuration worse.
 The likely cause is domain mismatch. bge-reranker-base was trained on web search questions and passages, and Moby-Dick is 1851 prose full of dialogue and digressions, so the cross-encoder's sense of what "answers" a question does not transfer. RRF over BM25 and vectors was already putting the right chunk near the top (MRR 0.665), which left a reranker little room to help and plenty of room to hurt.
 
 Steps 10 and 11 are both negative results, and they are worth keeping in the series. Techniques that are standard in RAG guides made this system worse, and only the eval showed it. The best retrieval configuration is still step 7's pg-hybrid over r128 chunks, with reader windows of 2.
+
+## Step 12: a library of documents (distractors are harmless, tenants need metadata)
+
+I added War and Peace (7,336 chunks, two and a half times the size of Moby-Dick) and 21 short documents from three fictional companies, for 10,360 chunks in total. Each company has its own vacation policy and similar pages, and the documents rarely name their company. ACMECorp's policy calls itself "GlobalCorp," and RegionalSolns' financial report says "TechFlow." Search is in-memory hybrid over r128 chunks with reader windows of 2, run by `scripts/step12.py`, and results are in `runs/step-12.json`.
+
+A big distractor book did no harm. The 30 Moby-Dick questions scored recall@800w 0.962 and recall@5 0.846 against the whole library, exactly as against Moby-Dick alone, and only 4 of 130 top-five results came from another document. The two novels use different names and vocabulary, so BM25 and the embeddings keep them apart.
+
+Tenants are a different problem. I wrote six company questions (`eval_library.yaml`) that name the company, as a user would.
+
+| Company questions | Gold in context | Top result from the right tenant | Correct | "I don't know" | Wrong |
+|---|---|---|---|---|---|
+| No filter, source labels shown to the model | 6/6 | 4/6 | 6/6 | 0 | 0 |
+| No filter, source labels hidden | 6/6 | 4/6 | 3/6 | 3 | 0 |
+| Tenant metadata filter | 6/6 | 6/6 | 5/6 | 1 | 0 |
+
+Without a filter, retrieval ranked RegionalSolns' vacation policy first for both ACMECorp PTO questions. The answers still came out right only because the prompt labels each passage with its document, such as "(ACMECorp:vacation_policy)," so the model read the tenant off the label. With labels hidden, the model could not tell which company a policy belonged to and declined three questions, which is the honest outcome but not a useful one. With a tenant filter, every top-five result came from the asking company. The one miss under the filter is L3, where InnovateFast's policy says it does not track vacation days and the model answered "I don't know" to "how many days."
+
+The lesson for multi-tenant RAG is that the text cannot be trusted to identify its owner, so tenant isolation has to be a metadata filter applied before retrieval. It is also a data-protection issue, since the unfiltered runs put another company's policy into the model's context. In Postgres the filter is a WHERE clause on the document's tenant.
+
+## Where this ends up
+
+The best configuration is pg-hybrid (BM25 plus pgvector, fused with RRF) over 128-token chunks, with each retrieved chunk widened by two neighbors for Qwen3-8B to read. It reaches recall@800w 0.962 and 18 of 26 correct answers, with all four unanswerable questions declined. Contextual headers, chapter summaries, HyDE, and reranking each fixed specific questions, but none improved the totals on this eval, and HyDE and reranking made retrieval clearly worse. The one remaining retrieval miss is q25, Fedallah's prophecy, and most remaining answer errors are misreadings by an 8B model with the right passage in front of it.

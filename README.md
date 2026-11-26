@@ -41,3 +41,11 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Steps 10 and 11: HyDE and reranking
 
 `--mode pg-hybrid-hyde`, `pg-hybrid-rerank`, and `pg-hybrid-hyde-rerank` add query rewriting, cross-encoder reranking, or both. Both made retrieval worse on this eval, and `pg-hybrid` stays the default (see `runs/log.md`).
+
+## Step 12: a library
+
+`corpus/library/` holds War and Peace and three companies' documents. `uv run python scripts/step12.py` measures distractor effects on the Moby-Dick questions and runs the company questions in `eval_library.yaml` with and without a tenant filter.
+
+## Results
+
+The per-step write-ups are in `runs/log.md`. `runs/rescore.csv` scores every step tag on the same 30 questions, and `runs/answers.csv` holds the graded answer runs.

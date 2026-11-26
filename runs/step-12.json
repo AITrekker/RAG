@@ -1,0 +1,425 @@
+{
+  "moby": {
+    "mobydick": {
+      "recall@800w": 0.962,
+      "recall@5": 0.846,
+      "top5_from_other_docs": "0/130"
+    },
+    "library": {
+      "recall@800w": 0.962,
+      "recall@5": 0.846,
+      "top5_from_other_docs": "4/130"
+    }
+  },
+  "tenants": {
+    "no filter": [
+      {
+        "id": "L1",
+        "question": "How many PTO days does a new employee get per year at ACMECorp?",
+        "expected": "15 days (120 hours) per year in years 0 to 2.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:vacation_policy",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy"
+        ],
+        "answer": "A new employee at ACMECorp gets 15 days of PTO per year [5]."
+      },
+      {
+        "id": "L2",
+        "question": "How many PTO days does a new employee get per year at RegionalSolns?",
+        "expected": "20 days (160 hours) per year for all full-time employees.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:vacation_policy",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy"
+        ],
+        "answer": "RegionalSolns provides new employees with 160 hours (20 days) of PTO per year [1]."
+      },
+      {
+        "id": "L3",
+        "question": "How many vacation days do InnovateFast employees get?",
+        "expected": "InnovateFast does not track vacation days and trusts employees to manage their own time.",
+        "hit_800w": true,
+        "top5": [
+          "InnovateFast:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:team_handbook",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:company_mission",
+          "InnovateFast:vacation_policy",
+          "InnovateFast:working_style",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:working_style"
+        ],
+        "answer": "InnovateFast employees are offered unlimited paid time off, and there is no specified number of vacation days provided in the policy [1]."
+      },
+      {
+        "id": "L4",
+        "question": "How much unused PTO can ACMECorp employees roll over to next year?",
+        "expected": "Up to 40 hours; anything beyond that is forfeited.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:company_overview"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:project_timeline",
+          "RegionalSolns:marketing_strategy",
+          "RegionalSolns:vacation_policy"
+        ],
+        "answer": "ACMECorp employees can roll over up to 40 hours of unused PTO to the next calendar year [2]."
+      },
+      {
+        "id": "L5",
+        "question": "What was RegionalSolns' total revenue in Q4 2023?",
+        "expected": "$1,850,000, up 22 percent year over year.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:financial_report",
+          "ACMECorp:meeting_notes",
+          "RegionalSolns:financial_report",
+          "InnovateFast:project_timeline",
+          "ACMECorp:company_overview"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:meeting_notes",
+          "InnovateFast:project_timeline",
+          "InnovateFast:technical_documentation",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:marketing_strategy",
+          "warandpeace:82"
+        ],
+        "answer": "RegionalSolns' total revenue in Q4 2023 was $1,850,000 [1]."
+      },
+      {
+        "id": "L6",
+        "question": "How far in advance must ACMECorp employees request more than ten consecutive days of leave?",
+        "expected": "One month in advance.",
+        "hit_800w": true,
+        "top5": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:working_style",
+          "RegionalSolns:team_handbook"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:technical_documentation",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:working_style",
+          "warandpeace:340"
+        ],
+        "answer": "ACMECorp employees must request more than ten consecutive days of leave at least one month in advance [1]."
+      }
+    ],
+    "tenant filter": [
+      {
+        "id": "L1",
+        "question": "How many PTO days does a new employee get per year at ACMECorp?",
+        "expected": "15 days (120 hours) per year in years 0 to 2.",
+        "hit_800w": true,
+        "top5": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "ACMECorp:working_style"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:meeting_notes",
+          "ACMECorp:product_specifications",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style"
+        ],
+        "answer": "A new employee at ACMECorp gets 15 days of PTO per year, as they are in the 0-2 years tenure bracket [1]."
+      },
+      {
+        "id": "L2",
+        "question": "How many PTO days does a new employee get per year at RegionalSolns?",
+        "expected": "20 days (160 hours) per year for all full-time employees.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:financial_report"
+        ],
+        "context_docs": [
+          "RegionalSolns:financial_report",
+          "RegionalSolns:marketing_strategy",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:working_style"
+        ],
+        "answer": "A new employee at Regional Solutions gets 20 days of PTO per year [1]."
+      },
+      {
+        "id": "L3",
+        "question": "How many vacation days do InnovateFast employees get?",
+        "expected": "InnovateFast does not track vacation days and trusts employees to manage their own time.",
+        "hit_800w": true,
+        "top5": [
+          "InnovateFast:vacation_policy",
+          "InnovateFast:company_mission",
+          "InnovateFast:working_style",
+          "InnovateFast:our_culture",
+          "InnovateFast:technical_documentation"
+        ],
+        "context_docs": [
+          "InnovateFast:company_mission",
+          "InnovateFast:our_culture",
+          "InnovateFast:technical_documentation",
+          "InnovateFast:user_manual",
+          "InnovateFast:vacation_policy",
+          "InnovateFast:working_style"
+        ],
+        "answer": "I don't know."
+      },
+      {
+        "id": "L4",
+        "question": "How much unused PTO can ACMECorp employees roll over to next year?",
+        "expected": "Up to 40 hours; anything beyond that is forfeited.",
+        "hit_800w": true,
+        "top5": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:company_mission",
+          "ACMECorp:company_overview",
+          "ACMECorp:meeting_notes",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style"
+        ],
+        "answer": "ACMECorp employees can roll over up to 40 hours of unused PTO to the next calendar year [1]."
+      },
+      {
+        "id": "L5",
+        "question": "What was RegionalSolns' total revenue in Q4 2023?",
+        "expected": "$1,850,000, up 22 percent year over year.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:financial_report",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:marketing_strategy",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:financial_report"
+        ],
+        "context_docs": [
+          "RegionalSolns:company_mission",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:marketing_strategy",
+          "RegionalSolns:our_culture",
+          "RegionalSolns:team_handbook"
+        ],
+        "answer": "RegionalSolns' total revenue in Q4 2023 was $1,850,000 [1]."
+      },
+      {
+        "id": "L6",
+        "question": "How far in advance must ACMECorp employees request more than ten consecutive days of leave?",
+        "expected": "One month in advance.",
+        "hit_800w": true,
+        "top5": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "ACMECorp:working_style",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:company_overview"
+        ],
+        "context_docs": [
+          "ACMECorp:company_mission",
+          "ACMECorp:company_overview",
+          "ACMECorp:meeting_notes",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style"
+        ],
+        "answer": "ACMECorp employees must request more than ten consecutive days of leave at least one month in advance [1]."
+      }
+    ],
+    "no filter, labels hidden": [
+      {
+        "id": "L1",
+        "question": "How many PTO days does a new employee get per year at ACMECorp?",
+        "expected": "15 days (120 hours) per year in years 0 to 2.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:vacation_policy",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy"
+        ],
+        "answer": "ACME Corporation provides 15 days of vacation per year for employees with 0-2 years of tenure [5]."
+      },
+      {
+        "id": "L2",
+        "question": "How many PTO days does a new employee get per year at RegionalSolns?",
+        "expected": "20 days (160 hours) per year for all full-time employees.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:vacation_policy",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy"
+        ],
+        "answer": "Regional Solutions provides 160 hours (20 days) of PTO per year for all full-time employees [1]."
+      },
+      {
+        "id": "L3",
+        "question": "How many vacation days do InnovateFast employees get?",
+        "expected": "InnovateFast does not track vacation days and trusts employees to manage their own time.",
+        "hit_800w": true,
+        "top5": [
+          "InnovateFast:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:team_handbook",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:vacation_policy"
+        ],
+        "context_docs": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:company_mission",
+          "InnovateFast:vacation_policy",
+          "InnovateFast:working_style",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:working_style"
+        ],
+        "answer": "InnovateFast employees are offered unlimited paid time off [1], so there is no set number of vacation days specified."
+      },
+      {
+        "id": "L4",
+        "question": "How much unused PTO can ACMECorp employees roll over to next year?",
+        "expected": "Up to 40 hours; anything beyond that is forfeited.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:company_overview"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:project_timeline",
+          "RegionalSolns:marketing_strategy",
+          "RegionalSolns:vacation_policy"
+        ],
+        "answer": "I don't know."
+      },
+      {
+        "id": "L5",
+        "question": "What was RegionalSolns' total revenue in Q4 2023?",
+        "expected": "$1,850,000, up 22 percent year over year.",
+        "hit_800w": true,
+        "top5": [
+          "RegionalSolns:financial_report",
+          "ACMECorp:meeting_notes",
+          "RegionalSolns:financial_report",
+          "InnovateFast:project_timeline",
+          "ACMECorp:company_overview"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:meeting_notes",
+          "InnovateFast:project_timeline",
+          "InnovateFast:technical_documentation",
+          "RegionalSolns:financial_report",
+          "RegionalSolns:marketing_strategy",
+          "warandpeace:82"
+        ],
+        "answer": "I don't know."
+      },
+      {
+        "id": "L6",
+        "question": "How far in advance must ACMECorp employees request more than ten consecutive days of leave?",
+        "expected": "One month in advance.",
+        "hit_800w": true,
+        "top5": [
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "RegionalSolns:vacation_policy",
+          "ACMECorp:working_style",
+          "RegionalSolns:team_handbook"
+        ],
+        "context_docs": [
+          "ACMECorp:company_overview",
+          "ACMECorp:vacation_policy",
+          "ACMECorp:working_style",
+          "InnovateFast:technical_documentation",
+          "RegionalSolns:team_handbook",
+          "RegionalSolns:vacation_policy",
+          "RegionalSolns:working_style",
+          "warandpeace:340"
+        ],
+        "answer": "I don't know."
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+# Step 12 questions about the company documents. Gold labels are document labels.
+# `tenant` is the metadata a real system would know from the user's account.
+questions:
+  - id: L1
+    question: How many PTO days does a new employee get per year at ACMECorp?
+    tenant: ACMECorp
+    answer: 15 days (120 hours) per year in years 0 to 2.
+    gold: [ACMECorp:vacation_policy]
+
+  - id: L2
+    question: How many PTO days does a new employee get per year at RegionalSolns?
+    tenant: RegionalSolns
+    answer: 20 days (160 hours) per year for all full-time employees.
+    gold: [RegionalSolns:vacation_policy]
+
+  - id: L3
+    question: How many vacation days do InnovateFast employees get?
+    tenant: InnovateFast
+    answer: InnovateFast does not track vacation days and trusts employees to manage their own time.
+    gold: [InnovateFast:vacation_policy]
+
+  - id: L4
+    question: How much unused PTO can ACMECorp employees roll over to next year?
+    tenant: ACMECorp
+    answer: Up to 40 hours; anything beyond that is forfeited.
+    gold: [ACMECorp:vacation_policy]
+
+  - id: L5
+    question: What was RegionalSolns' total revenue in Q4 2023?
+    tenant: RegionalSolns
+    answer: $1,850,000, up 22 percent year over year.
+    gold: [RegionalSolns:financial_report]
+
+  - id: L6
+    question: How far in advance must ACMECorp employees request more than ten consecutive days of leave?
+    tenant: ACMECorp
+    answer: One month in advance.
+    gold: [ACMECorp:vacation_policy]
