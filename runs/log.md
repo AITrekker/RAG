@@ -235,3 +235,11 @@ The lesson for multi-tenant RAG is that the text cannot be trusted to identify i
 ## Where this ends up
 
 The best configuration is pg-hybrid (BM25 plus pgvector, fused with RRF) over 128-token chunks, with each retrieved chunk widened by two neighbors for Qwen3-8B to read. It reaches recall@800w 0.962 and 18 of 26 correct answers, with all four unanswerable questions declined. Contextual headers, chapter summaries, HyDE, and reranking each fixed specific questions, but none improved the totals on this eval, and HyDE and reranking made retrieval clearly worse. The one remaining retrieval miss is q25, Fedallah's prophecy, and most remaining answer errors are misreadings by an 8B model with the right passage in front of it.
+
+## Library: ten children's books
+
+I added ten children's classics from Project Gutenberg (Alice's Adventures in Wonderland, Through the Looking-Glass, Peter Pan, The Wonderful Wizard of Oz, The Jungle Book, The Wind in the Willows, The Secret Garden, Treasure Island, Pinocchio, and Black Beauty), about 508,000 words in 6,615 r128 chunks, stored in Postgres next to Moby-Dick. `rag ask` and `rag search` now search the whole library by default, `--book <slug>` limits them to one book, and `--moby-only` keeps the eval setup.
+
+Each book marks its chapters differently ("CHAPTER I.", "Chapter 3", "01 My Early Home", a bare Roman numeral, or story titles), so `rag/books.py` has a heading style per book and takes the last occurrence of each heading to skip the table of contents. The Treasure Island text has no heading line for chapter XVII, so chapters XVI and XVII parse as one.
+
+Adding the books changed the Moby-Dick eval slightly. Recall@800w stays at 0.962, but pg-hybrid MRR moved from 0.665 to 0.658 because the HNSW index now holds about 18,000 vectors and its approximate search ranks two chunks one place differently. An exact scan still gives the original vector-only MRR of 0.617. I also turned on pgvector's iterative scans, so filtering the shared index to one book cannot silently return fewer rows than requested.

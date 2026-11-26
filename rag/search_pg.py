@@ -39,3 +39,17 @@ def hybrid(chunking: str):
                 scores[p.id] += 1 / (K + rank)
         return [by_id[i] for i in sorted(scores, key=scores.get, reverse=True)]
     return search
+
+
+def library(chunking: str = "r128", book: str | None = None):
+    """pg-hybrid across every ingested book, or one book when `book` is set."""
+    def search(query: str, units: list[Paragraph]) -> list[Paragraph]:
+        by_id = {u.id: u for u in units}
+        q = embed([QUERY_PREFIX + query])[0]
+        vector = [by_id[i] for i in db.library_vector_search(q, chunking, DEPTH, book) if i in by_id]
+        scores: dict[int, float] = defaultdict(float)
+        for ranked in (search_bm25.search(query, units), vector):
+            for rank, p in enumerate(ranked, start=1):
+                scores[p.id] += 1 / (K + rank)
+        return [by_id[i] for i in sorted(scores, key=scores.get, reverse=True)]
+    return search

@@ -95,3 +95,20 @@ def citations(answer: str, context: list[Paragraph]) -> list[Paragraph]:
 
 def abstained(answer: str) -> bool:
     return "i don't know" in answer.lower().replace("’", "'")
+
+
+LIBRARY_SYSTEM = """You answer questions about the books in a small library of classic novels, using only the numbered passages provided.
+Rules:
+- Use only facts stated in the passages. Do not use outside knowledge of the books.
+- Cite the passages you used with their numbers in square brackets, like [2] or [1][4].
+- If the passages do not contain the answer, reply with exactly: I don't know.
+- Answer in two or three sentences."""
+
+
+def library_messages(question: str, context: list[Paragraph]) -> list[dict]:
+    from .books import describe
+    passages = "\n\n".join(f"[{i}] ({describe(p.chapter)}) {p.text}" for i, p in enumerate(context, 1))
+    return [
+        {"role": "system", "content": LIBRARY_SYSTEM},
+        {"role": "user", "content": f"Passages:\n\n{passages}\n\nQuestion: {question}"},
+    ]

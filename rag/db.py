@@ -98,6 +98,9 @@ def vector_search(query_vec, chunking: str, limit: int, exact: bool = False,
     with conn.transaction():
         # HNSW returns at most ef_search rows, so raise it to cover the limit.
         conn.execute(f"SET LOCAL hnsw.ef_search = {max(limit, 40)}")
+        # With several books in one index, filtering after the HNSW scan can return too
+        # few rows. Iterative scans (pgvector 0.8) keep scanning until the filter is met.
+        conn.execute("SET LOCAL hnsw.iterative_scan = strict_order")
         if exact:
             conn.execute("SET LOCAL enable_indexscan = off")
         rows = conn.execute(
@@ -106,5 +109,98 @@ def vector_search(query_vec, chunking: str, limit: int, exact: bool = False,
                WHERE e.model = %s AND c.chunking = %s AND d.path = %s
                ORDER BY e.vec <=> %s LIMIT %s""",
             (MODEL_NAME, chunking, str(path), query_vec, limit),
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
+# ---- Library: Moby-Dick plus the children's books -------------------------------
+
+def slug_of(path: str) -> str:
+    name = Path(path).stem
+    return "mobydick" if name == "mobydick" else name
+
+
+def ingest_units(path: Path, units: list[Paragraph], chunking: str) -> str:
+    """Same transaction and skip rules as ingest(), for units built elsewhere."""
+    from .search_vector import MODEL_NAME, embed
+
+    conn = connect()
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    done = conn.execute(
+        """SELECT count(*) FROM documents d JOIN chunks c ON c.doc_id = d.id
+           JOIN embeddings_384 e ON e.chunk_id = c.id AND e.model = %s
+           WHERE d.path = %s AND d.sha256 = %s AND c.chunking = %s""",
+        (MODEL_NAME, str(path), sha, chunking),
+    ).fetchone()[0]
+    if done:
+        return f"skipped: {path.name} {chunking} already ingested ({done} chunks)"
+    vectors = embed([u.text for u in units])
+    with conn.transaction():
+        doc_id = conn.execute(
+            """INSERT INTO documents (path, sha256) VALUES (%s, %s)
+               ON CONFLICT (path) DO UPDATE SET sha256 = EXCLUDED.sha256, ingested_at = now()
+               RETURNING id""",
+            (str(path), sha),
+        ).fetchone()[0]
+        conn.execute("DELETE FROM chunks WHERE doc_id = %s AND chunking = %s", (doc_id, chunking))
+        with conn.cursor() as cur:
+            for u, v in zip(units, vectors):
+                chunk_id = cur.execute(
+                    """INSERT INTO chunks (doc_id, chunking, idx, chapter, text)
+                       VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                    (doc_id, chunking, u.id, u.chapter, u.text),
+                ).fetchone()[0]
+                cur.execute("INSERT INTO embeddings_384 (chunk_id, model, vec) VALUES (%s, %s, %s)",
+                            (chunk_id, MODEL_NAME, v))
+    return f"ingested: {path.name} {chunking} ({len(units)} chunks)"
+
+
+def library_books(chunking: str = "r128") -> list[tuple[str, int]]:
+    rows = connect().execute(
+        """SELECT d.path, count(*) FROM chunks c JOIN documents d ON d.id = c.doc_id
+           WHERE c.chunking = %s AND d.path LIKE %s GROUP BY 1 ORDER BY 1""",
+        (chunking, f"{ROOT}/corpus/%"),
+    ).fetchall()
+    return [(slug_of(path), n) for path, n in rows]
+
+
+def _book_clause(book: str | None) -> tuple[str, tuple]:
+    if not book:
+        return "d.path LIKE %s", (f"{ROOT}/corpus/%",)
+    name = "mobydick" if book == "mobydick" else book
+    return "d.path LIKE %s", (f"{ROOT}/corpus/%/{name}.txt" if name != "mobydick" else f"{ROOT}/corpus/mobydick.txt",)
+
+
+def load_library(chunking: str = "r128", book: str | None = None) -> list[Paragraph]:
+    """Chunks from every book (or one), with global ids and 'slug:chapter' labels."""
+    where, params = _book_clause(book)
+    rows = connect().execute(
+        f"""SELECT c.id, d.path, c.chapter, c.text FROM chunks c JOIN documents d ON d.id = c.doc_id
+            WHERE c.chunking = %s AND {where} ORDER BY c.id""",
+        (chunking, *params),
+    ).fetchall()
+    out = []
+    for cid, path, chapter, text in rows:
+        label = chapter if ":" in chapter else f"{slug_of(path)}:{chapter}"
+        out.append(Paragraph(cid, label, text))
+    return out
+
+
+def library_vector_search(query_vec, chunking: str, limit: int, book: str | None = None) -> list[int]:
+    from .search_vector import MODEL_NAME
+
+    where, params = _book_clause(book)
+    conn = connect()
+    with conn.transaction():
+        conn.execute(f"SET LOCAL hnsw.ef_search = {max(limit, 40)}")
+        # With several books in one index, filtering after the HNSW scan can return too
+        # few rows. Iterative scans (pgvector 0.8) keep scanning until the filter is met.
+        conn.execute("SET LOCAL hnsw.iterative_scan = strict_order")
+        rows = conn.execute(
+            f"""SELECT c.id FROM embeddings_384 e JOIN chunks c ON c.id = e.chunk_id
+                JOIN documents d ON d.id = c.doc_id
+                WHERE e.model = %s AND c.chunking = %s AND {where}
+                ORDER BY e.vec <=> %s LIMIT %s""",
+            (MODEL_NAME, chunking, *params, query_vec, limit),
         ).fetchall()
     return [r[0] for r in rows]

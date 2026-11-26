@@ -40,6 +40,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("ingest", help="chunk, embed, and store the corpus in Postgres")
     i.add_argument("--chunking", default="r128")
+    sub.add_parser("ingest-books", help="chunk, embed, and store the children's books (r128)")
+    sub.add_parser("books", help="list the books in the library")
     sub.add_parser("summarize", help="write a summary of every chapter with Qwen")
     c = sub.add_parser("contextualize", help="write a contextual header for every chunk with Qwen")
     c.add_argument("--chunking", default="r128")
@@ -54,10 +56,26 @@ def main():
         if name in ("search", "ask"):
             p.add_argument("query")
             p.add_argument("-k", type=int, default=5)
+            p.add_argument("--moby-only", action="store_true",
+                           help="search Moby-Dick alone with --mode (the eval setup)")
+            p.add_argument("--book", help="limit the library search to one book, such as peter-pan")
         else:
             p.add_argument("--step", required=True)
     args = ap.parse_args()
 
+    if args.cmd == "ingest-books":
+        from . import db
+        from .books import BOOK_DIR, BOOKS, book_units
+        for slug in BOOKS:
+            print(db.ingest_units(BOOK_DIR / f"{slug}.txt", book_units(slug), "r128"))
+        print(db.ingest("r128"))
+        return
+    if args.cmd == "books":
+        from . import db
+        from .books import TITLES
+        for slug, n in db.library_books():
+            print(f"{slug:<28} {n:>5} chunks  {TITLES.get(slug, slug)}")
+        return
     if args.cmd == "summarize":
         from .summarize import run
         print(run())
@@ -78,13 +96,18 @@ def main():
         print(grade(args.step, label)["summary"])
         return
 
-    fn, units = build(args.mode, args.chunking)
+    library_mode = args.cmd in ("search", "ask") and not args.moby_only
+    if library_mode:  # search and ask default to the whole library
+        from . import db, search_pg
+        fn, units = search_pg.library("r128", args.book), db.load_library("r128", args.book)
+    else:
+        fn, units = build(args.mode, args.chunking)
     search = lambda q: fn(q, units)
 
     if args.cmd == "ask":
-        from .generate import chat, citations, expand, messages_for, select_context
+        from .generate import chat, citations, expand, library_messages, messages_for, select_context
         context = expand(select_context(search(args.query)), units, args.window)
-        answer = chat(messages_for(args.query, context))
+        answer = chat((library_messages if library_mode else messages_for)(args.query, context))
         print(answer, "\n")
         for i, p in enumerate(context, 1):
             mark = "*" if p in citations(answer, context) else " "

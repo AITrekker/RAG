@@ -49,3 +49,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Results
 
 The per-step write-ups are in `runs/log.md`. `runs/rescore.csv` scores every step tag on the same 30 questions, and `runs/answers.csv` holds the graded answer runs.
+
+## Library
+
+`uv run rag books` lists the books. `uv run rag ask "Why did the Tin Woodman want a heart?"` searches all of them, and `--book peter-pan` limits the search to one. `scripts/fetch_books.sh` downloads the texts and `uv run rag ingest-books` indexes them.
