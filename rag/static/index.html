@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library RAG</title>
+<style>
+:root {
+  --bg: #f7f6f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a65; --line: #e3e1da;
+  --accent: #2f5d8a; --accent-soft: #e5edf5; --cite: #8a4b2f; --cite-soft: #f6ebe4;
+  --bm25: #6a4c93; --vector: #2a7f62; --both: #b07a12; --shadow: 0 1px 2px rgba(0,0,0,.05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9c9a92; --line: #33322e;
+    --accent: #7fb0e0; --accent-soft: #1f2d3b; --cite: #e5a47f; --cite-soft: #3a2a20;
+    --bm25: #b79de0; --vector: #6fcfa8; --both: #e6b84d; --shadow: none; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { padding: 20px 24px 0; max-width: 1180px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; }
+.sub { color: var(--muted); font-size: 13px; margin: 0; }
+main { max-width: 1180px; margin: 0 auto; padding: 16px 24px 48px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; box-shadow: var(--shadow); }
+form { display: grid; gap: 12px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+input[type=text] { flex: 1 1 420px; font: inherit; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+select, button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
+button.primary:disabled { opacity: .6; cursor: wait; }
+label.ctl { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg); cursor: pointer; color: var(--ink); }
+.chip:hover { border-color: var(--accent); }
+.tabs { display: flex; gap: 4px; margin: 18px 0 12px; border-bottom: 1px solid var(--line); }
+.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+  padding: 8px 14px; color: var(--muted); cursor: pointer; }
+.tab[aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.hidden { display: none !important; }
+.answer { font-size: 17px; line-height: 1.6; }
+.cite { display: inline-block; font-size: 12px; font-weight: 600; padding: 0 6px; margin: 0 1px;
+  border-radius: 6px; background: var(--cite-soft); color: var(--cite); border: 0; cursor: pointer; }
+.meta { color: var(--muted); font-size: 13px; margin-top: 10px; }
+.passages { display: grid; gap: 10px; margin-top: 14px; }
+.passage { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
+.passage.cited { border-left: 4px solid var(--cite); }
+.passage.flash { outline: 2px solid var(--cite); }
+.where { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+.num { font-weight: 700; color: var(--ink); }
+.ptext { font-size: 14px; white-space: pre-wrap; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.more { font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; }
+.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+.col h3 { font-size: 14px; margin: 0 0 4px; }
+.col p.explain { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.hit { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
+.hit.used { box-shadow: inset 3px 0 0 var(--accent); }
+.badges { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px; }
+.badge { font-size: 11px; padding: 0 6px; border-radius: 6px; border: 1px solid currentColor; }
+.b-bm25 { color: var(--bm25); } .b-vector { color: var(--vector); } .b-both { color: var(--both); }
+.b-used { color: var(--accent); }
+.timing { display: flex; height: 22px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); margin: 6px 0; }
+.timing div { font-size: 11px; color: #fff; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: hidden; }
+.legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; max-height: 420px; overflow: auto; }
+details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.section { margin-top: 16px; }
+.error { color: #b3261e; }
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Library RAG</h1>
+  <p class="sub">Ask a question about the books. Answers come only from retrieved passages, read by Qwen3-8B on the desktop GPU.</p>
+</header>
+<main>
+  <div class="panel">
+    <form id="ask">
+      <div class="row">
+        <input type="text" id="q" placeholder="Who was Long John Silver?" autocomplete="off" required>
+        <select id="book" aria-label="Book"><option value="">All books</option></select>
+        <button class="primary" id="go" type="submit">Ask</button>
+      </div>
+      <div class="chips" id="samples"></div>
+      <div class="row">
+        <label class="ctl">Search
+          <select id="mode"><option value="hybrid">Hybrid (BM25 + vectors)</option>
+            <option value="vector">Vectors only</option><option value="bm25">BM25 only</option></select></label>
+        <label class="ctl">Neighbor window
+          <select id="window"><option>0</option><option>1</option><option selected>2</option><option>3</option></select></label>
+        <label class="ctl" id="sumwrap"><input type="checkbox" id="summaries" disabled> Chapter summaries (Moby-Dick only)</label>
+      </div>
+    </form>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="answer">Ask</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="hood">Under the hood</button>
+  </div>
+
+  <section id="answer">
+    <div class="empty" id="answerEmpty">Ask something, or pick a sample question.</div>
+    <div class="panel hidden" id="answerPanel">
+      <div class="answer" id="answerText"></div>
+      <div class="meta" id="answerMeta"></div>
+    </div>
+    <div class="passages" id="passages"></div>
+  </section>
+
+  <section id="hood" class="hidden">
+    <div class="empty" id="hoodEmpty">Ask a question to see how it was answered.</div>
+    <div id="hoodBody" class="hidden">
+      <div class="panel">
+        <strong style="font-size:14px">Where the time went</strong>
+        <div class="timing" id="timing"></div>
+        <div class="legend" id="timingLegend"></div>
+        <div class="meta" id="hoodMeta"></div>
+      </div>
+      <div class="section cols">
+        <div class="col"><h3 style="color:var(--bm25)">BM25 (words)</h3>
+          <p class="explain">Scores chunks by shared words, weighting rare words more.</p><div id="r-bm25"></div></div>
+        <div class="col"><h3 style="color:var(--vector)">Vectors (meaning)</h3>
+          <p class="explain">Ranks chunks by embedding similarity to the question.</p><div id="r-vector"></div></div>
+        <div class="col"><h3 style="color:var(--both)">Fused (RRF)</h3>
+          <p class="explain">Adds 1/(60 + rank) from each list. Blue edge means it went to the reader.</p><div id="r-fused"></div></div>
+      </div>
+      <div class="section panel">
+        <details><summary>Exact prompt sent to Qwen</summary><pre id="prompt"></pre></details>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const SAMPLES = [
+  ["Why did the Tin Woodman want a heart?", "wizard-of-oz"],
+  ["What did the Cheshire Cat tell Alice?", "alice-in-wonderland"],
+  ["Who is Long John Silver?", "treasure-island"],
+  ["Why does Peter Pan come to Wendy's house?", "peter-pan"],
+  ["How did Mowgli defeat Shere Khan?", "jungle-book"],
+  ["What was Ahab's beef with Moby?", ""],
+  ["Why did Pinocchio's nose grow?", ""],
+];
+let last = null;
+
+async function loadBooks() {
+  const books = await (await fetch("/api/books")).json();
+  for (const b of books) $("book").insertAdjacentHTML("beforeend",
+    `<option value="${esc(b.slug)}">${esc(b.title)} (${b.chunks})</option>`);
+}
+for (const [q, book] of SAMPLES) {
+  const chip = document.createElement("button");
+  chip.type = "button"; chip.className = "chip"; chip.textContent = q;
+  chip.onclick = () => { $("q").value = q; $("book").value = book; syncSummaries(); ask(); };
+  $("samples").appendChild(chip);
+}
+function syncSummaries() {
+  const ok = $("book").value === "mobydick";
+  $("summaries").disabled = !ok; if (!ok) $("summaries").checked = false;
+}
+$("book").onchange = syncSummaries;
+
+document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach((x) => x.setAttribute("aria-selected", x === t));
+  $("answer").classList.toggle("hidden", t.dataset.tab !== "answer");
+  $("hood").classList.toggle("hidden", t.dataset.tab !== "hood");
+});
+
+$("ask").onsubmit = (e) => { e.preventDefault(); ask(); };
+
+async function ask() {
+  const question = $("q").value.trim(); if (!question) return;
+  $("go").disabled = true; $("go").textContent = "Thinking…";
+  try {
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, book: $("book").value || null, mode: $("mode").value,
+        window: +$("window").value, summaries: $("summaries").checked }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    last = data; renderAnswer(data); renderHood(data);
+  } catch (err) {
+    $("answerEmpty").classList.add("hidden"); $("answerPanel").classList.remove("hidden");
+    $("answerText").innerHTML = `<span class="error">${esc(err.message)}</span>`; $("answerMeta").textContent = "";
+    $("passages").innerHTML = "";
+  } finally { $("go").disabled = false; $("go").textContent = "Ask"; }
+}
+
+function passageCard(p) {
+  return `<div class="passage ${p.cited ? "cited" : ""}" id="p${p.n}">
+    <div class="where"><span class="num">[${p.n}]</span>${esc(p.where)}${p.cited ? ' · <span style="color:var(--cite)">cited</span>' : ""}</div>
+    <div class="ptext clamp">${esc(p.text)}</div>
+    <button class="more" type="button" onclick="this.previousElementSibling.classList.toggle('clamp'); this.textContent = this.textContent === 'Show all' ? 'Show less' : 'Show all'">Show all</button></div>`;
+}
+function renderAnswer(d) {
+  $("answerEmpty").classList.add("hidden"); $("answerPanel").classList.remove("hidden");
+  $("answerText").innerHTML = esc(d.answer).replace(/\[(\d+)\]/g,
+    (m, n) => `<button class="cite" type="button" onclick="jump(${n})">${n}</button>`);
+  const cited = d.passages.filter((p) => p.cited).length;
+  $("answerMeta").textContent = `${d.passages.length} passages read, ${cited} cited · ${(d.timings.generate_ms / 1000).toFixed(1)}s to write · ${d.counts.chunks_searched.toLocaleString()} chunks searched`;
+  $("passages").innerHTML = d.passages.map(passageCard).join("");
+}
+function jump(n) {
+  const el = $("p" + n); if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1200);
+}
+
+function hitCard(h, used) {
+  const b = [];
+  if (h.bm25_rank && h.vector_rank) b.push(`<span class="badge b-both">both lists</span>`);
+  if (h.bm25_rank) b.push(`<span class="badge b-bm25">BM25 #${h.bm25_rank}</span>`);
+  if (h.vector_rank) b.push(`<span class="badge b-vector">vector #${h.vector_rank}</span>`);
+  b.push(`<span class="badge" style="color:var(--muted)">RRF ${h.rrf}</span>`);
+  if (used) b.push(`<span class="badge b-used">to reader</span>`);
+  return `<div class="hit ${used ? "used" : ""}"><div class="badges">${b.join("")}</div>
+    <div class="where">${esc(h.where)}</div><div class="ptext clamp">${esc(h.text)}</div></div>`;
+}
+function renderHood(d) {
+  $("hoodEmpty").classList.add("hidden"); $("hoodBody").classList.remove("hidden");
+  const used = new Set(d.retrieved_ids);
+  for (const k of ["bm25", "vector", "fused"])
+    $("r-" + k).innerHTML = d.rankings[k].map((h) => hitCard(h, used.has(h.id))).join("");
+  const parts = [["BM25", d.timings.bm25_ms, "var(--bm25)"], ["Embed + pgvector", d.timings.vector_ms, "var(--vector)"],
+    ["Fusion", d.timings.fusion_ms, "var(--both)"], ["Qwen writes the answer", d.timings.generate_ms, "var(--accent)"]];
+  const total = parts.reduce((s, p) => s + p[1], 0) || 1;
+  $("timing").innerHTML = parts.map(([n, ms, c]) =>
+    `<div style="width:${Math.max(ms / total * 100, 0.5)}%;background:${c}" title="${n} ${ms} ms">${ms / total > .12 ? esc(n) : ""}</div>`).join("");
+  $("timingLegend").innerHTML = parts.map(([n, ms, c]) => `<span><span style="color:${c}">■</span> ${esc(n)} ${ms.toLocaleString()} ms</span>`).join("");
+  $("hoodMeta").textContent = `Mode ${d.mode} · neighbor window ${d.window} · index ${d.chunking} · ${d.counts.context_words} words of context`;
+  $("prompt").textContent = d.prompt.map((m) => `--- ${m.role} ---\n${m.content}`).join("\n\n");
+}
+loadBooks();
+</script>
+</body>
+</html>

@@ -53,3 +53,7 @@ The per-step write-ups are in `runs/log.md`. `runs/rescore.csv` scores every ste
 ## Library
 
 `uv run rag books` lists the books. `uv run rag ask "Why did the Tin Woodman want a heart?"` searches all of them, and `--book peter-pan` limits the search to one. `scripts/fetch_books.sh` downloads the texts and `uv run rag ingest-books` indexes them.
+
+## Web page
+
+`./scripts/start-web.sh` serves the page on 127.0.0.1:8080 inside WSL (stop it with `./scripts/stop-web.sh`). From the Mac, run `ssh -f -N -L 127.0.0.1:8080:127.0.0.1:8080 desktop-wsl` and open http://localhost:8080. The Ask tab shows the answer with clickable citations and the passages it read. The Under the hood tab shows BM25's ranking, the vector ranking, and the RRF fusion side by side, which chunks went to the reader, the exact prompt, and where the time went. vLLM must be running (`./scripts/start-vllm.sh`).
