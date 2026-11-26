@@ -16,13 +16,17 @@ MODES = {
     "hybrid": search_hybrid.search,
 }
 # Postgres modes read chunks and embeddings from the database (run `rag ingest` first).
-PG_MODES = ["pg-vector", "pg-vector-exact", "pg-hybrid"]
+PG_MODES = ["pg-vector", "pg-vector-exact", "pg-hybrid",
+            "pg-hybrid-hyde", "pg-hybrid-rerank", "pg-hybrid-hyde-rerank"]
 
 
 def build(mode: str, chunking: str):
     if mode not in PG_MODES:
         return MODES[mode], load_units(chunking)
     from . import db, search_pg
+    if mode.startswith("pg-hybrid-"):  # steps 10 and 11
+        from .search_advanced import make
+        return make(chunking, hyde="hyde" in mode, rerank_top="rerank" in mode), db.load_chunks(chunking)
     fn = {
         "pg-vector": search_pg.vector(chunking),
         "pg-vector-exact": search_pg.vector(chunking, exact=True),
@@ -36,6 +40,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("ingest", help="chunk, embed, and store the corpus in Postgres")
     i.add_argument("--chunking", default="r128")
+    sub.add_parser("summarize", help="write a summary of every chapter with Qwen")
     c = sub.add_parser("contextualize", help="write a contextual header for every chunk with Qwen")
     c.add_argument("--chunking", default="r128")
     for name in ("search", "eval", "ask", "answer-eval", "grade"):
@@ -53,6 +58,10 @@ def main():
             p.add_argument("--step", required=True)
     args = ap.parse_args()
 
+    if args.cmd == "summarize":
+        from .summarize import run
+        print(run())
+        return
     if args.cmd == "contextualize":
         from .contextualize import run
         print(run(args.chunking))

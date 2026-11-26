@@ -83,9 +83,13 @@ def load_chunks(size: int, overlap: int) -> list[Paragraph]:
 
 def load_units(chunking: str) -> list[Paragraph]:
     """'paragraph' for steps 1 to 3, 'r<size>' such as 'r256' for recursive chunks, or
-    'r<size>ctx' for recursive chunks with contextual headers (step 8)."""
+    'r<size>ctx' for recursive chunks with contextual headers (step 8), or
+    a 'sum' suffix (r128sum, r128ctxsum) to add chapter summaries (step 9)."""
     if chunking == "paragraph":
         return load_paragraphs()
+    if chunking.endswith("sum"):  # step 9: chunks plus chapter summaries, such as r128sum
+        from .summarize import load_summaries
+        return load_units(chunking.removesuffix("sum")) + load_summaries()
     if chunking.endswith("ctx"):  # step 8: chunks with a contextual header, such as r128ctx
         from .contextualize import load_contextual
         return load_contextual(chunking)

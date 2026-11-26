@@ -33,6 +33,8 @@ STEP_MODES = {
     "step-5": [f"{m} --chunking r128" for m in ("bm25", "vector", "hybrid")],
     "step-6": [f"{m} --chunking r128" for m in ("pg-vector", "pg-vector-exact", "pg-hybrid")],
     "step-7": ["pg-hybrid --chunking r128"],  # retrieval only; answers are graded by hand
+    "step-8": ["bm25 --chunking r128ctx", "vector --chunking r128ctx", "pg-hybrid --chunking r128ctx"],
+    "step-9": ["pg-hybrid --chunking r128sum", "pg-hybrid --chunking r128ctxsum"],
 }
 
 

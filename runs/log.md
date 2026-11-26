@@ -161,3 +161,21 @@ Two things pull retrieval down. Each chunk gets 39 words longer, so fewer chunks
 Headers did help in some places. "Who was Ahab?" now has chapter 28 at rank one, the ship-owners answer (Peleg and Bildad) and the one-armed captain (Samuel Enderby) became correct, and the vector-only MRR rose from 0.617 to 0.665. They also introduced new mistakes, such as naming Bulkington as Ishmael's bedmate.
 
 The lesson is that contextual retrieval pays off when chunks lack context the retriever needs, and on this book hybrid search over small chunks was already near its ceiling. Reader windows from step 7 had already supplied most of the context the generator needed. I will test chapter summaries both with and without headers.
+
+## Step 9: chapter summaries (recall@800w 0.923, 17 of 26 answers correct)
+
+Qwen summarized all 136 chapters in 2 minutes 9 seconds. Chapters longer than 2,000 words were summarized window by window and then merged. The 136 summaries (in `data/summaries.jsonl`) are indexed as extra chunks beside the 2,920 regular ones, and a summary counts as a hit when its chapter is a gold chapter.
+
+| pg-hybrid, reader window 2 | Recall@5 | Recall@800w | MRR@10 | Correct | Partial | Wrong |
+|---|---|---|---|---|---|---|
+| r128 (step 7) | 0.846 | 0.962 | 0.665 | 18 | 4 | 4 |
+| r128 plus summaries | 0.846 | 0.923 | 0.571 | 17 | 6 | 3 |
+| r128 with headers plus summaries | 0.808 | 0.846 | 0.594 | not graded | | |
+
+I expected summaries to answer "Who was Ahab?", and they did. The chapter 28 and 29 summaries now rank in its top five, and the answer reads "the captain of the Pequod, a man consumed by his obsession with hunting the white whale." Summaries also fixed Starbuck's objection (vengeance on a whale is morally wrong) and named Captain Boomer as the one-armed captain.
+
+Summaries cost retrieval elsewhere. A summary runs about 150 words, so it uses a big share of the 800-word budget, and "How did Ahab die?" lost chapter 135 from the context. The overall answer count did not move. Summaries fixed some answers and introduced new mistakes, such as giving Ahab a lost arm and listing the Jungfrau as a ship that met Moby Dick.
+
+q25 shows the remaining gap clearly. The chapter 117 summary says "the Parsee warns that only hemp can kill Ahab," which is the answer, but the question asks what Fedallah "predicted," and the summary calls him "the Parsee." Neither BM25 nor the embedding connects the two.
+
+Answer quality has plateaued at 17 to 18 correct across steps 7 to 9. The remaining errors split between misreading (q13 owners, q18 bedmate details) and passages that never make the context (q21, q25). This leads to step 10, rewriting the question before searching.

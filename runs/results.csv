@@ -15,3 +15,5 @@ step-8,bm25+r128ctx,2026-11-25 20:57,0.692,0.523,0.808,26,False,False
 step-8,vector+r128ctx,2026-11-25 20:57,0.808,0.665,0.808,26,True,True
 step-8,hybrid+r128ctx,2026-11-25 20:57,0.808,0.619,0.846,26,True,True
 step-8,pg-hybrid+r128ctx,2026-11-25 20:57,0.808,0.619,0.846,26,True,True
+step-9,pg-hybrid+r128sum,2026-11-25 21:02,0.846,0.571,0.923,26,True,True
+step-9,pg-hybrid+r128ctxsum,2026-11-25 21:02,0.808,0.594,0.846,26,True,True

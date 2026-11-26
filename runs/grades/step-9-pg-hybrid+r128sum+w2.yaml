@@ -1,0 +1,32 @@
+# Graded by Claude in session on 2026-11-25 against the expected answers in eval.yaml.
+# Pending Amit's review.
+q01: correct   # captain of the Pequod, obsessed with vengeance on the whale
+q02: partial   # right on the leg and revenge, but wrongly adds an arm (that was Boomer)
+q03: correct
+q04: correct
+q05: correct
+q06: correct   # vengeance on a whale is morally wrong, though it invents a past attempt on his life
+q07: correct
+q08: correct
+q09: correct
+q10: correct
+q11: correct
+q12: correct
+q13: wrong     # says Ahab owns the ship
+q14: correct
+q15: correct   # Captain Boomer of the Samuel Enderby
+q16: correct
+q17: correct   # damp, drizzly November in my soul
+q18: partial   # Queequeg named, but "from the Rachel" and the reason are wrong
+q19: partial   # both jumps, but only "affected emotionally" for his madness
+q20: partial   # canoe coffin and custom; misses the fever
+q21: wrong     # false "I don't know"; chapter 135 not in context this time
+q22: correct
+q23: partial   # turmoil and abhorrence of the obsession, no musket
+q24: correct
+q25: wrong     # the chapter 117 summary names the hearses and hemp but was not retrieved
+q26: partial   # the Rachel is right, the Jungfrau is wrong, the other three missing
+q27: correct
+q28: correct
+q29: correct
+q30: correct
