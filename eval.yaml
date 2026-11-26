@@ -61,3 +61,124 @@ questions:
     category: unanswerable
     answer: The book never names her.
     gold_chapters: []
+
+  # Added 2026-11-25. Gold chapters verified against the corpus.
+  - id: q11
+    question: Who was the second mate of the Pequod?
+    category: lookup
+    answer: Stubb, a native of Cape Cod.
+    gold_chapters: [27]
+
+  - id: q12
+    question: Who was the third mate?
+    category: lookup
+    answer: Flask, a native of Tisbury on Martha's Vineyard.
+    gold_chapters: [27]
+
+  - id: q13
+    question: Who owned the Pequod?
+    category: lookup
+    answer: Captains Peleg and Bildad were the largest owners.
+    gold_chapters: [16]
+
+  - id: q14
+    question: What was the name of Queequeg's idol?
+    category: lookup
+    answer: Yojo, his small black god.
+    gold_chapters: [16]
+
+  - id: q15
+    question: Which ship's captain had lost an arm to Moby Dick?
+    category: lookup
+    answer: Captain Boomer of the Samuel Enderby of London.
+    gold_chapters: [100]
+
+  - id: q16
+    question: Who preached the sermon about Jonah?
+    category: lookup
+    answer: Father Mapple, the whalemen's chaplain.
+    gold_chapters: [8, 9]
+
+  - id: q17
+    question: Why does Ishmael go to sea?
+    category: conceptual
+    answer: Going to sea is his cure whenever he feels gloomy and depressed, his substitute for suicide.
+    gold_chapters: [1]
+
+  - id: q18
+    question: Why did Ishmael end up sharing a bed with a stranger at the inn?
+    category: conceptual
+    answer: The Spouter-Inn was full, so the landlord had him share a bed with the harpooneer Queequeg.
+    gold_chapters: [3]
+
+  - id: q19
+    question: What happened to Pip after he jumped out of the whaleboat?
+    category: conceptual
+    answer: He was left alone in the open sea, and although he was rescued, the experience drove him mad.
+    gold_chapters: [93]
+
+  - id: q20
+    question: Why did Queequeg have a coffin made for himself?
+    category: conceptual
+    answer: He caught a fever, believed he was dying, and asked for a canoe-like coffin.
+    gold_chapters: [110]
+
+  - id: q21
+    question: How did Ahab die?
+    category: conceptual
+    answer: The harpoon line caught him around the neck and dragged him out of the boat and under the sea.
+    gold_chapters: [135]
+
+  - id: q22
+    question: Why does the color of the whale frighten Ishmael?
+    category: conceptual
+    answer: Whiteness appalls him because of its blankness and its association with terror and the void.
+    gold_chapters: [42]
+
+  - id: q23
+    question: How did Starbuck feel about Ahab?
+    category: hard
+    answer: He respected Ahab's authority but saw his hunt as madness, and he even considered shooting him with a musket.
+    gold_chapters: [36, 38, 123]
+
+  - id: q24
+    question: Why wouldn't Ahab help the Rachel?
+    category: hard
+    answer: The Rachel asked for help searching for the captain's lost son, and Ahab refused because it would delay his chase of Moby Dick.
+    gold_chapters: [128]
+
+  - id: q25
+    question: What did Fedallah predict about Ahab's death?
+    category: hard
+    answer: Ahab would first see two hearses on the sea, Fedallah would go before him, and only hemp could kill him.
+    gold_chapters: [117]
+
+  - id: q26
+    question: Which ships had run into Moby Dick before the Pequod found him?
+    category: hard
+    answer: The Jeroboam, the Samuel Enderby, the Rachel, and the Delight.
+    gold_chapters: [71, 100, 128, 131]
+
+  - id: q27
+    question: What's the deal with the gold coin on the mast?
+    category: hard
+    answer: Ahab nailed a gold doubloon to the mast as a reward for whoever first spots Moby Dick, and the crew each read their own meaning into it.
+    gold_chapters: [36, 99]
+
+  - id: q28
+    question: What was Ishmael's last name?
+    category: unanswerable
+    answer: The book never gives it.
+    gold_chapters: []
+
+  - id: q29
+    question: Who did Ishmael marry?
+    category: unanswerable
+    answer: The book never mentions Ishmael marrying.
+    gold_chapters: []
+
+  - id: q30
+    question: How much did Moby Dick weigh?
+    category: unanswerable
+    answer: The book never states Moby Dick's weight. Chapter 103 estimates the weight of large sperm whales in general, which tests whether the answer stays honest.
+    gold_chapters: []
