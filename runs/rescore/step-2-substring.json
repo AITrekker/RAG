@@ -2,9 +2,10 @@
   "summary": {
     "step": "step-2",
     "mode": "substring",
-    "time": "2026-11-25 18:24",
+    "time": "2026-11-25 18:29",
     "recall@5": 0.154,
     "mrr@10": 0.109,
+    "recall@800w": 0.154,
     "n_answerable": 26,
     "ahab_who": true,
     "ahab_beef": false
@@ -23,7 +24,8 @@
         "16"
       ],
       "hit": true,
-      "rr": 1.0
+      "rr": 1.0,
+      "hit_800w": true
     },
     {
       "id": "q02",
@@ -32,7 +34,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q03",
@@ -45,7 +48,8 @@
         "100"
       ],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q04",
@@ -54,7 +58,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q05",
@@ -63,7 +68,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q06",
@@ -72,7 +78,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q07",
@@ -87,7 +94,8 @@
         "4"
       ],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q08",
@@ -96,7 +104,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q09",
@@ -105,7 +114,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q10",
@@ -116,7 +126,8 @@
         "16"
       ],
       "hit": null,
-      "rr": null
+      "rr": null,
+      "hit_800w": null
     },
     {
       "id": "q11",
@@ -127,7 +138,8 @@
         "22"
       ],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q12",
@@ -140,7 +152,8 @@
         "48"
       ],
       "hit": true,
-      "rr": 0.5
+      "rr": 0.5,
+      "hit_800w": true
     },
     {
       "id": "q13",
@@ -151,7 +164,8 @@
         "20"
       ],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q14",
@@ -160,7 +174,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q15",
@@ -169,7 +184,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q16",
@@ -178,7 +194,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q17",
@@ -187,7 +204,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q18",
@@ -196,7 +214,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q19",
@@ -205,7 +224,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q20",
@@ -214,7 +234,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q21",
@@ -229,7 +250,8 @@
         "135"
       ],
       "hit": true,
-      "rr": 0.3333333333333333
+      "rr": 0.3333333333333333,
+      "hit_800w": true
     },
     {
       "id": "q22",
@@ -238,7 +260,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q23",
@@ -252,7 +275,8 @@
         "135"
       ],
       "hit": true,
-      "rr": 1.0
+      "rr": 1.0,
+      "hit_800w": true
     },
     {
       "id": "q24",
@@ -261,7 +285,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q25",
@@ -270,7 +295,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q26",
@@ -279,7 +305,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q27",
@@ -288,7 +315,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": false,
-      "rr": 0.0
+      "rr": 0.0,
+      "hit_800w": false
     },
     {
       "id": "q28",
@@ -299,7 +327,8 @@
         "16"
       ],
       "hit": null,
-      "rr": null
+      "rr": null,
+      "hit_800w": null
     },
     {
       "id": "q29",
@@ -308,7 +337,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": null,
-      "rr": null
+      "rr": null,
+      "hit_800w": null
     },
     {
       "id": "q30",
@@ -317,7 +347,8 @@
       "n_results": 0,
       "top_chapters": [],
       "hit": null,
-      "rr": null
+      "rr": null,
+      "hit_800w": null
     }
   ]
 }

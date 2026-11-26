@@ -1,0 +1,495 @@
+{
+  "summary": {
+    "step": "step-4",
+    "mode": "vector",
+    "time": "2026-11-25 18:29",
+    "recall@5": 0.769,
+    "mrr@10": 0.572,
+    "recall@800w": 0.808,
+    "n_answerable": 26,
+    "ahab_who": true,
+    "ahab_beef": true
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "category": "hard",
+      "question": "Who was Ahab?",
+      "n_results": 2568,
+      "top_chapters": [
+        "16",
+        "19",
+        "28",
+        "132",
+        "108"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q02",
+      "category": "hard",
+      "question": "What was Ahab's beef with Moby?",
+      "n_results": 2568,
+      "top_chapters": [
+        "46",
+        "36",
+        "36",
+        "41",
+        "134"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q03",
+      "category": "lookup",
+      "question": "What was the name of Ahab's ship?",
+      "n_results": 2568,
+      "top_chapters": [
+        "19",
+        "16",
+        "16",
+        "21",
+        "30"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q04",
+      "category": "lookup",
+      "question": "What was Ahab's artificial leg made from?",
+      "n_results": 2568,
+      "top_chapters": [
+        "106",
+        "28",
+        "19",
+        "30",
+        "16"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q05",
+      "category": "conceptual",
+      "question": "What reward did Ahab offer the crew for spotting the white whale?",
+      "n_results": 2568,
+      "top_chapters": [
+        "16",
+        "100",
+        "52",
+        "71",
+        "100"
+      ],
+      "hit": false,
+      "rr": 0.1111111111111111,
+      "hit_800w": true
+    },
+    {
+      "id": "q06",
+      "category": "conceptual",
+      "question": "Why did Starbuck object to hunting Moby Dick?",
+      "n_results": 2568,
+      "top_chapters": [
+        "36",
+        "135",
+        "132",
+        "46",
+        "41"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q07",
+      "category": "lookup",
+      "question": "Where was Queequeg from?",
+      "n_results": 2568,
+      "top_chapters": [
+        "12",
+        "21",
+        "17",
+        "49",
+        "27"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q08",
+      "category": "lookup",
+      "question": "Who was the first mate of the Pequod?",
+      "n_results": 2568,
+      "top_chapters": [
+        "26",
+        "81",
+        "19",
+        "116",
+        "27"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q09",
+      "category": "conceptual",
+      "question": "How did Ishmael survive the sinking?",
+      "n_results": 2568,
+      "top_chapters": [
+        "102",
+        "81",
+        "105",
+        "1",
+        "84"
+      ],
+      "hit": false,
+      "rr": 0.0,
+      "hit_800w": false
+    },
+    {
+      "id": "q10",
+      "category": "unanswerable",
+      "question": "What was the name of Ahab's wife?",
+      "n_results": 2568,
+      "top_chapters": [
+        "16",
+        "19",
+        "30",
+        "108",
+        "132"
+      ],
+      "hit": null,
+      "rr": null,
+      "hit_800w": null
+    },
+    {
+      "id": "q11",
+      "category": "lookup",
+      "question": "Who was the second mate of the Pequod?",
+      "n_results": 2568,
+      "top_chapters": [
+        "26",
+        "27",
+        "19",
+        "116",
+        "64"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q12",
+      "category": "lookup",
+      "question": "Who was the third mate?",
+      "n_results": 2568,
+      "top_chapters": [
+        "27",
+        "27",
+        "27",
+        "54",
+        "27"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q13",
+      "category": "lookup",
+      "question": "Who owned the Pequod?",
+      "n_results": 2568,
+      "top_chapters": [
+        "19",
+        "16",
+        "116",
+        "26",
+        "91"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q14",
+      "category": "lookup",
+      "question": "What was the name of Queequeg's idol?",
+      "n_results": 2568,
+      "top_chapters": [
+        "12",
+        "27",
+        "21",
+        "12",
+        "12"
+      ],
+      "hit": false,
+      "rr": 0.0,
+      "hit_800w": false
+    },
+    {
+      "id": "q15",
+      "category": "lookup",
+      "question": "Which ship's captain had lost an arm to Moby Dick?",
+      "n_results": 2568,
+      "top_chapters": [
+        "100",
+        "133",
+        "41",
+        "54",
+        "71"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q16",
+      "category": "lookup",
+      "question": "Who preached the sermon about Jonah?",
+      "n_results": 2568,
+      "top_chapters": [
+        "83",
+        "9",
+        "9",
+        "9",
+        "9"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q17",
+      "category": "conceptual",
+      "question": "Why does Ishmael go to sea?",
+      "n_results": 2568,
+      "top_chapters": [
+        "1",
+        "102",
+        "53",
+        "87",
+        "9"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q18",
+      "category": "conceptual",
+      "question": "Why did Ishmael end up sharing a bed with a stranger at the inn?",
+      "n_results": 2568,
+      "top_chapters": [
+        "17",
+        "3",
+        "3",
+        "3",
+        "3"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q19",
+      "category": "conceptual",
+      "question": "What happened to Pip after he jumped out of the whaleboat?",
+      "n_results": 2568,
+      "top_chapters": [
+        "125",
+        "93",
+        "93",
+        "93",
+        "93"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q20",
+      "category": "conceptual",
+      "question": "Why did Queequeg have a coffin made for himself?",
+      "n_results": 2568,
+      "top_chapters": [
+        "110",
+        "110",
+        "110",
+        "110",
+        "12"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q21",
+      "category": "conceptual",
+      "question": "How did Ahab die?",
+      "n_results": 2568,
+      "top_chapters": [
+        "106",
+        "132",
+        "128",
+        "41",
+        "28"
+      ],
+      "hit": false,
+      "rr": 0.0,
+      "hit_800w": false
+    },
+    {
+      "id": "q22",
+      "category": "conceptual",
+      "question": "Why does the color of the whale frighten Ishmael?",
+      "n_results": 2568,
+      "top_chapters": [
+        "42",
+        "102",
+        "68",
+        "80",
+        "92"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q23",
+      "category": "hard",
+      "question": "How did Starbuck feel about Ahab?",
+      "n_results": 2568,
+      "top_chapters": [
+        "48",
+        "134",
+        "109",
+        "36",
+        "109"
+      ],
+      "hit": true,
+      "rr": 0.25,
+      "hit_800w": true
+    },
+    {
+      "id": "q24",
+      "category": "hard",
+      "question": "Why wouldn't Ahab help the Rachel?",
+      "n_results": 2568,
+      "top_chapters": [
+        "53",
+        "134",
+        "46",
+        "46",
+        "28"
+      ],
+      "hit": false,
+      "rr": 0.0,
+      "hit_800w": false
+    },
+    {
+      "id": "q25",
+      "category": "hard",
+      "question": "What did Fedallah predict about Ahab's death?",
+      "n_results": 2568,
+      "top_chapters": [
+        "73",
+        "41",
+        "50",
+        "124",
+        "28"
+      ],
+      "hit": false,
+      "rr": 0.0,
+      "hit_800w": false
+    },
+    {
+      "id": "q26",
+      "category": "hard",
+      "question": "Which ships had run into Moby Dick before the Pequod found him?",
+      "n_results": 2568,
+      "top_chapters": [
+        "87",
+        "71",
+        "41",
+        "54",
+        "19"
+      ],
+      "hit": true,
+      "rr": 0.5,
+      "hit_800w": true
+    },
+    {
+      "id": "q27",
+      "category": "hard",
+      "question": "What's the deal with the gold coin on the mast?",
+      "n_results": 2568,
+      "top_chapters": [
+        "36",
+        "35",
+        "99",
+        "99",
+        "35"
+      ],
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
+    },
+    {
+      "id": "q28",
+      "category": "unanswerable",
+      "question": "What was Ishmael's last name?",
+      "n_results": 2568,
+      "top_chapters": [
+        "102",
+        "1",
+        "41",
+        "88",
+        "17"
+      ],
+      "hit": null,
+      "rr": null,
+      "hit_800w": null
+    },
+    {
+      "id": "q29",
+      "category": "unanswerable",
+      "question": "Who did Ishmael marry?",
+      "n_results": 2568,
+      "top_chapters": [
+        "102",
+        "41",
+        "1",
+        "10",
+        "13"
+      ],
+      "hit": null,
+      "rr": null,
+      "hit_800w": null
+    },
+    {
+      "id": "q30",
+      "category": "unanswerable",
+      "question": "How much did Moby Dick weigh?",
+      "n_results": 2568,
+      "top_chapters": [
+        "41",
+        "103",
+        "36",
+        "135",
+        "54"
+      ],
+      "hit": null,
+      "rr": null,
+      "hit_800w": null
+    }
+  ]
+}

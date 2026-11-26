@@ -48,3 +48,38 @@ The chunks have the problems I predicted. 35 paragraphs are longer than the mode
 The stemming side test made BM25 worse, dropping recall from 0.615 to 0.538. It lost q05 and q26 and gained nothing, and it still missed "owned" versus "owners." I dropped stemming.
 
 This leads to step 4, chunking that fits the model's window and gives short lines their context.
+
+## Step 4: token-sized chunks (vector r128 recall@800w 0.885)
+
+I built a recursive chunker that works within each chapter. It packs paragraphs, or sentences when a paragraph is too long, into chunks of a target size measured with the embedding model's own tokenizer, and it carries a small overlap (one eighth of the size) into the next chunk. I swept sizes of 128, 256, 384, and 512 tokens for both BM25 and vector search.
+
+| Chunking | Chunks | Mean tokens | Under 20 tokens | Over 512 tokens |
+|---|---|---|---|---|
+| Paragraph | 2,568 | 112 | 410 | 35 |
+| r128 | 2,920 | 100 | 16 | 0 |
+| r256 | 1,458 | 202 | 2 | 0 |
+| r384 | 989 | 298 | 0 | 0 |
+| r512 | 729 | 405 | 0 | 20 |
+
+The first sweep used recall@5 and gave a muddled answer, since bigger chunks looked about as good as smaller ones. Five 400-token chunks hold four times the text of five 100-token chunks, so recall@5 gives big chunks credit for retrieving more text. I added recall@800w to the harness, which walks down the results until 800 words (about 1,000 tokens) are used and checks whether any of that text comes from a gold chapter. The rescore script now copies the current harness into every tag, so all steps carry this metric.
+
+| Mode | Recall@5 | Recall@800w | MRR@10 |
+|---|---|---|---|
+| BM25, paragraph | 0.615 | 0.846 | 0.459 |
+| BM25, r128 | 0.615 | 0.808 | 0.432 |
+| BM25, r512 | 0.692 | 0.500 | 0.542 |
+| Vector, paragraph | 0.769 | 0.808 | 0.572 |
+| Vector, r128 | 0.808 | 0.885 | 0.598 |
+| Vector, r512 | 0.769 | 0.654 | 0.622 |
+
+At an equal amount of text, smaller chunks win for both methods, and recall falls steadily as chunk size grows. Vector search with 128-token chunks is the best configuration so far at 23 of 26. BM25 on raw paragraphs holds up well on this metric, because it favors short paragraphs that cost few words.
+
+One question moves these scores by 0.038, so a difference of one or two questions between neighboring configurations is noise. The trend across sizes is larger than that.
+
+Two questions miss in every configuration. q14 asks for Queequeg's "idol," and the book calls Yojo his "god." q25 asks what Fedallah "predicted," and chapter 117 shows the prophecy as dialogue about hearses and hemp without any word like "predict."
+
+The r512 setting slightly overshoots the model's limit on 20 chunks, by up to 12 tokens, because the limit includes two special tokens and re-tokenizing decoded text can add a few. It does not change the conclusion, since r512 lost anyway.
+
+I reset `runs/results.csv` because its columns changed. `runs/rescore.csv` is the comparable record for every step.
+
+This leads to step 5, hybrid search over r128 chunks. BM25 and vectors still miss different questions.

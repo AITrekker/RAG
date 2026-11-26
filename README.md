@@ -17,3 +17,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Step 3: embeddings
 
 `uv run rag search "..." --mode vector` ranks paragraphs by embedding similarity with bge-small-en-v1.5 on the GPU. PyTorch comes from the CUDA 12.8 wheel index, which includes sm_120 kernels for the RTX 5070, and the project is pinned to Python 3.12 in `.venv`.
+
+## Step 4: chunking
+
+`--chunking r128` (or r256, r384, r512) switches from paragraphs to token-sized recursive chunks, for example `uv run rag eval --step step-4 --mode vector --chunking r128`. The eval reports recall@800w alongside recall@5, which compares chunk sizes at an equal amount of retrieved text.
