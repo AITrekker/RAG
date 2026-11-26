@@ -32,6 +32,7 @@ STEP_MODES = {
     + [f"{m} --chunking r{n}" for m in ("bm25", "vector") for n in (128, 256, 384, 512)],
     "step-5": [f"{m} --chunking r128" for m in ("bm25", "vector", "hybrid")],
     "step-6": [f"{m} --chunking r128" for m in ("pg-vector", "pg-vector-exact", "pg-hybrid")],
+    "step-7": ["pg-hybrid --chunking r128"],  # retrieval only; answers are graded by hand
 }
 
 

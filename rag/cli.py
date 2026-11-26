@@ -1,4 +1,4 @@
-"""Command line: `rag ingest`, `rag search "question"`, and `rag eval --step step-6`."""
+"""Command line: `rag ingest`, `rag search`, `rag eval`, `rag ask`, and `rag answer-eval`."""
 
 import argparse
 import textwrap
@@ -36,12 +36,15 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("ingest", help="chunk, embed, and store the corpus in Postgres")
     i.add_argument("--chunking", default="r128")
-    for name in ("search", "eval"):
+    for name in ("search", "eval", "ask", "answer-eval", "grade"):
         p = sub.add_parser(name)
         p.add_argument("--mode", default="pg-hybrid", choices=[*MODES, *PG_MODES])
         p.add_argument("--chunking", default="r128",
                        help="'paragraph', or 'r<tokens>' such as r128 for recursive chunks")
-        if name == "search":
+        if name in ("ask", "answer-eval", "grade"):
+            p.add_argument("--window", type=int, default=2,
+                           help="widen each retrieved chunk by this many neighbors for the generator")
+        if name in ("search", "ask"):
             p.add_argument("query")
             p.add_argument("-k", type=int, default=5)
         else:
@@ -53,9 +56,35 @@ def main():
         print(db.ingest(args.chunking))
         return
 
+    if args.cmd == "grade":
+        from .answer_eval import grade
+        label = args.mode if args.chunking == "paragraph" else f"{args.mode}+{args.chunking}"
+        label += f"+w{args.window}" if args.window else ""
+        print(grade(args.step, label)["summary"])
+        return
+
     fn, units = build(args.mode, args.chunking)
     search = lambda q: fn(q, units)
 
+    if args.cmd == "ask":
+        from .generate import chat, citations, expand, messages_for, select_context
+        context = expand(select_context(search(args.query)), units, args.window)
+        answer = chat(messages_for(args.query, context))
+        print(answer, "\n")
+        for i, p in enumerate(context, 1):
+            mark = "*" if p in citations(answer, context) else " "
+            print(f"{mark}[{i}] ch {p.chapter}: {p.text[:100]}...")
+        return
+    if args.cmd == "answer-eval":
+        from .answer_eval import run
+        label = args.mode if args.chunking == "paragraph" else f"{args.mode}+{args.chunking}"
+        label += f"+w{args.window}" if args.window else ""
+        out = run(search, args.step, label, units, args.window)
+        for q in out["questions"]:
+            print(f"{q['id']} ctx={str(q['in_context']):<5} cites_gold={str(q['cites_gold']):<5} "
+                  f"abstain={str(q['abstained']):<5} {q['answer'][:110]!r}")
+        print("\n", out["summary"])
+        return
     if args.cmd == "search":
         results = search(args.query)
         print(f"{len(results)} matching chunks (showing {min(args.k, len(results))})\n")

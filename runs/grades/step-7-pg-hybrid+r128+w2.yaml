@@ -1,0 +1,32 @@
+# Graded by Claude in session on 2026-11-25 against the expected answers in eval.yaml.
+# Pending Amit's review.
+q01: correct   # captain of the Pequod, obsessed with the whale that injured him
+q02: correct
+q03: correct   # the Pequod, now that the Samuel Enderby chunk comes with its speaker
+q04: correct
+q05: correct
+q06: wrong     # same misreading of Starbuck's question as without windows
+q07: correct
+q08: correct
+q09: correct   # coffin life-buoy, picked up a day and a night later
+q10: correct
+q11: correct
+q12: correct   # Flask
+q13: wrong     # says Ahab owns the ship; Peleg and Bildad were in context
+q14: correct
+q15: partial   # "the one-armed captain" with no ship or name
+q16: correct
+q17: correct
+q18: correct
+q19: correct   # both jumps, abandoned, left an idiot
+q20: partial   # wanted a canoe coffin; misses the fever and believing he was dying
+q21: wrong     # false "I don't know"; chapter 135 was in context
+q22: correct
+q23: partial   # respect and concern, no musket
+q24: correct
+q25: wrong     # chapter 117 never retrieved
+q26: partial   # the Jeroboam and an unnamed ship
+q27: correct
+q28: correct
+q29: correct
+q30: correct

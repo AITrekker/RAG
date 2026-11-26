@@ -1,0 +1,32 @@
+# Graded by Claude in session on 2026-11-25 against the expected answers in eval.yaml.
+# Pending Amit's review.
+q01: partial   # pride and obsession, but never says captain of the Pequod or the lost leg
+q02: correct
+q03: wrong     # says "Samuel Enderby"; chapter 16 chunks naming the Pequod were in context
+q04: correct
+q05: correct
+q06: wrong     # misreads Starbuck's question; misses vengeance on a dumb brute as blasphemy
+q07: correct
+q08: correct
+q09: wrong     # garbled; the epilogue chunk was in context but the coffin life-buoy is missing
+q10: correct   # says the name is not given (without the exact "I don't know" phrase)
+q11: correct
+q12: wrong     # says Stubb; the chapter 27 chunk naming Flask was in context
+q13: wrong     # false "I don't know"; two chapter 16 chunks were in context
+q14: correct   # Yojo, from chapters 95 and 17
+q15: wrong     # says the Jeroboam while citing the Samuel Enderby chunk
+q16: correct
+q17: correct
+q18: correct
+q19: partial   # describes Pip's first jump; misses being abandoned and going mad
+q20: wrong     # says he wanted a sea-chest and was pretending; he had a fever and thought he was dying
+q21: wrong     # says his body was seen floating; chapter 135 was in context but not used
+q22: correct
+q23: partial   # obedience and conflict are right; nothing about the musket
+q24: correct
+q25: wrong     # "I don't know"; chapter 117 was never retrieved
+q26: partial   # names only the Jeroboam
+q27: correct
+q28: correct
+q29: correct
+q30: correct   # did not invent a weight from the chapter 103 estimates

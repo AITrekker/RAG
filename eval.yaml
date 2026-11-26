@@ -85,7 +85,8 @@ questions:
     question: What was the name of Queequeg's idol?
     category: lookup
     answer: Yojo, his small black god.
-    gold_chapters: [16]
+    # Fixed at step 7. Yojo is named in all five chapters; the original label had only 16.
+    gold_chapters: [16, 17, 72, 95, 110]
 
   - id: q15
     question: Which ship's captain had lost an arm to Moby Dick?

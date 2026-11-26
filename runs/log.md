@@ -119,3 +119,26 @@ The first ingest took 11 seconds, and a second run skipped in 0.16 seconds becau
 HNSW is an approximate index, but at 2,920 vectors it returned the same results as an exact scan on every question. One detail matters here. pgvector's HNSW returns at most `hnsw.ef_search` rows (40 by default), so a query asking for the top 200 silently gets 40. The search code raises ef_search to the requested depth.
 
 Retrieval quality is where step 5 left it, and I still have to read chunks myself to get an answer. This leads to step 7, generation with local Qwen.
+
+## Step 7: generation with local Qwen3-8B (18 of 26 correct with neighbor windows)
+
+I served Qwen3-8B (AWQ 4-bit) with vLLM on the RTX 5070 at 0.85 GPU memory utilization, which leaves about 1.8 GB for the embedding model and gives a 29,824-token KV cache. Thinking mode is off. The generator takes pg-hybrid r128 results up to 800 words, numbers the passages, and must cite them and say "I don't know" when they don't hold the answer. All 30 questions run in about 15 seconds.
+
+Grading needed a reader, so `rag answer-eval` writes the answers next to the expected ones and `rag grade` folds a hand-written grade file into the saved run. I (Claude) graded both runs below against eval.yaml, and those grades are pending Amit's review.
+
+| Config | Correct | Partial | Wrong | Wrong with gold in context | Unanswerable handled |
+|---|---|---|---|---|---|
+| r128 chunks as retrieved | 13/26 | 4/26 | 9/26 | 8 | 4/4 |
+| r128 chunks widened by 2 neighbors | 18/26 | 4/26 | 4/26 | 3 | 4/4 |
+
+I expected "Who was Ahab?" to fail and unanswerable questions to draw invented answers. Neither happened the way I predicted. The model declined all four unanswerable questions, including the weight trap, and with neighbor windows it answered "Who was Ahab?" correctly from late-chapter passages about his obsession and injury.
+
+The surprise was that the generator, not retrieval, became the bottleneck. In 8 of the 9 wrong answers on raw r128 chunks, a gold chunk was already in the context. Small chunks retrieve well but read badly, because they strip away who is speaking. A chapter 100 chunk says "Samuel Enderby is the name of my ship," and without the lines around it the model named that as Ahab's ship. The Stubb and Flask descriptions in chapter 27 run together the same way.
+
+I tried widening each retrieved chunk to its two neighbors on each side, for the reader only, while retrieval stays on small chunks. That fixed the ship's name, the third mate, the coffin life-buoy, and Pip's madness, and it is now the default (`--window 2`).
+
+Grading also found an error in my eval set. q14's gold list had only chapter 16, but Yojo is named in chapters 16, 17, 72, 95, and 110, and the generator answered correctly from 95 and 17. I fixed the gold list, which changes every step's q14 result, and rescored all tags.
+
+Four answers are still wrong. q06 and q13 misread passages that were in context (Starbuck's objection, and the ship's owners). q21 says "I don't know" with the chapter 135 death scene in context. q25 never retrieves chapter 117.
+
+This leads to step 8, contextual headers. A one-line header on each chunk saying where it sits and who is involved should help both retrieval (q25) and reading.

@@ -29,3 +29,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Step 6: Postgres and pgvector
 
 `docker compose up -d db` starts Postgres with pgvector (it restarts with Docker). `uv run rag ingest --chunking r128` stores chunks and embeddings in one transaction and skips work already done. The `pg-vector`, `pg-vector-exact`, and `pg-hybrid` modes search from the database, and `pg-hybrid` is now the default.
+
+## Step 7: generation
+
+`./scripts/start-vllm.sh` serves Qwen3-8B AWQ on 127.0.0.1:8001 (stop it with `./scripts/stop-vllm.sh`). `uv run rag ask "Who was Ahab?"` answers with numbered citations. `uv run rag answer-eval --step step-7` answers every eval question and writes `runs/<step>-<config>-answers.md`, and `uv run rag grade --step step-7` applies hand grades from `runs/grades/`. `--window 2` (the default) widens each retrieved chunk by two neighbors for the reader.
