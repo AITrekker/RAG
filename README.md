@@ -25,3 +25,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Step 5: hybrid search
 
 `uv run rag search "..." --mode hybrid --chunking r128` merges BM25 and vector rankings with reciprocal rank fusion (K = 60).
+
+## Step 6: Postgres and pgvector
+
+`docker compose up -d db` starts Postgres with pgvector (it restarts with Docker). `uv run rag ingest --chunking r128` stores chunks and embeddings in one transaction and skips work already done. The `pg-vector`, `pg-vector-exact`, and `pg-hybrid` modes search from the database, and `pg-hybrid` is now the default.

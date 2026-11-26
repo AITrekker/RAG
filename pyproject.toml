@@ -5,6 +5,8 @@ requires-python = ">=3.12,<3.13"
 # Dependencies get added as each step needs them.
 dependencies = [
   "numpy>=2.5.5",
+  "pgvector>=0.5.1",
+  "psycopg[binary]>=3.3.9",
   "pyyaml",
   "rank-bm25>=0.2.2",
   "sentence-transformers>=6.3.0",

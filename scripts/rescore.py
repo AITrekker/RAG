@@ -31,6 +31,7 @@ STEP_MODES = {
     "step-4": ["bm25", "vector"]
     + [f"{m} --chunking r{n}" for m in ("bm25", "vector") for n in (128, 256, 384, 512)],
     "step-5": [f"{m} --chunking r128" for m in ("bm25", "vector", "hybrid")],
+    "step-6": [f"{m} --chunking r128" for m in ("pg-vector", "pg-vector-exact", "pg-hybrid")],
 }
 
 
@@ -60,6 +61,11 @@ def main():
             try:
                 shutil.copy(eval_file, wt / "eval.yaml")
                 shutil.copy(ROOT / "rag" / "eval.py", wt / "rag" / "eval.py")
+                if (ROOT / ".env").exists():
+                    shutil.copy(ROOT / ".env", wt / ".env")  # database credentials for pg modes
+                for chunking in sorted({s.split()[-1] for s in STEP_MODES[tag] if s.startswith("pg-")}):
+                    subprocess.run(["uv", "run", "-q", "rag", "ingest", "--chunking", chunking],
+                                   cwd=wt, check=True, capture_output=True, text=True)
                 for spec in STEP_MODES[tag]:
                     mode, *extra = spec.split()
                     print(f"scoring {tag} {spec}", flush=True)

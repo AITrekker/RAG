@@ -101,3 +101,21 @@ The two remaining misses are the ones both methods miss, q14 (idol versus god) a
 "Who was Ahab?" hits within 800 words but not in the top five, where chapters 134, 130, and 135 show Ahab in the final chase without describing him. This is the whole-book question that step 9's chapter summaries target.
 
 Every chunking or model change still re-embeds the whole book on each run, and the rescore re-embeds every tag. That is fast for one book, but the LLM-written headers in step 8 will be slow to produce and must be stored. This leads to step 6, Postgres and pgvector.
+
+## Step 6: Postgres and pgvector (scores unchanged, recall@800w 0.923)
+
+I moved storage into Postgres 17 with pgvector 0.8.7. The schema has a documents table, a chunks table keyed by chunking strategy with a generated full-text column and GIN index, and an embeddings table with a fixed 384-dimension vector column and an HNSW index. `rag ingest` chunks and embeds the book first, then writes the document, its 2,920 chunks, and their embeddings in one transaction.
+
+The goal was to hold step 5's scores while making the embeddings persistent, and it did. The Postgres versions of vector and hybrid search return the same top five chunks as the in-memory versions for all 30 questions, and the scores match exactly.
+
+| Mode (r128) | Recall@5 | Recall@800w | MRR@10 |
+|---|---|---|---|
+| pg-vector (HNSW) | 0.808 | 0.885 | 0.598 |
+| pg-vector-exact | 0.808 | 0.885 | 0.598 |
+| pg-hybrid | 0.808 | 0.923 | 0.646 |
+
+The first ingest took 11 seconds, and a second run skipped in 0.16 seconds because the file hash, chunking, and model were already stored. To test the transaction, I forced the embeddings to the wrong dimension so the first vector insert would fail. The ingest raised an error and the row counts stayed exactly as before, with no orphan chunks and no partial document. That is the failure mode the two-database setup in LearnRAG kept hitting.
+
+HNSW is an approximate index, but at 2,920 vectors it returned the same results as an exact scan on every question. One detail matters here. pgvector's HNSW returns at most `hnsw.ef_search` rows (40 by default), so a query asking for the top 200 silently gets 40. The search code raises ef_search to the requested depth.
+
+Retrieval quality is where step 5 left it, and I still have to read chunks myself to get an answer. This leads to step 7, generation with local Qwen.
