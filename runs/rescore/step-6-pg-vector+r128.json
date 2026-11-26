@@ -2,7 +2,7 @@
   "summary": {
     "step": "step-6",
     "mode": "pg-vector+r128",
-    "time": "2026-11-25 18:56",
+    "time": "2026-11-25 21:14",
     "recall@5": 0.846,
     "mrr@10": 0.617,
     "recall@800w": 0.923,

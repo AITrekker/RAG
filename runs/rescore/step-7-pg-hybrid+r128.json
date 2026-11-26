@@ -2,7 +2,7 @@
   "summary": {
     "step": "step-7",
     "mode": "pg-hybrid+r128",
-    "time": "2026-11-25 18:57",
+    "time": "2026-11-25 21:14",
     "recall@5": 0.846,
     "mrr@10": 0.665,
     "recall@800w": 0.962,
