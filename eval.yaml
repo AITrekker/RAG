@@ -1,0 +1,63 @@
+# Seed eval set for Moby Dick. Gold chapters were verified against corpus/mobydick.txt.
+# A retrieval hit means a chunk from any gold chapter ranks in the top k.
+# category: lookup | conceptual | hard | unanswerable
+questions:
+  - id: q01
+    question: Who was Ahab?
+    category: hard
+    answer: Captain of the Pequod, an aging Nantucket whaling captain who lost his leg to Moby Dick and is consumed by the hunt for revenge.
+    gold_chapters: [16, 28, 36, 41]
+
+  - id: q02
+    question: What was Ahab's beef with Moby?
+    category: hard
+    answer: Moby Dick bit off Ahab's leg on an earlier voyage, and Ahab swore vengeance on the white whale.
+    gold_chapters: [36, 41]
+
+  - id: q03
+    question: What was the name of Ahab's ship?
+    category: lookup
+    answer: The Pequod.
+    gold_chapters: [16]
+
+  - id: q04
+    question: What was Ahab's artificial leg made from?
+    category: lookup
+    answer: Polished bone from a sperm whale's jaw.
+    gold_chapters: [28]
+
+  - id: q05
+    question: What reward did Ahab offer the crew for spotting the white whale?
+    category: conceptual
+    answer: A gold doubloon (a Spanish ounce of gold) nailed to the mast.
+    gold_chapters: [36]
+
+  - id: q06
+    question: Why did Starbuck object to hunting Moby Dick?
+    category: conceptual
+    answer: He thought seeking vengeance on a dumb brute that acted from instinct was madness and blasphemous.
+    gold_chapters: [36]
+
+  - id: q07
+    question: Where was Queequeg from?
+    category: lookup
+    answer: Rokovoko, an island far to the west and south.
+    gold_chapters: [12]
+
+  - id: q08
+    question: Who was the first mate of the Pequod?
+    category: lookup
+    answer: Starbuck.
+    gold_chapters: [26]
+
+  - id: q09
+    question: How did Ishmael survive the sinking?
+    category: conceptual
+    answer: He floated on Queequeg's coffin, which had been made into a life-buoy, until the Rachel picked him up.
+    gold_chapters: [epilogue]
+
+  - id: q10
+    question: What was the name of Ahab's wife?
+    category: unanswerable
+    answer: The book never names her.
+    gold_chapters: []
