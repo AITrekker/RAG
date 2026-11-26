@@ -2,9 +2,9 @@
   "summary": {
     "step": "step-4",
     "mode": "vector+r512",
-    "time": "2026-11-25 18:44",
-    "recall@5": 0.769,
-    "mrr@10": 0.622,
+    "time": "2026-11-25 18:55",
+    "recall@5": 0.808,
+    "mrr@10": 0.635,
     "recall@800w": 0.654,
     "n_answerable": 26,
     "ahab_who": true,
@@ -231,8 +231,8 @@
         "4",
         "10"
       ],
-      "hit": false,
-      "rr": 0.0,
+      "hit": true,
+      "rr": 0.3333333333333333,
       "hit_800w": false
     },
     {

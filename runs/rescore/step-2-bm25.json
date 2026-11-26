@@ -2,9 +2,9 @@
   "summary": {
     "step": "step-2",
     "mode": "bm25",
-    "time": "2026-11-25 18:43",
-    "recall@5": 0.615,
-    "mrr@10": 0.459,
+    "time": "2026-11-25 18:54",
+    "recall@5": 0.654,
+    "mrr@10": 0.492,
     "recall@800w": 0.846,
     "n_answerable": 26,
     "ahab_who": false,
@@ -231,8 +231,8 @@
         "18",
         "10"
       ],
-      "hit": false,
-      "rr": 0.14285714285714285,
+      "hit": true,
+      "rr": 1.0,
       "hit_800w": true
     },
     {

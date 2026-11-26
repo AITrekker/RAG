@@ -2,10 +2,10 @@
   "summary": {
     "step": "step-4",
     "mode": "bm25+r512",
-    "time": "2026-11-25 18:43",
-    "recall@5": 0.692,
-    "mrr@10": 0.542,
-    "recall@800w": 0.5,
+    "time": "2026-11-25 18:55",
+    "recall@5": 0.731,
+    "mrr@10": 0.575,
+    "recall@800w": 0.538,
     "n_answerable": 26,
     "ahab_who": true,
     "ahab_beef": true
@@ -231,9 +231,9 @@
         "3",
         "18"
       ],
-      "hit": false,
-      "rr": 0.14285714285714285,
-      "hit_800w": false
+      "hit": true,
+      "rr": 1.0,
+      "hit_800w": true
     },
     {
       "id": "q15",
