@@ -3,11 +3,11 @@
 import argparse
 import textwrap
 
-from . import search_substring
+from . import search_bm25, search_substring
 from .corpus import load_paragraphs
 from .eval import score
 
-MODES = {"substring": search_substring.search}
+MODES = {"substring": search_substring.search, "bm25": search_bm25.search}
 
 
 def main():
@@ -15,11 +15,11 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("search")
     s.add_argument("query")
-    s.add_argument("--mode", default="substring", choices=MODES)
+    s.add_argument("--mode", default="bm25", choices=MODES)
     s.add_argument("-k", type=int, default=5)
     e = sub.add_parser("eval")
     e.add_argument("--step", required=True)
-    e.add_argument("--mode", default="substring", choices=MODES)
+    e.add_argument("--mode", default="bm25", choices=MODES)
     args = ap.parse_args()
 
     paragraphs = load_paragraphs()

@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Search modes to score for each step. Add a line when a step is tagged.
 STEP_MODES = {
     "step-1": ["substring"],
+    "step-2": ["substring", "bm25"],
 }
 
 
