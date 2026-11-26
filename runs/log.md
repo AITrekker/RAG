@@ -10,6 +10,6 @@ I expected "Ahab" to match hundreds of paragraphs unranked and "beef" to match n
 
 The one hit (q01) is luck. Chapter 16 comes first in book order and happens to be a gold chapter, and the top five results are dialogue lines like "Who is Captain Ahab, sir?" that describe nothing.
 
-The surprise was that requiring every word mattered more than vocabulary mismatch. Six of nine answerable questions returned zero paragraphs because a single question word (made, reward, object, first, survive) never appeared next to the others.
+Requiring every word caused more misses than vocabulary mismatch did. Six of nine answerable questions returned zero paragraphs because a single question word (made, reward, object, first, survive) never appeared next to the others.
 
-This leads to step 2, which ranks partial matches with BM25 instead of requiring every word.
+This leads to step 2, which uses BM25 to rank paragraphs that match only some of the words.
