@@ -179,3 +179,19 @@ Summaries cost retrieval elsewhere. A summary runs about 150 words, so it uses a
 q25 shows the remaining gap clearly. The chapter 117 summary says "the Parsee warns that only hemp can kill Ahab," which is the answer, but the question asks what Fedallah "predicted," and the summary calls him "the Parsee." Neither BM25 nor the embedding connects the two.
 
 Answer quality has plateaued at 17 to 18 correct across steps 7 to 9. The remaining errors split between misreading (q13 owners, q18 bedmate details) and passages that never make the context (q21, q25). This leads to step 10, rewriting the question before searching.
+
+## Step 10: HyDE query rewriting (recall@800w 0.846, worse)
+
+Qwen writes a 100-word passage in Melville's style that would answer the question, and the vector side searches with that passage while BM25 keeps the original question. RRF fuses the two as before.
+
+| pg-hybrid | Recall@5 | Recall@800w | MRR@10 |
+|---|---|---|---|
+| r128 (step 7) | 0.846 | 0.962 | 0.665 |
+| r128 with HyDE | 0.731 | 0.846 | 0.522 |
+| r128 plus summaries with HyDE | 0.769 | 0.808 | 0.553 |
+
+I expected HyDE to fix casually worded questions, and q25 in particular. It did fix q25 on plain chunks, which is the first time chapter 117 has entered the 800-word context. It lost four other questions to get there, the first mate, the third mate, Ishmael's survival, and the whiteness chapter.
+
+The hypothetical passages show why. For "Who was the third mate?" Qwen wrote about a mate whose "name, though seldom spoken, was known to all," with no name at all. For "How did Ishmael survive the sinking?" it wrote that he "clung to the whaleboat" with "a rope around his waist," which is wrong, because he floated on Queequeg's coffin. HyDE replaces the question with the model's memory of the book, and an 8B model's memory of Moby-Dick is vague on names and invents plot. That steers the vector search toward passages that match the invention.
+
+HyDE should help when questions are short and the model knows the domain well. Here the questions were already specific and the model's memory is the weak link, so HyDE stays off.

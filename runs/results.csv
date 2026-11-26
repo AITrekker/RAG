@@ -17,3 +17,9 @@ step-8,hybrid+r128ctx,2026-11-25 20:57,0.808,0.619,0.846,26,True,True
 step-8,pg-hybrid+r128ctx,2026-11-25 20:57,0.808,0.619,0.846,26,True,True
 step-9,pg-hybrid+r128sum,2026-11-25 21:02,0.846,0.571,0.923,26,True,True
 step-9,pg-hybrid+r128ctxsum,2026-11-25 21:02,0.808,0.594,0.846,26,True,True
+step-10,pg-hybrid-hyde+r128,2026-11-25 21:05,0.731,0.522,0.846,26,True,True
+step-10,pg-hybrid-rerank+r128,2026-11-25 21:05,0.769,0.584,0.846,26,True,True
+step-10,pg-hybrid-hyde-rerank+r128,2026-11-25 21:07,0.577,0.465,0.769,26,False,True
+step-10,pg-hybrid-hyde+r128sum,2026-11-25 21:07,0.769,0.553,0.808,26,True,True
+step-10,pg-hybrid-rerank+r128sum,2026-11-25 21:07,0.846,0.565,0.846,26,False,True
+step-10,pg-hybrid-hyde-rerank+r128sum,2026-11-25 21:09,0.846,0.616,0.846,26,False,True

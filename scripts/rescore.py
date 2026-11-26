@@ -35,6 +35,9 @@ STEP_MODES = {
     "step-7": ["pg-hybrid --chunking r128"],  # retrieval only; answers are graded by hand
     "step-8": ["bm25 --chunking r128ctx", "vector --chunking r128ctx", "pg-hybrid --chunking r128ctx"],
     "step-9": ["pg-hybrid --chunking r128sum", "pg-hybrid --chunking r128ctxsum"],
+    "step-10": [f"pg-hybrid-hyde --chunking {c}" for c in ("r128", "r128sum")],
+    "step-11": [f"{m} --chunking {c}" for m in ("pg-hybrid-rerank", "pg-hybrid-hyde-rerank")
+                for c in ("r128", "r128sum")],
 }
 
 
