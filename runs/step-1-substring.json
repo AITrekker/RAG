@@ -1,0 +1,122 @@
+{
+  "summary": {
+    "step": "step-1",
+    "mode": "substring",
+    "time": "2026-11-25 18:11",
+    "recall@5": 0.111,
+    "mrr@10": 0.111,
+    "n_answerable": 9,
+    "ahab_who": true,
+    "ahab_beef": false
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "category": "hard",
+      "question": "Who was Ahab?",
+      "n_results": 371,
+      "top_chapters": [
+        "16",
+        "16",
+        "16",
+        "16",
+        "16"
+      ],
+      "hit": true,
+      "rr": 1.0
+    },
+    {
+      "id": "q02",
+      "category": "hard",
+      "question": "What was Ahab's beef with Moby?",
+      "n_results": 0,
+      "top_chapters": [],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q03",
+      "category": "lookup",
+      "question": "What was the name of Ahab's ship?",
+      "n_results": 3,
+      "top_chapters": [
+        "52",
+        "81",
+        "100"
+      ],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q04",
+      "category": "lookup",
+      "question": "What was Ahab's artificial leg made from?",
+      "n_results": 0,
+      "top_chapters": [],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q05",
+      "category": "conceptual",
+      "question": "What reward did Ahab offer the crew for spotting the white whale?",
+      "n_results": 0,
+      "top_chapters": [],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q06",
+      "category": "conceptual",
+      "question": "Why did Starbuck object to hunting Moby Dick?",
+      "n_results": 0,
+      "top_chapters": [],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q07",
+      "category": "lookup",
+      "question": "Where was Queequeg from?",
+      "n_results": 171,
+      "top_chapters": [
+        "3",
+        "3",
+        "3",
+        "3",
+        "4"
+      ],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q08",
+      "category": "lookup",
+      "question": "Who was the first mate of the Pequod?",
+      "n_results": 0,
+      "top_chapters": [],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q09",
+      "category": "conceptual",
+      "question": "How did Ishmael survive the sinking?",
+      "n_results": 0,
+      "top_chapters": [],
+      "hit": false,
+      "rr": 0.0
+    },
+    {
+      "id": "q10",
+      "category": "unanswerable",
+      "question": "What was the name of Ahab's wife?",
+      "n_results": 1,
+      "top_chapters": [
+        "16"
+      ],
+      "hit": null,
+      "rr": null
+    }
+  ]
+}
