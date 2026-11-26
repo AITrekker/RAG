@@ -1,3 +1,5 @@
 step,mode,time,recall@5,mrr@10,n_answerable,ahab_who,ahab_beef
 step-1,substring,2026-11-25 18:11,0.111,0.111,9,True,False
 step-2,bm25,2026-11-25 18:20,0.615,0.459,26,False,True
+step-3,bm25-stem,2026-11-25 18:23,0.538,0.461,26,False,True
+step-3,vector,2026-11-25 18:23,0.769,0.572,26,True,True

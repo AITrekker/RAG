@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 STEP_MODES = {
     "step-1": ["substring"],
     "step-2": ["substring", "bm25"],
+    "step-3": ["bm25", "bm25-stem", "vector"],
 }
 
 

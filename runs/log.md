@@ -27,3 +27,24 @@ BM25 returns something for every question, including all four unanswerable ones,
 The hit metric is generous for multi-chapter questions. q26 counts as a hit because chapter 100 appears in the top five, although the answer needs four chapters.
 
 This leads to step 3, embeddings, since most remaining misses are about meaning and wording. Stemming would fix "owned" and "owners" and is worth a quick test alongside.
+
+## Step 3: embeddings (vector recall@5 0.769, MRR 0.572)
+
+I embedded each paragraph with bge-small-en-v1.5 on the RTX 5070 and ranked by cosine similarity. Everything is still in memory, and the book embeds in seconds.
+
+| Mode | Recall@5 | MRR@10 | Lookup | Conceptual | Hard |
+|---|---|---|---|---|---|
+| BM25 (step 2) | 0.615 | 0.459 | 3/10 | 9/9 | 4/7 |
+| Vector | 0.769 | 0.572 | 9/10 | 6/9 | 5/7 |
+
+Both Ahab questions hit for the first time. "Who was Ahab?" ranks chapters 16 and 28 in the top five, and the beef question finds chapters 36 and 41 even though no paragraph contains "beef."
+
+I predicted that exact names would get worse, and they did. Vectors missed "Why wouldn't Ahab help the Rachel?", where BM25 matched the ship's name directly. Vectors also missed "How did Ahab die?" and the coffin-survival question, which BM25 found through words like "die" and "coffin." The two methods fail on different questions, and that is the case for combining them at step 5.
+
+The surprise was that lookups went from worst to best. "First mate" now finds "chief mate," and "owned" finds "owners," because the embedding treats them as the same meaning.
+
+The chunks have the problems I predicted. 35 paragraphs are longer than the model's 512-token limit (the longest is 1,041 tokens) and get cut off, and 369 paragraphs are under 20 tokens, mostly short dialogue lines with no context.
+
+The stemming side test made BM25 worse, dropping recall from 0.615 to 0.538. It lost q05 and q26 and gained nothing, and it still missed "owned" versus "owners." I dropped stemming.
+
+This leads to step 4, chunking that fits the model's window and gives short lines their context.

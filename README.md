@@ -13,3 +13,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Step 2: BM25
 
 `uv run rag search "..." --mode bm25` ranks paragraphs with BM25, and BM25 is now the default mode. `uv run python scripts/rescore.py` rescores every step tag against the current eval set and writes `runs/rescore.csv`.
+
+## Step 3: embeddings
+
+`uv run rag search "..." --mode vector` ranks paragraphs by embedding similarity with bge-small-en-v1.5 on the GPU. PyTorch comes from the CUDA 12.8 wheel index, which includes sm_120 kernels for the RTX 5070, and the project is pinned to Python 3.12 in `.venv`.

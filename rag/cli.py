@@ -3,11 +3,16 @@
 import argparse
 import textwrap
 
-from . import search_bm25, search_substring
+from . import search_bm25, search_bm25_stem, search_substring, search_vector
 from .corpus import load_paragraphs
 from .eval import score
 
-MODES = {"substring": search_substring.search, "bm25": search_bm25.search}
+MODES = {
+    "substring": search_substring.search,
+    "bm25": search_bm25.search,
+    "bm25-stem": search_bm25_stem.search,
+    "vector": search_vector.search,
+}
 
 
 def main():
