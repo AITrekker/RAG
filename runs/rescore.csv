@@ -1,4 +1,7 @@
 eval_set,n_questions,step,mode,time,recall@5,mrr@10,n_answerable,ahab_who,ahab_beef
-70a04760,30,step-1,substring,2026-11-25 18:21,0.154,0.109,26,True,False
-70a04760,30,step-2,substring,2026-11-25 18:21,0.154,0.109,26,True,False
-70a04760,30,step-2,bm25,2026-11-25 18:21,0.615,0.459,26,False,True
+70a04760,30,step-1,substring,2026-11-25 18:24,0.154,0.109,26,True,False
+70a04760,30,step-2,substring,2026-11-25 18:24,0.154,0.109,26,True,False
+70a04760,30,step-2,bm25,2026-11-25 18:24,0.615,0.459,26,False,True
+70a04760,30,step-3,bm25,2026-11-25 18:24,0.615,0.459,26,False,True
+70a04760,30,step-3,bm25-stem,2026-11-25 18:24,0.538,0.461,26,False,True
+70a04760,30,step-3,vector,2026-11-25 18:24,0.769,0.572,26,True,True

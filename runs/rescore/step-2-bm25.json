@@ -2,7 +2,7 @@
   "summary": {
     "step": "step-2",
     "mode": "bm25",
-    "time": "2026-11-25 18:21",
+    "time": "2026-11-25 18:24",
     "recall@5": 0.615,
     "mrr@10": 0.459,
     "n_answerable": 26,
