@@ -83,3 +83,21 @@ The r512 setting slightly overshoots the model's limit on 20 chunks, by up to 12
 I reset `runs/results.csv` because its columns changed. `runs/rescore.csv` is the comparable record for every step.
 
 This leads to step 5, hybrid search over r128 chunks. BM25 and vectors still miss different questions.
+
+## Step 5: hybrid search with RRF (recall@800w 0.923, MRR 0.646)
+
+I ran BM25 and vector search over the same r128 chunks and merged the two rankings with reciprocal rank fusion. Each chunk scores the sum of 1 / (60 + rank) across both lists, so only rank positions matter and the two methods' incompatible scores never get compared.
+
+| Mode (r128) | Recall@5 | Recall@800w | MRR@10 |
+|---|---|---|---|
+| BM25 | 0.615 | 0.808 | 0.432 |
+| Vector | 0.808 | 0.885 | 0.598 |
+| Hybrid | 0.808 | 0.923 | 0.646 |
+
+I expected hybrid search to recover the questions where only one method succeeds, and it did. At 800 words, hybrid hits every question that either method hits on its own, and it loses none. It picks up "How did Ahab die?" from BM25 and the leg, Queequeg's home, and whiteness questions from vectors. MRR improved more than recall did, which means the right chunk also moves higher in the list.
+
+The two remaining misses are the ones both methods miss, q14 (idol versus god) and q25 (Fedallah's prediction). Fusion cannot recover a chunk that neither list ranks well.
+
+"Who was Ahab?" hits within 800 words but not in the top five, where chapters 134, 130, and 135 show Ahab in the final chase without describing him. This is the whole-book question that step 9's chapter summaries target.
+
+Every chunking or model change still re-embeds the whole book on each run, and the rescore re-embeds every tag. That is fast for one book, but the LLM-written headers in step 8 will be slow to produce and must be stored. This leads to step 6, Postgres and pgvector.

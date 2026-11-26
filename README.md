@@ -21,3 +21,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Step 4: chunking
 
 `--chunking r128` (or r256, r384, r512) switches from paragraphs to token-sized recursive chunks, for example `uv run rag eval --step step-4 --mode vector --chunking r128`. The eval reports recall@800w alongside recall@5, which compares chunk sizes at an equal amount of retrieved text.
+
+## Step 5: hybrid search
+
+`uv run rag search "..." --mode hybrid --chunking r128` merges BM25 and vector rankings with reciprocal rank fusion (K = 60).

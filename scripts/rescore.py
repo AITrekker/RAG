@@ -30,6 +30,7 @@ STEP_MODES = {
     "step-3": ["bm25", "bm25-stem", "vector"],
     "step-4": ["bm25", "vector"]
     + [f"{m} --chunking r{n}" for m in ("bm25", "vector") for n in (128, 256, 384, 512)],
+    "step-5": [f"{m} --chunking r128" for m in ("bm25", "vector", "hybrid")],
 }
 
 

@@ -3,7 +3,7 @@
 import argparse
 import textwrap
 
-from . import search_bm25, search_bm25_stem, search_substring, search_vector
+from . import search_bm25, search_bm25_stem, search_hybrid, search_substring, search_vector
 from .chunk import load_units
 from .eval import score
 
@@ -12,6 +12,7 @@ MODES = {
     "bm25": search_bm25.search,
     "bm25-stem": search_bm25_stem.search,
     "vector": search_vector.search,
+    "hybrid": search_hybrid.search,
 }
 
 
