@@ -37,3 +37,7 @@ Run `scripts/step0_check.sh` inside WSL from `~/rag`. It checks the GPU, uv, and
 ## Steps 8 and 9: headers and summaries
 
 `uv run rag contextualize --chunking r128` writes a Qwen header for every chunk to `data/contexts-r128.jsonl`, and `--chunking r128ctx` indexes chunks with their headers. `uv run rag summarize` writes chapter summaries to `data/summaries.jsonl`, and a `sum` suffix (`r128sum`, `r128ctxsum`) adds them to the index. Both data files are committed, so rebuilding the index needs no GPU time for generation.
+
+## Steps 10 and 11: HyDE and reranking
+
+`--mode pg-hybrid-hyde`, `pg-hybrid-rerank`, and `pg-hybrid-hyde-rerank` add query rewriting, cross-encoder reranking, or both. Both made retrieval worse on this eval, and `pg-hybrid` stays the default (see `runs/log.md`).

@@ -195,3 +195,21 @@ I expected HyDE to fix casually worded questions, and q25 in particular. It did 
 The hypothetical passages show why. For "Who was the third mate?" Qwen wrote about a mate whose "name, though seldom spoken, was known to all," with no name at all. For "How did Ishmael survive the sinking?" it wrote that he "clung to the whaleboat" with "a rope around his waist," which is wrong, because he floated on Queequeg's coffin. HyDE replaces the question with the model's memory of the book, and an 8B model's memory of Moby-Dick is vague on names and invents plot. That steers the vector search toward passages that match the invention.
 
 HyDE should help when questions are short and the model knows the domain well. Here the questions were already specific and the model's memory is the weak link, so HyDE stays off.
+
+## Step 11: cross-encoder reranking (recall@800w 0.846, worse)
+
+A cross-encoder (BAAI/bge-reranker-base, fp16 on the GPU next to vLLM) reads the question together with each of the top 20 fused chunks and reorders them by how well each one answers it.
+
+| pg-hybrid | Recall@5 | Recall@800w | MRR@10 |
+|---|---|---|---|
+| r128 (step 7) | 0.846 | 0.962 | 0.665 |
+| r128 with reranking | 0.769 | 0.846 | 0.584 |
+| r128 with HyDE and reranking | 0.577 | 0.769 | 0.465 |
+| r128 plus summaries with reranking | 0.846 | 0.846 | 0.565 |
+| r128 plus summaries with HyDE and reranking | 0.846 | 0.846 | 0.616 |
+
+I expected reranking to tighten the top five. It made every configuration worse. On plain chunks it pushed the gold chunks for Ishmael's survival, Ahab's death, and the Rachel below chunks it scored higher. With summaries it also demoted the chapter 28 summary for "Who was Ahab?"
+
+The likely cause is domain mismatch. bge-reranker-base was trained on web search questions and passages, and Moby-Dick is 1851 prose full of dialogue and digressions, so the cross-encoder's sense of what "answers" a question does not transfer. RRF over BM25 and vectors was already putting the right chunk near the top (MRR 0.665), which left a reranker little room to help and plenty of room to hurt.
+
+Steps 10 and 11 are both negative results, and they are worth keeping in the series. Techniques that are standard in RAG guides made this system worse, and only the eval showed it. The best retrieval configuration is still step 7's pg-hybrid over r128 chunks, with reader windows of 2.
