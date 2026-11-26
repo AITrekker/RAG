@@ -2,7 +2,7 @@
   "summary": {
     "step": "step-4",
     "mode": "vector",
-    "time": "2026-11-25 18:36",
+    "time": "2026-11-25 18:43",
     "recall@5": 0.769,
     "mrr@10": 0.572,
     "recall@800w": 0.808,
