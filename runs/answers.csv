@@ -1,3 +1,4 @@
 step,config,time,in_context,cites_gold,false_abstain,abstain_unanswerable,correct,partial,wrong_with_gold_in_context,unanswerable_correct
 step-7,pg-hybrid+r128,2026-11-25 18:54,25/26,21/26,2/26,3/4,13/26,4/26,8/26,4/4
 step-7,pg-hybrid+r128+w2,2026-11-25 18:54,25/26,21/26,2/26,4/4,18/26,4/26,3/26,4/4
+step-8,pg-hybrid+r128ctx+w2,2026-11-25 20:59,22/26,21/26,2/26,3/4,17/26,5/26,1/26,4/4

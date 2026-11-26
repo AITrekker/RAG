@@ -36,6 +36,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("ingest", help="chunk, embed, and store the corpus in Postgres")
     i.add_argument("--chunking", default="r128")
+    c = sub.add_parser("contextualize", help="write a contextual header for every chunk with Qwen")
+    c.add_argument("--chunking", default="r128")
     for name in ("search", "eval", "ask", "answer-eval", "grade"):
         p = sub.add_parser(name)
         p.add_argument("--mode", default="pg-hybrid", choices=[*MODES, *PG_MODES])
@@ -51,6 +53,10 @@ def main():
             p.add_argument("--step", required=True)
     args = ap.parse_args()
 
+    if args.cmd == "contextualize":
+        from .contextualize import run
+        print(run(args.chunking))
+        return
     if args.cmd == "ingest":
         from . import db
         print(db.ingest(args.chunking))

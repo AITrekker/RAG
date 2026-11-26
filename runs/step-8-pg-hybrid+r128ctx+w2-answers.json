@@ -1,0 +1,638 @@
+{
+  "summary": {
+    "step": "step-8",
+    "config": "pg-hybrid+r128ctx+w2",
+    "time": "2026-11-25 20:59",
+    "in_context": "22/26",
+    "cites_gold": "21/26",
+    "false_abstain": "2/26",
+    "abstain_unanswerable": "3/4",
+    "correct": "17/26",
+    "partial": "5/26",
+    "wrong_with_gold_in_context": "1/26",
+    "unanswerable_correct": "4/4"
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "category": "hard",
+      "question": "Who was Ahab?",
+      "expected": "Captain of the Pequod, an aging Nantucket whaling captain who lost his leg to Moby Dick and is consumed by the hunt for revenge.",
+      "answer": "Ahab is the captain of the ship *Pequod*, known for his obsessive pursuit of the white whale, Moby Dick. He is described as a formidable and enigmatic figure with a scar on his face, and he is missing a leg, which he replaces with an ivory leg made from a sperm whale's jaw. Ahab is driven by a deep-seated rage and a monomaniacal desire to avenge the loss of his leg and confront the whale, despite the dangers and the warnings of his crew [1][3][6].",
+      "context_chapters": [
+        "28",
+        "134",
+        "106",
+        "130",
+        "128",
+        "16",
+        "117",
+        "100"
+      ],
+      "cited_chapters": [
+        "28",
+        "106",
+        "16"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q02",
+      "category": "hard",
+      "question": "What was Ahab's beef with Moby?",
+      "expected": "Moby Dick bit off Ahab's leg on an earlier voyage, and Ahab swore vengeance on the white whale.",
+      "answer": "Ahab's beef with Moby Dick was rooted in a profound and obsessive desire for revenge, stemming from a past encounter where the whale severed his leg. This act of violence by Moby Dick became a symbol of all his suffering, malice, and spiritual turmoil, leading Ahab to view the whale as an embodiment of intangible malignity and a personal adversary to be destroyed. [3][4]",
+      "context_chapters": [
+        "134",
+        "133",
+        "41",
+        "34",
+        "118",
+        "41"
+      ],
+      "cited_chapters": [
+        "41",
+        "34"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q03",
+      "category": "lookup",
+      "question": "What was the name of Ahab's ship?",
+      "expected": "The Pequod.",
+      "answer": "The name of Captain Ahab's ship is the Pequod. This is indicated in multiple passages, such as when Elijah refers to Captain Ahab as \"the captain of our ship, the Pequod\" [1], and when Captain Peleg discusses Captain Ahab and the Pequod [2].",
+      "context_chapters": [
+        "19",
+        "16",
+        "124",
+        "100",
+        "16"
+      ],
+      "cited_chapters": [
+        "19",
+        "16"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q04",
+      "category": "lookup",
+      "question": "What was Ahab's artificial leg made from?",
+      "expected": "Polished bone from a sperm whale's jaw.",
+      "answer": "Ahab's artificial leg was made from whalebone, specifically the polished bone of a sperm whale's jaw [1].",
+      "context_chapters": [
+        "28",
+        "108",
+        "108",
+        "108"
+      ],
+      "cited_chapters": [
+        "28"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q05",
+      "category": "conceptual",
+      "question": "What reward did Ahab offer the crew for spotting the white whale?",
+      "expected": "A gold doubloon (a Spanish ounce of gold) nailed to the mast.",
+      "answer": "Ahab offered a Spanish gold ounce as a reward for capturing the white whale, Moby Dick [1]. He held up the gold piece and announced that the man who raises him the white-headed whale with a wrinkled brow and a crooked jaw would receive the reward [1].",
+      "context_chapters": [
+        "36",
+        "36",
+        "119",
+        "135",
+        "46"
+      ],
+      "cited_chapters": [
+        "36"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q06",
+      "category": "conceptual",
+      "question": "Why did Starbuck object to hunting Moby Dick?",
+      "expected": "He thought seeking vengeance on a dumb brute that acted from instinct was madness and blasphemous.",
+      "answer": "Starbuck objected to hunting Moby Dick because he believed it was a dangerous and deadly pursuit, and he feared for the lives of his crew. He expressed his concerns by stating he would not have anyone in his boat who was not afraid of a whale, emphasizing that true courage comes from respecting danger [5]. Additionally, in Chapter 123, Starbuck contemplates the loaded muskets in the cabin and reflects on the dangerous course Captain Ahab has set, considering the implications of a fair wind for the hunt of Moby Dick [1].",
+      "context_chapters": [
+        "123",
+        "135",
+        "132",
+        "61",
+        "26",
+        "134"
+      ],
+      "cited_chapters": [
+        "123",
+        "26"
+      ],
+      "abstained": false,
+      "in_context": false,
+      "cites_gold": false,
+      "grade": "wrong"
+    },
+    {
+      "id": "q07",
+      "category": "lookup",
+      "question": "Where was Queequeg from?",
+      "expected": "Rokovoko, an island far to the west and south.",
+      "answer": "Queequeg was from Rokovoko, an island far away to the West and South, which is not down in any map [3].",
+      "context_chapters": [
+        "13",
+        "21",
+        "12",
+        "17"
+      ],
+      "cited_chapters": [
+        "12"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q08",
+      "category": "lookup",
+      "question": "Who was the first mate of the Pequod?",
+      "expected": "Starbuck.",
+      "answer": "The first mate of the Pequod was Starbuck [2].",
+      "context_chapters": [
+        "27",
+        "26",
+        "71",
+        "81"
+      ],
+      "cited_chapters": [
+        "26"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q09",
+      "category": "conceptual",
+      "question": "How did Ishmael survive the sinking?",
+      "expected": "He floated on Queequeg's coffin, which had been made into a life-buoy, until the Rachel picked him up.",
+      "answer": "Ishmael survived the sinking by being cast adrift and later buoyed by a coffin life-buoy, which allowed him to float on the sea for almost one whole day and night. He was eventually rescued by the ship Rachel, which found him after searching for its lost children [2].",
+      "context_chapters": [
+        "105",
+        "epilogue",
+        "45",
+        "48",
+        "85"
+      ],
+      "cited_chapters": [
+        "epilogue"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q10",
+      "category": "unanswerable",
+      "question": "What was the name of Ahab's wife?",
+      "expected": "The book never names her.",
+      "answer": "The name of Captain Ahab's wife is not explicitly mentioned in the provided passages. However, it is noted that Ahab has a wife and a child, and that she is described as a \"sweet, resigned girl\" [1]. Despite this, the specific name of Ahab's wife is not given in the text.",
+      "context_chapters": [
+        "16",
+        "132",
+        "130",
+        "71"
+      ],
+      "cited_chapters": [
+        "16"
+      ],
+      "abstained": false,
+      "in_context": null,
+      "cites_gold": null,
+      "grade": "correct"
+    },
+    {
+      "id": "q11",
+      "category": "lookup",
+      "question": "Who was the second mate of the Pequod?",
+      "expected": "Stubb, a native of Cape Cod.",
+      "answer": "The second mate of the Pequod was Stubb. This is indicated in multiple passages, such as [1] and [2], which refer to Stubb as the second mate and describe his actions and demeanor during the whaling voyage.",
+      "context_chapters": [
+        "27",
+        "64",
+        "27"
+      ],
+      "cited_chapters": [
+        "27",
+        "64"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q12",
+      "category": "lookup",
+      "question": "Who was the third mate?",
+      "expected": "Flask, a native of Tisbury on Martha's Vineyard.",
+      "answer": "The third mate of the Pequod was Flask [1]. He was described as a short, stout, ruddy young fellow with a pugnacious attitude toward whales [1]. Flask was also referred to as \"King-Post\" due to his sturdy, square form [1].",
+      "context_chapters": [
+        "27",
+        "54",
+        "27",
+        "135"
+      ],
+      "cited_chapters": [
+        "27"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q13",
+      "category": "lookup",
+      "question": "Who owned the Pequod?",
+      "expected": "Captains Peleg and Bildad were the largest owners.",
+      "answer": "The Pequod was owned by Captain Peleg and Captain Bildad, who were described as the principal proprietors of the ship [2].",
+      "context_chapters": [
+        "91",
+        "16",
+        "16",
+        "134"
+      ],
+      "cited_chapters": [
+        "16"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q14",
+      "category": "lookup",
+      "question": "What was the name of Queequeg's idol?",
+      "expected": "Yojo, his small black god.",
+      "answer": "The name of Queequeg's idol is referred to as a \"little negro\" [1].",
+      "context_chapters": [
+        "3",
+        "10",
+        "10"
+      ],
+      "cited_chapters": [
+        "3"
+      ],
+      "abstained": false,
+      "in_context": false,
+      "cites_gold": false,
+      "grade": "wrong"
+    },
+    {
+      "id": "q15",
+      "category": "lookup",
+      "question": "Which ship's captain had lost an arm to Moby Dick?",
+      "expected": "Captain Boomer of the Samuel Enderby of London.",
+      "answer": "The captain of the Samuel Enderby had lost an arm to Moby Dick. This is evidenced by the passage where the one-armed captain of the Samuel Enderby recounts his encounter with the White Whale, describing how his arm was severely injured during the hunt [5].",
+      "context_chapters": [
+        "128",
+        "100",
+        "45",
+        "135",
+        "100"
+      ],
+      "cited_chapters": [
+        "100"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q16",
+      "category": "lookup",
+      "question": "Who preached the sermon about Jonah?",
+      "expected": "Father Mapple, the whalemen's chaplain.",
+      "answer": "The sermon about Jonah was preached by Father Mapple [1].",
+      "context_chapters": [
+        "9",
+        "9",
+        "9"
+      ],
+      "cited_chapters": [
+        "9"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q17",
+      "category": "conceptual",
+      "question": "Why does Ishmael go to sea?",
+      "expected": "Going to sea is his cure whenever he feels gloomy and depressed, his substitute for suicide.",
+      "answer": "Ishmael goes to sea to escape the pressures of life on land and to experience the world. He prefers traveling as a sailor rather than a passenger, as he finds the simplicity and pay of a sailor's life more appealing than the responsibilities and discomforts of being a passenger or an officer [1].",
+      "context_chapters": [
+        "1",
+        "12",
+        "16",
+        "16"
+      ],
+      "cited_chapters": [
+        "1"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "partial"
+    },
+    {
+      "id": "q18",
+      "category": "conceptual",
+      "question": "Why did Ishmael end up sharing a bed with a stranger at the inn?",
+      "expected": "The Spouter-Inn was full, so the landlord had him share a bed with the harpooneer Queequeg.",
+      "answer": "Ishmael ended up sharing a bed with a stranger at the inn because he had no other choice, as the landlord had no other place for him and suggested he could share a harpooneer's blanket if he was going a-whalin' [2]. Despite his reluctance, he decided to stay in the inn and eventually ended up sharing a bed with the harpooneer, Bulkington [1].",
+      "context_chapters": [
+        "3",
+        "3",
+        "3"
+      ],
+      "cited_chapters": [
+        "3",
+        "3"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "partial"
+    },
+    {
+      "id": "q19",
+      "category": "conceptual",
+      "question": "What happened to Pip after he jumped out of the whaleboat?",
+      "expected": "He was left alone in the open sea, and although he was rescued, the experience drove him mad.",
+      "answer": "After Pip jumped out of the whaleboat, he was dragged into the water by the whale line and became entangled in it. He was then remorselessly dragged toward the boat by the line, which had taken several turns around his chest and neck [4]. Eventually, Pip was left behind in the ocean, drifting alone, and was later rescued by the ship, though he was left mentally disturbed [2].",
+      "context_chapters": [
+        "110",
+        "93",
+        "125",
+        "93"
+      ],
+      "cited_chapters": [
+        "93",
+        "93"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q20",
+      "category": "conceptual",
+      "question": "Why did Queequeg have a coffin made for himself?",
+      "expected": "He caught a fever, believed he was dying, and asked for a canoe-like coffin.",
+      "answer": "Queequeg requested a coffin made for himself because he desired to be buried in a dark canoe-like vessel, which he felt was more in line with his native customs and his fear of being devoured by sharks [1]. He believed this method of burial was more honorable and preferable to being laid in a hammock [1].",
+      "context_chapters": [
+        "110",
+        "110"
+      ],
+      "cited_chapters": [
+        "110"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "partial"
+    },
+    {
+      "id": "q21",
+      "category": "conceptual",
+      "question": "How did Ahab die?",
+      "expected": "The harpoon line caught him around the neck and dragged him out of the boat and under the sea.",
+      "answer": "I don't know.",
+      "context_chapters": [
+        "117",
+        "134",
+        "135",
+        "106",
+        "41"
+      ],
+      "cited_chapters": [],
+      "abstained": true,
+      "in_context": true,
+      "cites_gold": false,
+      "grade": "wrong"
+    },
+    {
+      "id": "q22",
+      "category": "conceptual",
+      "question": "Why does the color of the whale frighten Ishmael?",
+      "expected": "Whiteness appalls him because of its blankness and its association with terror and the void.",
+      "answer": "The color of the whale frightens Ishmael because it evokes a profound and nameless horror, symbolizing both beauty and terror, and is associated with supernatural and mystical implications [1]. This whiteness, when combined with the whale's ominous presence, intensifies the fear and dread he feels [1][4].",
+      "context_chapters": [
+        "42",
+        "42",
+        "41",
+        "42",
+        "32"
+      ],
+      "cited_chapters": [
+        "42",
+        "42"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q23",
+      "category": "hard",
+      "question": "How did Starbuck feel about Ahab?",
+      "expected": "He respected Ahab's authority but saw his hunt as madness, and he even considered shooting him with a musket.",
+      "answer": "Starbuck felt a mix of respect and concern for Ahab, as evidenced by his cautious and respectful challenge to Ahab's disregard for the leaking oil in the hold [2]. Additionally, Starbuck expressed a desire to return home and avoid the deadly waters, showing his concern for Ahab's well-being and the dangers of their quest [3].",
+      "context_chapters": [
+        "46",
+        "109",
+        "132",
+        "135"
+      ],
+      "cited_chapters": [
+        "109",
+        "132"
+      ],
+      "abstained": false,
+      "in_context": false,
+      "cites_gold": false,
+      "grade": "partial"
+    },
+    {
+      "id": "q24",
+      "category": "hard",
+      "question": "Why wouldn't Ahab help the Rachel?",
+      "expected": "The Rachel asked for help searching for the captain's lost son, and Ahab refused because it would delay his chase of Moby Dick.",
+      "answer": "Ahab refuses to help the Rachel because his primary focus is on his quest for Moby Dick. The Rachel's captain pleads with Ahab to join in the search for his missing son and crew, but Ahab remains unmoved, prioritizing his pursuit of the white whale over human concerns [1][2].",
+      "context_chapters": [
+        "128",
+        "128",
+        "128"
+      ],
+      "cited_chapters": [
+        "128",
+        "128"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q25",
+      "category": "hard",
+      "question": "What did Fedallah predict about Ahab's death?",
+      "expected": "Ahab would first see two hearses on the sea, Fedallah would go before him, and only hemp could kill him.",
+      "answer": "I don't know.",
+      "context_chapters": [
+        "50",
+        "130",
+        "73",
+        "48",
+        "48",
+        "130"
+      ],
+      "cited_chapters": [],
+      "abstained": true,
+      "in_context": false,
+      "cites_gold": false,
+      "grade": "wrong"
+    },
+    {
+      "id": "q26",
+      "category": "hard",
+      "question": "Which ships had run into Moby Dick before the Pequod found him?",
+      "expected": "The Jeroboam, the Samuel Enderby, the Rachel, and the Delight.",
+      "answer": "The ships that had run into Moby Dick before the Pequod found him include the Rachel, as mentioned in Chapter 128, where the Rachel's captain recounts the loss of his whale-boat during a previous encounter with Moby Dick [6]. Additionally, the passage in Chapter 134 mentions the Parsee, who was caught in the tangled lines of the Pequod's harpoon line, indicating that the Pequod had previously encountered Moby Dick and suffered losses [1]. However, the specific ships that had run into Moby Dick before the Pequod are not explicitly named in the provided passages.",
+      "context_chapters": [
+        "134",
+        "16",
+        "135",
+        "81",
+        "133",
+        "128",
+        "134"
+      ],
+      "cited_chapters": [
+        "134",
+        "128"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "partial"
+    },
+    {
+      "id": "q27",
+      "category": "hard",
+      "question": "What's the deal with the gold coin on the mast?",
+      "expected": "Ahab nailed a gold doubloon to the mast as a reward for whoever first spots Moby Dick, and the crew each read their own meaning into it.",
+      "answer": "The gold coin on the mast, referred to as the doubloon, holds significant symbolic and mystical importance for Captain Ahab and the crew of the Pequod. It is a pure, sacred object that Ahab is intensely focused on, believing it to be connected to his quest for the white whale, Moby Dick. The doubloon is revered by the crew as a talisman, and its presence is tied to the crew's reverence for the whale. The coin's inscriptions and zodiacal symbols are interpreted by various crew members, including Stubb, who attempts to decipher their meaning through his almanac and arithmetic. The doubloon is also linked to the idea of fate and destiny, as it is believed to be a sign or omen related to the whale's capture [1][2].",
+      "context_chapters": [
+        "99",
+        "99",
+        "36",
+        "9",
+        "35"
+      ],
+      "cited_chapters": [
+        "99",
+        "99"
+      ],
+      "abstained": false,
+      "in_context": true,
+      "cites_gold": true,
+      "grade": "correct"
+    },
+    {
+      "id": "q28",
+      "category": "unanswerable",
+      "question": "What was Ishmael's last name?",
+      "expected": "The book never gives it.",
+      "answer": "I don't know.",
+      "context_chapters": [
+        "45",
+        "16",
+        "17",
+        "16",
+        "17",
+        "42",
+        "19"
+      ],
+      "cited_chapters": [],
+      "abstained": true,
+      "in_context": null,
+      "cites_gold": null,
+      "grade": "correct"
+    },
+    {
+      "id": "q29",
+      "category": "unanswerable",
+      "question": "Who did Ishmael marry?",
+      "expected": "The book never mentions Ishmael marrying.",
+      "answer": "I don't know.",
+      "context_chapters": [
+        "16",
+        "17",
+        "3",
+        "3"
+      ],
+      "cited_chapters": [],
+      "abstained": true,
+      "in_context": null,
+      "cites_gold": null,
+      "grade": "correct"
+    },
+    {
+      "id": "q30",
+      "category": "unanswerable",
+      "question": "How much did Moby Dick weigh?",
+      "expected": "The book never states Moby Dick's weight. Chapter 103 estimates the weight of large sperm whales in general, which tests whether the answer stays honest.",
+      "answer": "I don't know.",
+      "context_chapters": [
+        "103",
+        "41",
+        "134",
+        "133",
+        "41",
+        "133"
+      ],
+      "cited_chapters": [],
+      "abstained": true,
+      "in_context": null,
+      "cites_gold": null,
+      "grade": "correct"
+    }
+  ]
+}

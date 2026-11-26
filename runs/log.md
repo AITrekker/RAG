@@ -142,3 +142,22 @@ Grading also found an error in my eval set. q14's gold list had only chapter 16,
 Four answers are still wrong. q06 and q13 misread passages that were in context (Starbuck's objection, and the ship's owners). q21 says "I don't know" with the chapter 135 death scene in context. q25 never retrieves chapter 117.
 
 This leads to step 8, contextual headers. A one-line header on each chunk saying where it sits and who is involved should help both retrieval (q25) and reading.
+
+## Step 8: contextual chunk headers (no gain; hybrid recall@800w 0.846, 17 of 26 answers correct)
+
+Note on earlier numbers: the q14 gold fix at step 7 changed every step's score. The tables in the step 1 to 6 entries use the original labels, and `runs/rescore.csv` has all steps on the corrected set. On the corrected set, step 7's pg-hybrid r128 scores recall@800w 0.962 (25 of 26), and only q25 misses.
+
+Qwen wrote a one- or two-sentence header for each of the 2,920 r128 chunks, from the chunk plus the 2,000-word window of its chapter. That took 7 minutes 23 seconds on the 5070. The header is prepended to the chunk for BM25, the embedding, and the reader, and it averages 39 words. The headers read well, for example "Chapter 1, Loomings, features Ishmael reflecting on his personal reasons for seeking the sea." They are committed in `data/contexts-r128.jsonl`.
+
+| r128 chunks, pg-hybrid | Recall@5 | Recall@800w | MRR@10 | Correct | Partial | Wrong |
+|---|---|---|---|---|---|---|
+| Without headers (step 7) | 0.846 | 0.962 | 0.665 | 18 | 4 | 4 |
+| With headers | 0.808 | 0.846 | 0.619 | 17 | 5 | 4 |
+
+I expected the headers to help both retrieval and reading, and q25 in particular. They helped neither overall, and q25 still misses.
+
+Two things pull retrieval down. Each chunk gets 39 words longer, so fewer chunks fit in the 800-word budget. When I counted only the raw chunk text against the budget, headers scored 24 of 26, still one below no headers. The headers also repeat character names across many chunks, which makes chunks from different chapters look alike. Starbuck questions q06 and q23 dropped out of the top five as chunks from chapters 123, 132, and 135 that mention Starbuck in their headers crowded in. A chapter 3 header that mentions Queequeg's "idol" pulled chapter 3 above the chapters that name Yojo.
+
+Headers did help in some places. "Who was Ahab?" now has chapter 28 at rank one, the ship-owners answer (Peleg and Bildad) and the one-armed captain (Samuel Enderby) became correct, and the vector-only MRR rose from 0.617 to 0.665. They also introduced new mistakes, such as naming Bulkington as Ishmael's bedmate.
+
+The lesson is that contextual retrieval pays off when chunks lack context the retriever needs, and on this book hybrid search over small chunks was already near its ceiling. Reader windows from step 7 had already supplied most of the context the generator needed. I will test chapter summaries both with and without headers.

@@ -1,0 +1,32 @@
+# Graded by Claude in session on 2026-11-25 against the expected answers in eval.yaml.
+# Pending Amit's review.
+q01: correct   # captain of the Pequod, ivory leg from a whale's jaw, revenge for the leg
+q02: correct
+q03: correct
+q04: correct
+q05: correct
+q06: wrong     # says danger to the crew; misses vengeance on a dumb brute as blasphemy
+q07: correct
+q08: correct
+q09: correct
+q10: correct
+q11: correct
+q12: correct   # Flask, nicknamed King-Post
+q13: correct   # Peleg and Bildad, which raw chunks got wrong
+q14: wrong     # describes the idol from chapter 3 without naming Yojo
+q15: correct   # the Samuel Enderby's captain
+q16: correct
+q17: partial   # a sailor's simple life; misses the gloom and "substitute for pistol and ball"
+q18: partial   # right reason, but names the bedmate as Bulkington instead of Queequeg
+q19: correct
+q20: partial   # canoe coffin and native custom; misses the fever
+q21: wrong     # false "I don't know" with chapter 135 in context
+q22: correct
+q23: partial   # respect and concern, no musket
+q24: correct
+q25: wrong     # chapter 117 never retrieved
+q26: partial   # only the Rachel
+q27: correct
+q28: correct
+q29: correct
+q30: correct
